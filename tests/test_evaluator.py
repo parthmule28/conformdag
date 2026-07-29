@@ -6,6 +6,7 @@ from conformdag.analysis import SourceFile, analyze_source
 from conformdag.evaluator import (
     EvaluationContext,
     OwnerEvaluator,
+    evaluate_deterministic,
     redact_evidence,
     structural_fingerprint,
 )
@@ -62,3 +63,39 @@ def test_structural_fingerprint_does_not_depend_on_line_number() -> None:
     second = structural_fingerprint(policy, "dag.py", "dag:dag:owner:platform", FindingStatus.PASS)
 
     assert first == second
+
+
+def test_deterministic_policy_suite_evaluates_tags_defaults_io_and_operators() -> None:
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
+    model = _model(
+        "from airflow import DAG\n"
+        "from airflow.operators.python import PythonOperator\n"
+        "from datetime import timedelta\n"
+        "import requests\n"
+        "dag = DAG(owner='platform', tags=['domain:data', 'owner:platform'])\n"
+        "task = PythonOperator(task_id='task', dag=dag, execution_timeout=timedelta(hours=2), "
+        "retries=2, retry_delay=timedelta(minutes=5))\n"
+        "requests.get('https://example.invalid')\n"
+        "old = PythonOperator(task_id='old', dag=dag)\n"
+    )
+
+    findings, evaluated, skipped = evaluate_deterministic(pack.policies, [model])
+
+    assert evaluated == [
+        "AIR-DET-001",
+        "AIR-DET-002",
+        "AIR-DET-003",
+        "AIR-DET-004",
+        "AIR-DET-005",
+        "AIR-DET-006",
+    ]
+    assert skipped == ["AIR-SEM-001", "AIR-SEM-002", "AIR-SEM-003", "AIR-SEM-004"]
+    by_policy: dict[str, list[FindingStatus]] = {}
+    for finding in findings:
+        by_policy.setdefault(finding.policy_id, []).append(finding.status)
+    assert by_policy["AIR-DET-001"] == [FindingStatus.PASS]
+    assert by_policy["AIR-DET-002"] == [FindingStatus.PASS]
+    assert by_policy["AIR-DET-003"] == [FindingStatus.PASS, FindingStatus.PASS]
+    assert by_policy["AIR-DET-004"] == [FindingStatus.PASS, FindingStatus.PASS]
+    assert FindingStatus.FAIL in by_policy["AIR-DET-005"]
+    assert len(by_policy["AIR-DET-006"]) == 2

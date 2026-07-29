@@ -44,6 +44,10 @@ class CallRecord:
     module_scope: bool
 
 
+def _empty_defaults() -> dict[str, object]:
+    return {}
+
+
 @dataclass
 class DagRecord:
     line: int
@@ -51,6 +55,16 @@ class DagRecord:
     owner_source: str | None
     tags: tuple[str, ...]
     variable_name: str | None = None
+    defaults: dict[str, object] = field(default_factory=_empty_defaults)
+
+
+@dataclass
+class TaskRecord:
+    line: int
+    qualified_name: str
+    task_id: str | None
+    dag_name: str | None
+    values: dict[str, object]
 
 
 def _empty_imports() -> list[ImportRecord]:
@@ -65,6 +79,10 @@ def _empty_dags() -> list[DagRecord]:
     return []
 
 
+def _empty_tasks() -> list[TaskRecord]:
+    return []
+
+
 def _empty_assignments() -> dict[str, object]:
     return {}
 
@@ -75,6 +93,7 @@ class SourceModel:
     imports: list[ImportRecord] = field(default_factory=_empty_imports)
     calls: list[CallRecord] = field(default_factory=_empty_calls)
     dags: list[DagRecord] = field(default_factory=_empty_dags)
+    tasks: list[TaskRecord] = field(default_factory=_empty_tasks)
     assignments: dict[str, object] = field(default_factory=_empty_assignments)
 
 
@@ -183,6 +202,8 @@ class _ModelVisitor(ast.NodeVisitor):
             )
             if self._is_dag_call(node):
                 self.model.dags.append(self._dag_record(node))
+            elif qualified_name.rsplit(".", 1)[-1].endswith("Operator"):
+                self.model.tasks.append(self._task_record(node, qualified_name))
         self.generic_visit(node)
 
     @staticmethod
@@ -194,6 +215,7 @@ class _ModelVisitor(ast.NodeVisitor):
         owner: str | None = None
         owner_source: str | None = None
         tags: tuple[str, ...] = ()
+        defaults: dict[str, object] = {}
         for keyword in node.keywords:
             if (
                 keyword.arg == "owner"
@@ -203,18 +225,41 @@ class _ModelVisitor(ast.NodeVisitor):
                 owner = keyword.value.value
                 owner_source = "DAG.owner"
             if keyword.arg == "default_args":
-                default_args = self._resolve_mapping(keyword.value)
-                default_owner = default_args.get("owner")
+                defaults = self._resolve_mapping(keyword.value)
+                default_owner = defaults.get("owner")
                 if owner is None and isinstance(default_owner, str):
                     owner = default_owner
                     owner_source = "DAG.default_args.owner"
-            if keyword.arg == "tags" and isinstance(keyword.value, (ast.List, ast.Tuple)):
-                tags = tuple(
-                    item.value
-                    for item in keyword.value.elts
-                    if isinstance(item, ast.Constant) and isinstance(item.value, str)
-                )
-        return DagRecord(node.lineno, owner, owner_source, tags)
+            if keyword.arg == "tags":
+                resolved_tags = self._resolve_value(keyword.value)
+                if isinstance(resolved_tags, list):
+                    tags = tuple(
+                        item for item in cast(list[object], resolved_tags) if isinstance(item, str)
+                    )
+        return DagRecord(node.lineno, owner, owner_source, tags, defaults=defaults)
+
+    def _task_record(self, node: ast.Call, qualified_name: str) -> TaskRecord:
+        values: dict[str, object] = {}
+        for keyword in node.keywords:
+            if keyword.arg:
+                values[keyword.arg] = self._resolve_value(keyword.value)
+        task_id = values.get("task_id")
+        dag_name = values.get("dag")
+        return TaskRecord(
+            line=node.lineno,
+            qualified_name=qualified_name,
+            task_id=task_id if isinstance(task_id, str) else None,
+            dag_name=dag_name if isinstance(dag_name, str) else None,
+            values=values,
+        )
+
+    def _resolve_value(self, node: ast.AST) -> object:
+        value = _literal_value(node)
+        if value is not None:
+            return value
+        if isinstance(node, ast.Name):
+            return self.model.assignments.get(node.id)
+        return None
 
     def _resolve_mapping(self, node: ast.AST) -> dict[str, object]:
         value = _literal_value(node)
@@ -240,6 +285,23 @@ def _literal_value(node: ast.AST) -> object:
             if isinstance(key, ast.Constant) and isinstance(key.value, str):
                 result[key.value] = _literal_value(value)
         return result
+    if isinstance(node, ast.Call) and _qualified_name(node.func) == "timedelta":
+        units = {
+            keyword.arg: _literal_value(keyword.value) for keyword in node.keywords if keyword.arg
+        }
+        total = 0.0
+        for unit, multiplier in (
+            ("weeks", 604800),
+            ("days", 86400),
+            ("hours", 3600),
+            ("minutes", 60),
+            ("seconds", 1),
+        ):
+            value = units.get(unit, 0)
+            if not isinstance(value, (int, float)):
+                return None
+            total += float(value) * multiplier
+        return total
     return None
 
 

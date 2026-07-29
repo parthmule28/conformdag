@@ -9,16 +9,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
-from conformdag.analysis import DagRecord, SourceModel
+from conformdag.analysis import CallRecord, DagRecord, SourceModel, TaskRecord
 from conformdag.models import (
     AirflowProfile,
     EnforcementType,
+    ExecutionTimeoutConfig,
     Finding,
     FindingEvidence,
     FindingLocation,
     FindingStatus,
+    ForbiddenOperatorsConfig,
     Policy,
     RequiredOwnerConfig,
+    RequiredTagsConfig,
+    RetryBoundsConfig,
+    TopLevelIOConfig,
 )
 
 
@@ -126,13 +131,241 @@ class OwnerEvaluator:
         )
 
 
+def _finding(
+    policy: Policy,
+    model: SourceModel,
+    line: int,
+    status: FindingStatus,
+    evidence: str,
+    anchor: str,
+    remediation: str | None = None,
+) -> Finding:
+    return Finding(
+        policy_id=policy.id,
+        policy_version=policy.version,
+        status=status,
+        severity=policy.severity,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(
+            file=Path(model.source.relative_path), start_line=line, end_line=line
+        ),
+        evidence=FindingEvidence(text=redact_evidence(evidence), start_line=line, end_line=line),
+        explanation=evidence,
+        remediation=remediation or policy.safe_path,
+        fingerprint=structural_fingerprint(policy, model.source.relative_path, anchor, status),
+    )
+
+
+class TagEvaluator:
+    policy_id = "AIR-DET-002"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(RequiredTagsConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for dag in model.dags:
+                tags = {
+                    key: value
+                    for tag in dag.tags
+                    for key, value in [tag.split(":", 1) if ":" in tag else (tag, None)]
+                }
+                missing = [key for key in configuration.required_keys if key not in tags]
+                invalid = [
+                    f"{key}={tags[key]!r}"
+                    for key, allowed in configuration.allowed_values.items()
+                    if key in tags and allowed and tags[key] not in allowed
+                ]
+                status = FindingStatus.PASS if not missing and not invalid else FindingStatus.FAIL
+                detail = (
+                    "DAG tags satisfy policy"
+                    if status is FindingStatus.PASS
+                    else f"missing tags={missing!r}; invalid tags={invalid!r}"
+                )
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        dag.line,
+                        status,
+                        detail,
+                        f"dag:{dag.variable_name or dag.line}:tags:{','.join(sorted(dag.tags))}",
+                    )
+                )
+        return findings
+
+
+def _dag_defaults(model: SourceModel, task: TaskRecord) -> dict[str, object]:
+    for dag in model.dags:
+        if task.dag_name is None or task.dag_name == dag.variable_name:
+            return dag.defaults
+    return {}
+
+
+def _effective_value(model: SourceModel, task: TaskRecord, name: str) -> object:
+    if name in task.values:
+        return task.values[name]
+    return _dag_defaults(model, task).get(name)
+
+
+class TimeoutEvaluator:
+    policy_id = "AIR-DET-003"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(ExecutionTimeoutConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for task in model.tasks:
+                value = _effective_value(model, task, "execution_timeout")
+                if value is None:
+                    value = configuration.approved_default_seconds
+                seconds = float(value) if isinstance(value, (int, float)) else None
+                valid = (
+                    seconds is not None
+                    and (configuration.min_seconds is None or seconds >= configuration.min_seconds)
+                    and (configuration.max_seconds is None or seconds <= configuration.max_seconds)
+                )
+                status = FindingStatus.PASS if valid else FindingStatus.FAIL
+                detail = (
+                    f"task {task.task_id or task.qualified_name} "
+                    f"effective timeout={value!r} seconds"
+                )
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        task.line,
+                        status,
+                        detail,
+                        f"task:{task.task_id or task.line}:timeout:{value!r}",
+                    )
+                )
+        return findings
+
+
+class RetryEvaluator:
+    policy_id = "AIR-DET-004"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(RetryBoundsConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for task in model.tasks:
+                retries = _effective_value(model, task, "retries")
+                delay = _effective_value(model, task, "retry_delay")
+                retries = 0 if retries is None else retries
+                delay = 0 if delay is None else delay
+                valid = (
+                    isinstance(retries, (int, float))
+                    and configuration.min_retries <= retries <= configuration.max_retries
+                    and (configuration.allow_zero_retries or retries > 0)
+                    and isinstance(delay, (int, float))
+                    and delay >= configuration.min_delay_seconds
+                    and (
+                        configuration.max_delay_seconds is None
+                        or delay <= configuration.max_delay_seconds
+                    )
+                )
+                status = FindingStatus.PASS if valid else FindingStatus.FAIL
+                detail = (
+                    f"task {task.task_id or task.qualified_name} effective retries={retries!r} "
+                    f"retry_delay={delay!r} seconds"
+                )
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        task.line,
+                        status,
+                        detail,
+                        f"task:{task.task_id or task.line}:retry:{retries!r}:{delay!r}",
+                    )
+                )
+        return findings
+
+
+class TopLevelIOEvaluator:
+    policy_id = "AIR-DET-005"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(TopLevelIOConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for call in model.calls:
+                if not call.module_scope:
+                    continue
+                matched = next(
+                    (
+                        pattern
+                        for pattern in configuration.forbidden_calls
+                        if call.qualified_name == pattern
+                    ),
+                    None,
+                )
+                if matched:
+                    findings.append(
+                        _finding(
+                            context.policy,
+                            model,
+                            call.line,
+                            FindingStatus.FAIL,
+                            f"module-scope call {call.qualified_name} matches forbidden "
+                            f"I/O pattern {matched}",
+                            f"call:{call.qualified_name}:{call.line}",
+                        )
+                    )
+        return findings
+
+
+def _resolve_imported_call(model: SourceModel, call: CallRecord) -> str:
+    for item in model.imports:
+        local_name = item.alias or item.module.rsplit(".", 1)[-1]
+        if call.qualified_name == local_name:
+            return item.module
+        if call.qualified_name.startswith(f"{local_name}.") and item.alias:
+            return f"{item.module}{call.qualified_name[len(local_name) :]}"
+    return call.qualified_name
+
+
+class ForbiddenOperatorEvaluator:
+    policy_id = "AIR-DET-006"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(ForbiddenOperatorsConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for call in model.calls:
+                resolved = _resolve_imported_call(model, call)
+                if resolved not in configuration.operators:
+                    continue
+                replacement = configuration.operators[resolved]
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        call.line,
+                        FindingStatus.FAIL,
+                        f"forbidden operator {resolved}; replacement guidance: {replacement}",
+                        f"operator:{resolved}:{call.line}",
+                        replacement,
+                    )
+                )
+        return findings
+
+
 def evaluate_deterministic(
     policies: Iterable[Policy],
     models: Sequence[SourceModel],
     airflow_profile: AirflowProfile | None = None,
 ) -> tuple[list[Finding], list[str], list[str]]:
     """Evaluate supported deterministic policies with stable policy/file ordering."""
-    evaluators: dict[str, DeterministicEvaluator] = {"AIR-DET-001": OwnerEvaluator()}
+    evaluators: dict[str, DeterministicEvaluator] = {
+        "AIR-DET-001": OwnerEvaluator(),
+        "AIR-DET-002": TagEvaluator(),
+        "AIR-DET-003": TimeoutEvaluator(),
+        "AIR-DET-004": RetryEvaluator(),
+        "AIR-DET-005": TopLevelIOEvaluator(),
+        "AIR-DET-006": ForbiddenOperatorEvaluator(),
+    }
     findings: list[Finding] = []
     evaluated: list[str] = []
     skipped: list[str] = []
