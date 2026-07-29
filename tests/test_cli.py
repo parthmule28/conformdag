@@ -18,3 +18,11 @@ def test_html_scan_requires_an_explicit_destination() -> None:
 
     assert result.exit_code == 2
     assert "HTML output requires --output" in result.output
+
+
+def test_preview_model_context_is_local_and_provider_free() -> None:
+    result = CliRunner().invoke(app, ["scan", "--path", ".", "--preview-model-context"])
+
+    assert result.exit_code == 0
+    assert '"context_hash"' in result.stdout
+    assert '"redacted_context"' in result.stdout

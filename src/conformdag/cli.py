@@ -11,6 +11,7 @@ from rich.table import Table
 from conformdag import __version__
 from conformdag.policy import PolicyValidationError, select_policy_pack
 from conformdag.reporting import has_blocking_failures, render_html, render_sarif
+from conformdag.scan import preview_model_context as build_model_context_preview
 from conformdag.scan import scan_repository
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -92,6 +93,7 @@ def scan(
     output: Path | None = None,
     format: str = "json",
     no_evidence: bool = False,
+    preview_model_context: bool = False,
 ) -> None:
     """Analyze sources and render JSON, SARIF, HTML, or terminal output."""
     root = path.resolve()
@@ -99,6 +101,20 @@ def scan(
         (root / policy_pack) if policy_pack and not policy_pack.is_absolute() else policy_pack
     )
     try:
+        if preview_model_context:
+            preview = build_model_context_preview(root, selected_pack)
+            typer.echo(
+                json.dumps(
+                    {
+                        "context_hash": preview.context_hash,
+                        "included_files": preview.included_files,
+                        "omitted_files": preview.omitted_files,
+                        "redacted_context": preview.text,
+                    },
+                    indent=2,
+                )
+            )
+            return
         report = scan_repository(root, selected_pack)
     except PolicyValidationError as exc:
         _fail(exc)

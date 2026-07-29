@@ -17,6 +17,7 @@ from conformdag.models import (
 )
 from conformdag.policy import load_suppressions, select_policy_pack
 from conformdag.reporting import apply_suppressions, normalize_report
+from conformdag.semantic import SemanticContext, build_context
 
 
 def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> ScanReport:
@@ -96,3 +97,32 @@ def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> S
         ),
     )
     return normalize_report(report)
+
+
+def preview_model_context(
+    repository_root: Path, policy_pack: Path | None = None
+) -> SemanticContext:
+    """Build the redacted semantic context preview without contacting a provider."""
+    root = repository_root.resolve()
+    config = load_project_config(root / "conformdag.yaml")
+    configured_pack = policy_pack or config.scan.policy_pack
+    if not configured_pack.is_absolute():
+        configured_pack = root / configured_pack
+    pack = select_policy_pack(configured_pack, root)
+    files, _ = discover_python_files(
+        root,
+        config.scan.include,
+        config.scan.exclude,
+        config.scan.follow_internal_symlinks,
+    )
+    policy_text = "\n\n".join(
+        f"{policy.id}: {policy.invariant}\nRemediation: {policy.safe_path or 'none'}"
+        for policy in pack.policies
+        if policy.enforcement.type.value in {"semantic", "hybrid"}
+        and policy.status.value == "ACTIVE"
+    )
+    return build_context(
+        policy_text,
+        {source.relative_path: source.content for source in files},
+        max_input_tokens=config.semantic.max_input_tokens,
+    )
