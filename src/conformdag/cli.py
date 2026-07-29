@@ -1,5 +1,6 @@
 """Command-line entry point for policy-pack and scan workflows."""
 
+import json
 from pathlib import Path
 from typing import NoReturn
 
@@ -9,7 +10,7 @@ from rich.table import Table
 
 from conformdag import __version__
 from conformdag.policy import PolicyValidationError, select_policy_pack
-from conformdag.reporting import has_blocking_failures
+from conformdag.reporting import has_blocking_failures, render_html, render_sarif
 from conformdag.scan import scan_repository
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -89,8 +90,10 @@ def scan(
     path: Path = Path("."),
     policy_pack: Path | None = None,
     output: Path | None = None,
+    format: str = "json",
+    no_evidence: bool = False,
 ) -> None:
-    """Analyze configured Python sources without importing or executing them."""
+    """Analyze sources and render JSON, SARIF, HTML, or terminal output."""
     root = path.resolve()
     selected_pack = (
         (root / policy_pack) if policy_pack and not policy_pack.is_absolute() else policy_pack
@@ -99,11 +102,39 @@ def scan(
         report = scan_repository(root, selected_pack)
     except PolicyValidationError as exc:
         _fail(exc)
-    serialized = report.model_dump_json(indent=2)
-    if output:
-        output.write_text(serialized + "\n", encoding="utf-8")
+    if format not in {"json", "sarif", "html", "terminal"}:
+        _fail(ValueError("format must be one of: json, sarif, html, terminal"))
+    if format == "html" and output is None:
+        _fail(ValueError("HTML output requires --output"))
+    if format == "terminal" and output is not None:
+        _fail(ValueError("terminal output cannot be written with --output"))
+
+    output_report = report
+    if no_evidence:
+        output_report = report.model_copy(
+            update={
+                "findings": [
+                    finding.model_copy(update={"evidence": None}) for finding in report.findings
+                ]
+            }
+        )
+    if format == "json":
+        rendered = output_report.model_dump_json(indent=2) + "\n"
+    elif format == "sarif":
+        rendered = json.dumps(render_sarif(output_report), indent=2, sort_keys=True) + "\n"
+    elif format == "html":
+        rendered = render_html(output_report, include_evidence=not no_evidence)
     else:
-        typer.echo(serialized)
+        rendered = (
+            f"ConformDAG scan {'complete' if report.complete else 'incomplete'}\n"
+            f"Files: {len(report.files_scanned)}\n"
+            f"Findings: {len(report.findings)}\n"
+            f"Result fingerprint: {report.result_fingerprint}\n"
+        )
+    if output:
+        output.write_text(rendered, encoding="utf-8")
+    else:
+        typer.echo(rendered, nl=False)
     typer.echo(
         f"scan {'complete' if report.complete else 'incomplete'}: "
         f"{len(report.files_scanned)} files, {len(report.findings)} findings",

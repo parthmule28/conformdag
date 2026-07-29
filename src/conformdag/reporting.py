@@ -6,6 +6,8 @@ import hashlib
 import json
 from datetime import UTC, datetime
 
+from jinja2 import Environment, select_autoescape
+
 from conformdag.models import Finding, FindingStatus, RunIssue, ScanReport, Suppression
 
 
@@ -115,3 +117,100 @@ def has_blocking_failures(report: ScanReport) -> bool:
         and finding.enforcement.value == "deterministic"
         for finding in report.findings
     )
+
+
+def render_sarif(report: ScanReport) -> dict[str, object]:
+    """Render canonical findings into a SARIF 2.1.0 document."""
+    rules: dict[str, dict[str, object]] = {}
+    results: list[dict[str, object]] = []
+    level_by_severity = {"critical": "error", "high": "error", "medium": "warning"}
+    for finding in report.findings:
+        rules.setdefault(
+            finding.policy_id,
+            {
+                "id": finding.policy_id,
+                "shortDescription": {"text": finding.policy_id},
+                "help": {"text": finding.remediation or "Review the policy guidance."},
+            },
+        )
+        if finding.status is FindingStatus.PASS:
+            continue
+        result: dict[str, object] = {
+            "ruleId": finding.policy_id,
+            "level": level_by_severity.get(finding.severity.value, "note"),
+            "message": {"text": finding.explanation or finding.status.value},
+            "properties": {
+                "status": finding.status.value,
+                "suppressed": finding.suppressed,
+                "fingerprint": finding.fingerprint,
+            },
+        }
+        if finding.location.file:
+            region: dict[str, object] = {}
+            if finding.location.start_line:
+                region["startLine"] = finding.location.start_line
+            result["locations"] = [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": str(finding.location.file)},
+                        "region": region,
+                    }
+                }
+            ]
+        if finding.suppressed:
+            result["suppressions"] = [{"kind": "external", "justification": "external suppression"}]
+        results.append(result)
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "ConformDAG",
+                        "version": report.run.tool_version,
+                        "rules": list(rules.values()),
+                    }
+                },
+                "results": results,
+                "automationDetails": {"id": report.result_fingerprint},
+            }
+        ],
+    }
+
+
+def render_html(report: ScanReport, include_evidence: bool = True) -> str:
+    """Render a self-contained offline HTML report with accessible table markup."""
+    template = Environment(
+        autoescape=select_autoescape(default=True),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    ).from_string(
+        """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ConformDAG report</title><style>
+body{font-family:system-ui,sans-serif;margin:2rem;color:#202124}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid #bbb;padding:.5rem;text-align:left;vertical-align:top}
+th{background:#eee}.evidence{font-family:monospace;margin-top:.4rem;white-space:pre-wrap}
+.PASS{color:#176b2c}.FAIL{color:#a20d0d}.NEEDS_REVIEW{color:#7a4b00}
+</style></head><body>
+<h1>ConformDAG report</h1>
+<p>Complete: {{ report.complete }}; Result fingerprint:
+<code>{{ report.result_fingerprint }}</code></p>
+<table><caption>Policy findings</caption><thead><tr>
+<th scope="col">Policy</th><th scope="col">Status</th><th scope="col">Severity</th>
+<th scope="col">Location</th><th scope="col">Explanation</th>
+</tr></thead><tbody>
+{% for finding in report.findings %}<tr>
+<td>{{ finding.policy_id }}</td>
+<td class="{{ finding.status.value }}">{{ finding.status.value }}</td>
+<td>{{ finding.severity.value }}</td><td>{{ finding.location.file or "" }}</td>
+<td>{{ finding.explanation or "" }}{% if include_evidence and finding.evidence %}
+<div class="evidence">{{ finding.evidence.text }}</div>{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></body></html>
+"""
+    )
+    return template.render(report=report, include_evidence=include_evidence)
