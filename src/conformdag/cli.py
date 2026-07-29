@@ -103,6 +103,11 @@ def scan(
         output.write_text(serialized + "\n", encoding="utf-8")
     else:
         typer.echo(serialized)
+    typer.echo(
+        f"scan {'complete' if report.complete else 'incomplete'}: "
+        f"{len(report.files_scanned)} files, {len(report.findings)} findings",
+        err=True,
+    )
     if report.issues:
         raise typer.Exit(code=3)
     if any(finding.status.value == "FAIL" for finding in report.findings):

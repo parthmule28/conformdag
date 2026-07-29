@@ -54,3 +54,22 @@ def test_parse_errors_are_reported(tmp_path: Path) -> None:
     assert model is None
     assert issue is not None
     assert issue.path == "broken.py"
+
+
+def test_resolves_owner_from_supported_default_args_inheritance(tmp_path: Path) -> None:
+    source_path = tmp_path / "inherited.py"
+    source_path.write_text(
+        "from airflow import DAG\n"
+        "default_args = {'owner': 'platform'}\n"
+        "dag = DAG(default_args=default_args)\n",
+        encoding="utf-8",
+    )
+    files, _ = discover_python_files(tmp_path, ["*.py"])
+
+    model, issue = analyze_source(files[0])
+
+    assert issue is None
+    assert model is not None
+    assert model.dags[0].owner == "platform"
+    assert model.dags[0].owner_source == "DAG.default_args.owner"
+    assert model.dags[0].variable_name == "dag"

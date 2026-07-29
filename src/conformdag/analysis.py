@@ -7,6 +7,7 @@ import hashlib
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 DEFAULT_EXCLUDES = ("**/.venv/**", "**/.git/**", "**/vendor/**", "**/generated/**")
 
@@ -43,11 +44,13 @@ class CallRecord:
     module_scope: bool
 
 
-@dataclass(frozen=True)
+@dataclass
 class DagRecord:
     line: int
     owner: str | None
+    owner_source: str | None
     tags: tuple[str, ...]
+    variable_name: str | None = None
 
 
 def _empty_imports() -> list[ImportRecord]:
@@ -62,12 +65,17 @@ def _empty_dags() -> list[DagRecord]:
     return []
 
 
+def _empty_assignments() -> dict[str, object]:
+    return {}
+
+
 @dataclass
 class SourceModel:
     source: SourceFile
     imports: list[ImportRecord] = field(default_factory=_empty_imports)
     calls: list[CallRecord] = field(default_factory=_empty_calls)
     dags: list[DagRecord] = field(default_factory=_empty_dags)
+    assignments: dict[str, object] = field(default_factory=_empty_assignments)
 
 
 def _matches(relative_path: str, patterns: tuple[str, ...]) -> bool:
@@ -145,6 +153,18 @@ class _ModelVisitor(ast.NodeVisitor):
             )
         self.generic_visit(node)
 
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.generic_visit(node)
+        value = _literal_value(node.value)
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and value is not None:
+            self.model.assignments[node.targets[0].id] = value
+        if isinstance(node.value, ast.Call) and self._is_dag_call(node.value):
+            variable_name = node.targets[0].id if isinstance(node.targets[0], ast.Name) else None
+            for dag in reversed(self.model.dags):
+                if dag.line == node.value.lineno:
+                    dag.variable_name = variable_name
+                    break
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._function_depth += 1
         self.generic_visit(node)
@@ -161,13 +181,18 @@ class _ModelVisitor(ast.NodeVisitor):
             self.model.calls.append(
                 CallRecord(qualified_name, node.lineno, node.col_offset, self._function_depth == 0)
             )
-            if qualified_name.rsplit(".", 1)[-1] == "DAG":
+            if self._is_dag_call(node):
                 self.model.dags.append(self._dag_record(node))
         self.generic_visit(node)
 
     @staticmethod
-    def _dag_record(node: ast.Call) -> DagRecord:
+    def _is_dag_call(node: ast.Call) -> bool:
+        qualified_name = _qualified_name(node.func)
+        return bool(qualified_name and qualified_name.rsplit(".", 1)[-1] == "DAG")
+
+    def _dag_record(self, node: ast.Call) -> DagRecord:
         owner: str | None = None
+        owner_source: str | None = None
         tags: tuple[str, ...] = ()
         for keyword in node.keywords:
             if (
@@ -176,13 +201,46 @@ class _ModelVisitor(ast.NodeVisitor):
                 and isinstance(keyword.value.value, str)
             ):
                 owner = keyword.value.value
+                owner_source = "DAG.owner"
+            if keyword.arg == "default_args":
+                default_args = self._resolve_mapping(keyword.value)
+                default_owner = default_args.get("owner")
+                if owner is None and isinstance(default_owner, str):
+                    owner = default_owner
+                    owner_source = "DAG.default_args.owner"
             if keyword.arg == "tags" and isinstance(keyword.value, (ast.List, ast.Tuple)):
                 tags = tuple(
                     item.value
                     for item in keyword.value.elts
                     if isinstance(item, ast.Constant) and isinstance(item.value, str)
                 )
-        return DagRecord(node.lineno, owner, tags)
+        return DagRecord(node.lineno, owner, owner_source, tags)
+
+    def _resolve_mapping(self, node: ast.AST) -> dict[str, object]:
+        value = _literal_value(node)
+        if isinstance(value, dict):
+            return cast(dict[str, object], value)
+        if isinstance(node, ast.Name):
+            assigned = self.model.assignments.get(node.id)
+            if isinstance(assigned, dict):
+                return cast(dict[str, object], assigned)
+        return {}
+
+
+def _literal_value(node: ast.AST) -> object:
+    if isinstance(node, ast.Constant) and isinstance(
+        node.value, (str, int, float, bool, type(None))
+    ):
+        return node.value
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return [_literal_value(item) for item in node.elts]
+    if isinstance(node, ast.Dict):
+        result: dict[str, object] = {}
+        for key, value in zip(node.keys, node.values, strict=True):
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                result[key.value] = _literal_value(value)
+        return result
+    return None
 
 
 def analyze_source(source: SourceFile) -> tuple[SourceModel | None, ParseIssue | None]:
