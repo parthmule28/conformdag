@@ -1,0 +1,115 @@
+schema_version: "1"
+id: conformdag-default
+version: 0.1.0
+policies:
+  - id: AIR-DET-001
+    title: Every DAG has an approved owner
+    version: 1.0.0
+    status: ACTIVE
+    severity: high
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Ownership and metadata", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Every DAG declares an approved owner.
+    safe_path: An owner is present and belongs to the configured allow-list.
+    enforcement: {type: deterministic, deterministic_checks: [effective-owner], blocking: true}
+    configuration: {kind: required-owner, allowed_values: [platform, data-engineering, analytics]}
+  - id: AIR-DET-002
+    title: DAG tags use approved keys and values
+    version: 1.0.0
+    status: ACTIVE
+    severity: medium
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Ownership and metadata", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: DAG tags use the policy-defined key and value vocabulary.
+    enforcement: {type: deterministic, deterministic_checks: [tags]}
+    configuration: {kind: required-tags, required_keys: [domain, owner], allowed_values: {domain: [data, analytics, platform]}}
+  - id: AIR-DET-003
+    title: Task execution timeout is bounded
+    version: 1.0.0
+    status: ACTIVE
+    severity: high
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Execution safety", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Every task has an effective execution timeout within approved bounds.
+    enforcement: {type: deterministic, deterministic_checks: [effective-timeout]}
+    configuration: {kind: execution-timeout, min_seconds: 1, max_seconds: 86400, approved_default_seconds: 3600}
+  - id: AIR-DET-004
+    title: Task retries are bounded
+    version: 1.0.0
+    status: ACTIVE
+    severity: medium
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Execution safety", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Retry count and delay remain within policy bounds.
+    enforcement: {type: deterministic, deterministic_checks: [retry-bounds]}
+    configuration: {kind: retry-bounds, min_retries: 0, max_retries: 5, min_delay_seconds: 0, max_delay_seconds: 3600, allow_zero_retries: true}
+  - id: AIR-DET-005
+    title: Module scope avoids high confidence I/O
+    version: 1.0.0
+    status: ACTIVE
+    severity: critical
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Execution safety", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Module-level code does not perform configured high-confidence I/O.
+    enforcement: {type: deterministic, deterministic_checks: [module-scope-io], blocking: true}
+    configuration: {kind: top-level-io, forbidden_calls: [requests.get, boto3.client, subprocess.run], uncertain_as_review: true}
+  - id: AIR-DET-006
+    title: Operators are approved for the runtime profile
+    version: 1.0.0
+    status: ACTIVE
+    severity: high
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Execution safety", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Operators and imports are approved for the selected Airflow profile.
+    enforcement: {type: deterministic, deterministic_checks: [operator-allow-list]}
+    configuration: {kind: forbidden-operators, operators: {airflow.operators.python.PythonOperator: use-taskflow}}
+  - id: AIR-SEM-001
+    title: Task behavior is idempotent
+    version: 1.0.0
+    status: ACTIVE
+    severity: high
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Repeated task execution does not produce unsafe duplicate side effects.
+    enforcement: {type: semantic, model_check: true, allow_abstention: true}
+    configuration: {kind: idempotence, external_write_markers: [insert, upload, publish]}
+  - id: AIR-SEM-002
+    title: Orchestration remains outside business logic
+    version: 1.0.0
+    status: ACTIVE
+    severity: medium
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Business logic is separated from orchestration boundaries.
+    enforcement: {type: semantic, model_check: true, allow_abstention: true}
+    configuration: {kind: orchestration-boundary, max_statements: 40, max_complexity: 12, signal_patterns: [for-loop, database-query]}
+  - id: AIR-SEM-003
+    title: Sensitive values are not logged
+    version: 1.0.0
+    status: ACTIVE
+    severity: critical
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Logs do not expose credentials or sensitive values.
+    enforcement: {type: hybrid, deterministic_checks: [logging-calls], model_check: true, allow_abstention: true, blocking: true}
+    configuration: {kind: sensitive-logging, secret_patterns: [password, token, secret], logging_calls: [logging.info, logging.warning, logging.error]}
+  - id: AIR-SEM-004
+    title: Approved abstractions preserve intent
+    version: 1.0.0
+    status: ACTIVE
+    severity: low
+    airflow_profiles: ["2.11.2", "3.3.0"]
+    ownership: {owner: platform}
+    source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
+    invariant: Project abstractions preserve the declared operational intent.
+    enforcement: {type: semantic, model_check: true, allow_abstention: true}
+    configuration: {kind: approved-abstractions, abstractions: {company.operators.SafePythonOperator: safe task wrapper}}

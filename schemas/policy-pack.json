@@ -1,0 +1,694 @@
+{
+  "$defs": {
+    "AirflowProfile": {
+      "enum": [
+        "2.11.2",
+        "3.3.0"
+      ],
+      "title": "AirflowProfile",
+      "type": "string"
+    },
+    "ApprovedAbstractionsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "abstractions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Abstractions",
+          "type": "object"
+        },
+        "kind": {
+          "const": "approved-abstractions",
+          "default": "approved-abstractions",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "ApprovedAbstractionsConfig",
+      "type": "object"
+    },
+    "EnforcementConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_abstention": {
+          "default": true,
+          "title": "Allow Abstention",
+          "type": "boolean"
+        },
+        "blocking": {
+          "default": false,
+          "title": "Blocking",
+          "type": "boolean"
+        },
+        "deterministic_checks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Deterministic Checks",
+          "type": "array"
+        },
+        "model_check": {
+          "default": false,
+          "title": "Model Check",
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/$defs/EnforcementType"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "EnforcementConfig",
+      "type": "object"
+    },
+    "EnforcementType": {
+      "enum": [
+        "deterministic",
+        "semantic",
+        "hybrid"
+      ],
+      "title": "EnforcementType",
+      "type": "string"
+    },
+    "ExceptionPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "require_expiry": {
+          "default": true,
+          "title": "Require Expiry",
+          "type": "boolean"
+        },
+        "require_reason": {
+          "default": true,
+          "title": "Require Reason",
+          "type": "boolean"
+        }
+      },
+      "title": "ExceptionPolicy",
+      "type": "object"
+    },
+    "ExecutionTimeoutConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "approved_default_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved Default Seconds"
+        },
+        "kind": {
+          "const": "execution-timeout",
+          "default": "execution-timeout",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Seconds"
+        },
+        "min_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Seconds"
+        }
+      },
+      "title": "ExecutionTimeoutConfig",
+      "type": "object"
+    },
+    "ForbiddenOperatorsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "forbidden-operators",
+          "default": "forbidden-operators",
+          "title": "Kind",
+          "type": "string"
+        },
+        "operators": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Operators",
+          "type": "object"
+        }
+      },
+      "title": "ForbiddenOperatorsConfig",
+      "type": "object"
+    },
+    "IdempotenceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "external_write_markers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "External Write Markers",
+          "type": "array"
+        },
+        "kind": {
+          "const": "idempotence",
+          "default": "idempotence",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "IdempotenceConfig",
+      "type": "object"
+    },
+    "LifecycleStatus": {
+      "enum": [
+        "DRAFT",
+        "APPROVED",
+        "ACTIVE",
+        "CONFLICTED",
+        "DEPRECATED",
+        "REJECTED"
+      ],
+      "title": "LifecycleStatus",
+      "type": "string"
+    },
+    "OrchestrationBoundaryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "orchestration-boundary",
+          "default": "orchestration-boundary",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_complexity": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Complexity"
+        },
+        "max_statements": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Statements"
+        },
+        "signal_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Signal Patterns",
+          "type": "array"
+        }
+      },
+      "title": "OrchestrationBoundaryConfig",
+      "type": "object"
+    },
+    "Ownership": {
+      "additionalProperties": false,
+      "properties": {
+        "approved_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approved At"
+        },
+        "approvers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Approvers",
+          "type": "array"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "owner": {
+          "title": "Owner",
+          "type": "string"
+        },
+        "review_before": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Before"
+        }
+      },
+      "required": [
+        "owner"
+      ],
+      "title": "Ownership",
+      "type": "object"
+    },
+    "Policy": {
+      "additionalProperties": false,
+      "properties": {
+        "airflow_profiles": {
+          "items": {
+            "$ref": "#/$defs/AirflowProfile"
+          },
+          "title": "Airflow Profiles",
+          "type": "array"
+        },
+        "configuration": {
+          "discriminator": {
+            "mapping": {
+              "approved-abstractions": "#/$defs/ApprovedAbstractionsConfig",
+              "execution-timeout": "#/$defs/ExecutionTimeoutConfig",
+              "forbidden-operators": "#/$defs/ForbiddenOperatorsConfig",
+              "idempotence": "#/$defs/IdempotenceConfig",
+              "orchestration-boundary": "#/$defs/OrchestrationBoundaryConfig",
+              "required-owner": "#/$defs/RequiredOwnerConfig",
+              "required-tags": "#/$defs/RequiredTagsConfig",
+              "retry-bounds": "#/$defs/RetryBoundsConfig",
+              "sensitive-logging": "#/$defs/SensitiveLoggingConfig",
+              "top-level-io": "#/$defs/TopLevelIOConfig"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RequiredOwnerConfig"
+            },
+            {
+              "$ref": "#/$defs/RequiredTagsConfig"
+            },
+            {
+              "$ref": "#/$defs/ExecutionTimeoutConfig"
+            },
+            {
+              "$ref": "#/$defs/RetryBoundsConfig"
+            },
+            {
+              "$ref": "#/$defs/TopLevelIOConfig"
+            },
+            {
+              "$ref": "#/$defs/ForbiddenOperatorsConfig"
+            },
+            {
+              "$ref": "#/$defs/IdempotenceConfig"
+            },
+            {
+              "$ref": "#/$defs/OrchestrationBoundaryConfig"
+            },
+            {
+              "$ref": "#/$defs/SensitiveLoggingConfig"
+            },
+            {
+              "$ref": "#/$defs/ApprovedAbstractionsConfig"
+            }
+          ],
+          "title": "Configuration"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/EnforcementConfig"
+        },
+        "exceptions": {
+          "$ref": "#/$defs/ExceptionPolicy"
+        },
+        "id": {
+          "pattern": "^[A-Z0-9]+(?:-[A-Z0-9]+)+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "invariant": {
+          "title": "Invariant",
+          "type": "string"
+        },
+        "ownership": {
+          "$ref": "#/$defs/Ownership"
+        },
+        "safe_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Safe Path"
+        },
+        "scope": {
+          "$ref": "#/$defs/PolicyScope"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "source": {
+          "$ref": "#/$defs/PolicySource"
+        },
+        "status": {
+          "$ref": "#/$defs/LifecycleStatus"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "version",
+        "status",
+        "severity",
+        "ownership",
+        "source",
+        "invariant",
+        "enforcement",
+        "configuration"
+      ],
+      "title": "Policy",
+      "type": "object"
+    },
+    "PolicyScope": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "operators": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Operators",
+          "type": "array"
+        }
+      },
+      "title": "PolicyScope",
+      "type": "object"
+    },
+    "PolicySource": {
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "title": "Content Hash",
+          "type": "string"
+        },
+        "document": {
+          "format": "path",
+          "title": "Document",
+          "type": "string"
+        },
+        "section": {
+          "title": "Section",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "document",
+        "section",
+        "content_hash"
+      ],
+      "title": "PolicySource",
+      "type": "object"
+    },
+    "RequiredOwnerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Pattern"
+        },
+        "allowed_values": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Values",
+          "type": "array"
+        },
+        "kind": {
+          "const": "required-owner",
+          "default": "required-owner",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "RequiredOwnerConfig",
+      "type": "object"
+    },
+    "RequiredTagsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_values": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Allowed Values",
+          "type": "object"
+        },
+        "kind": {
+          "const": "required-tags",
+          "default": "required-tags",
+          "title": "Kind",
+          "type": "string"
+        },
+        "required_keys": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Keys",
+          "type": "array"
+        }
+      },
+      "title": "RequiredTagsConfig",
+      "type": "object"
+    },
+    "RetryBoundsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_zero_retries": {
+          "default": true,
+          "title": "Allow Zero Retries",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "retry-bounds",
+          "default": "retry-bounds",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_delay_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Delay Seconds"
+        },
+        "max_retries": {
+          "minimum": 0,
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "min_delay_seconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Min Delay Seconds",
+          "type": "integer"
+        },
+        "min_retries": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Min Retries",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_retries"
+      ],
+      "title": "RetryBoundsConfig",
+      "type": "object"
+    },
+    "SensitiveLoggingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "sensitive-logging",
+          "default": "sensitive-logging",
+          "title": "Kind",
+          "type": "string"
+        },
+        "logging_calls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Logging Calls",
+          "type": "array"
+        },
+        "secret_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Secret Patterns",
+          "type": "array"
+        }
+      },
+      "title": "SensitiveLoggingConfig",
+      "type": "object"
+    },
+    "Severity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "TopLevelIOConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "forbidden_calls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Calls",
+          "type": "array"
+        },
+        "kind": {
+          "const": "top-level-io",
+          "default": "top-level-io",
+          "title": "Kind",
+          "type": "string"
+        },
+        "uncertain_as_review": {
+          "default": true,
+          "title": "Uncertain As Review",
+          "type": "boolean"
+        }
+      },
+      "title": "TopLevelIOConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "policies": {
+      "items": {
+        "$ref": "#/$defs/Policy"
+      },
+      "title": "Policies",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "policies"
+  ],
+  "title": "PolicyPack",
+  "type": "object"
+}

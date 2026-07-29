@@ -1,0 +1,57 @@
+{
+  "$defs": {
+    "Confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "confidence": {
+      "$ref": "#/$defs/Confidence"
+    },
+    "evidence": {
+      "title": "Evidence",
+      "type": "string"
+    },
+    "explanation": {
+      "title": "Explanation",
+      "type": "string"
+    },
+    "remediation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Remediation"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "NEEDS_REVIEW",
+        "NOT_APPLICABLE"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "evidence",
+    "explanation",
+    "confidence"
+  ],
+  "title": "SemanticResponse",
+  "type": "object"
+}

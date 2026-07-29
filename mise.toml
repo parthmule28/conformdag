@@ -1,0 +1,61 @@
+[tools]
+python = "3.12"
+uv = "0.12.0"
+node = "26.5.1"
+"npm:@fission-ai/openspec" = "1.7.0"
+"pipx:ruff" = "0.12.10"
+"npm:pyright" = "1.1.403"
+"pipx:pip-audit" = "2.9.0"
+"aqua:gitleaks" = "8.28.0"
+
+[tasks.setup]
+description = "Create the locked development environment"
+run = "uv sync --all-groups"
+
+[tasks.lint]
+description = "Run Ruff lint checks"
+run = "uv run ruff check ."
+
+[tasks."format-check"]
+description = "Verify Ruff formatting"
+run = "uv run ruff format --check ."
+
+[tasks.format]
+description = "Format Python sources"
+run = "uv run ruff format ."
+
+[tasks.typecheck]
+description = "Run strict Pyright checks"
+run = "uv run pyright"
+
+[tasks.test]
+description = "Run fast tests"
+run = "uv run pytest -m 'not runtime'"
+
+[tasks."test:runtime"]
+description = "Run Docker/Airflow runtime tests"
+run = "uv run pytest -m runtime"
+
+[tasks.build]
+description = "Build wheel and source distribution"
+run = "uv build"
+
+[tasks."scan:example"]
+description = "Scan the checked-in example repository"
+run = "uv run conformdag scan examples/sample-repository --policy-pack examples/policies/pack.yaml"
+
+[tasks.benchmark]
+description = "Run the public benchmark"
+run = "uv run conformdag benchmark benchmarks/"
+
+[tasks.security]
+description = "Run dependency and secret checks"
+run = "uv run pip-audit && gitleaks detect --source . --redact"
+
+[tasks."image-scan"]
+description = "Scan a runtime image with Docker Scout"
+run = "docker scout cves $CONFORMDAG_IMAGE"
+
+[tasks.check]
+description = "Run the default local quality gate"
+depends = ["format-check", "lint", "typecheck", "test"]

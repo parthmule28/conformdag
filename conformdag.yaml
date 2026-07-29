@@ -1,0 +1,14 @@
+config_version: "1"
+scan:
+  policy_pack: policies/pack.yaml
+  include:
+    - dags/**/*.py
+  exclude:
+    - "**/.venv/**"
+    - "**/.git/**"
+    - "**/vendor/**"
+    - "**/generated/**"
+semantic:
+  enabled: false
+runtime:
+  enabled: false

@@ -1,0 +1,513 @@
+{
+  "$defs": {
+    "AirflowProfile": {
+      "enum": [
+        "2.11.2",
+        "3.3.0"
+      ],
+      "title": "AirflowProfile",
+      "type": "string"
+    },
+    "Confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "EnforcementType": {
+      "enum": [
+        "deterministic",
+        "semantic",
+        "hybrid"
+      ],
+      "title": "EnforcementType",
+      "type": "string"
+    },
+    "Finding": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "enforcement": {
+          "$ref": "#/$defs/EnforcementType"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FindingEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/FindingLocation"
+        },
+        "policy_id": {
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "policy_version": {
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "remediation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remediation"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "status": {
+          "$ref": "#/$defs/FindingStatus"
+        },
+        "suppressed": {
+          "default": false,
+          "title": "Suppressed",
+          "type": "boolean"
+        },
+        "suppression": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Suppression"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "policy_id",
+        "policy_version",
+        "status",
+        "severity",
+        "enforcement",
+        "fingerprint"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "FindingEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "code_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code Hash"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Line"
+        },
+        "start_line": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Line"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "FindingEvidence",
+      "type": "object"
+    },
+    "FindingLocation": {
+      "additionalProperties": false,
+      "properties": {
+        "end_line": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Line"
+        },
+        "file": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File"
+        },
+        "start_line": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Line"
+        }
+      },
+      "title": "FindingLocation",
+      "type": "object"
+    },
+    "FindingStatus": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "NEEDS_REVIEW",
+        "NOT_APPLICABLE",
+        "SKIPPED",
+        "ERROR"
+      ],
+      "title": "FindingStatus",
+      "type": "string"
+    },
+    "RunIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "fatal": {
+          "default": false,
+          "title": "Fatal",
+          "type": "boolean"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "phase": {
+          "title": "Phase",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "phase"
+      ],
+      "title": "RunIssue",
+      "type": "object"
+    },
+    "RunMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Environment",
+          "type": "object"
+        },
+        "input_hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Input Hashes",
+          "type": "object"
+        },
+        "policy_pack_id": {
+          "title": "Policy Pack Id",
+          "type": "string"
+        },
+        "policy_pack_version": {
+          "title": "Policy Pack Version",
+          "type": "string"
+        },
+        "prompt_hashes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Prompt Hashes",
+          "type": "object"
+        },
+        "repository_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repository Revision"
+        },
+        "resolved_configuration": {
+          "additionalProperties": true,
+          "title": "Resolved Configuration",
+          "type": "object"
+        },
+        "runtime_image_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Image Digest"
+        },
+        "runtime_profile": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AirflowProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "semantic_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Model"
+        },
+        "semantic_provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Semantic Provider"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "tool_version": {
+          "title": "Tool Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_version",
+        "policy_pack_id",
+        "policy_pack_version",
+        "timestamp"
+      ],
+      "title": "RunMetadata",
+      "type": "object"
+    },
+    "Severity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "Suppression": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "owner": {
+          "title": "Owner",
+          "type": "string"
+        },
+        "policy_id": {
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "policy_id",
+        "reason",
+        "owner",
+        "created_at",
+        "expires_at"
+      ],
+      "title": "Suppression",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "complete": {
+      "title": "Complete",
+      "type": "boolean"
+    },
+    "files_scanned": {
+      "items": {
+        "format": "path",
+        "type": "string"
+      },
+      "title": "Files Scanned",
+      "type": "array"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/RunIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "policies_evaluated": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Policies Evaluated",
+      "type": "array"
+    },
+    "policies_skipped": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Policies Skipped",
+      "type": "array"
+    },
+    "report_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Report Version",
+      "type": "string"
+    },
+    "result_fingerprint": {
+      "title": "Result Fingerprint",
+      "type": "string"
+    },
+    "run": {
+      "$ref": "#/$defs/RunMetadata"
+    }
+  },
+  "required": [
+    "complete",
+    "result_fingerprint",
+    "run"
+  ],
+  "title": "ScanReport",
+  "type": "object"
+}

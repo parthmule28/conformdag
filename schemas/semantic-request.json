@@ -1,0 +1,45 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "context_hash": {
+      "title": "Context Hash",
+      "type": "string"
+    },
+    "evidence": {
+      "title": "Evidence",
+      "type": "string"
+    },
+    "max_output_tokens": {
+      "default": 4000,
+      "exclusiveMinimum": 0,
+      "title": "Max Output Tokens",
+      "type": "integer"
+    },
+    "policy_id": {
+      "title": "Policy Id",
+      "type": "string"
+    },
+    "prompt_version": {
+      "title": "Prompt Version",
+      "type": "string"
+    },
+    "system_prompt": {
+      "title": "System Prompt",
+      "type": "string"
+    },
+    "temperature": {
+      "default": 0.0,
+      "title": "Temperature",
+      "type": "number"
+    }
+  },
+  "required": [
+    "policy_id",
+    "prompt_version",
+    "context_hash",
+    "system_prompt",
+    "evidence"
+  ],
+  "title": "SemanticRequest",
+  "type": "object"
+}

@@ -1,0 +1,174 @@
+{
+  "$defs": {
+    "AirflowProfile": {
+      "enum": [
+        "2.11.2",
+        "3.3.0"
+      ],
+      "title": "AirflowProfile",
+      "type": "string"
+    },
+    "ProjectRuntimeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "airflow_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AirflowProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image"
+        },
+        "network_enabled": {
+          "default": false,
+          "title": "Network Enabled",
+          "type": "boolean"
+        },
+        "timeout_seconds": {
+          "default": 300,
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "title": "ProjectRuntimeConfig",
+      "type": "object"
+    },
+    "ProjectScanConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "follow_internal_symlinks": {
+          "default": false,
+          "title": "Follow Internal Symlinks",
+          "type": "boolean"
+        },
+        "include": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Include",
+          "type": "array"
+        },
+        "policy_pack": {
+          "default": "policies/pack.yaml",
+          "format": "path",
+          "title": "Policy Pack",
+          "type": "string"
+        }
+      },
+      "title": "ProjectScanConfig",
+      "type": "object"
+    },
+    "ProjectSemanticConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "default": "CONFORMDAG_MODEL_API_KEY",
+          "title": "Api Key Env",
+          "type": "string"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Url"
+        },
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "max_concurrency": {
+          "default": 4,
+          "exclusiveMinimum": 0,
+          "title": "Max Concurrency",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "default": 32000,
+          "exclusiveMinimum": 0,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "default": 4000,
+          "exclusiveMinimum": 0,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "temperature": {
+          "default": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        }
+      },
+      "title": "ProjectSemanticConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "config_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Config Version",
+      "type": "string"
+    },
+    "runtime": {
+      "$ref": "#/$defs/ProjectRuntimeConfig"
+    },
+    "scan": {
+      "$ref": "#/$defs/ProjectScanConfig"
+    },
+    "semantic": {
+      "$ref": "#/$defs/ProjectSemanticConfig"
+    }
+  },
+  "title": "ProjectConfig",
+  "type": "object"
+}

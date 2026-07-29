@@ -1,0 +1,89 @@
+{
+  "$defs": {
+    "AirflowProfile": {
+      "enum": [
+        "2.11.2",
+        "3.3.0"
+      ],
+      "title": "AirflowProfile",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "airflow_profile": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AirflowProfile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "exclude": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Exclude",
+      "type": "array"
+    },
+    "image": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Image"
+    },
+    "include": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Include",
+      "type": "array"
+    },
+    "network_enabled": {
+      "default": false,
+      "title": "Network Enabled",
+      "type": "boolean"
+    },
+    "policy_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Policy Ids",
+      "type": "array"
+    },
+    "repository_root": {
+      "format": "path",
+      "title": "Repository Root",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "timeout_seconds": {
+      "default": 300,
+      "exclusiveMinimum": 0,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "repository_root",
+    "include",
+    "exclude",
+    "policy_ids"
+  ],
+  "title": "RuntimeManifest",
+  "type": "object"
+}
