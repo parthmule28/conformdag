@@ -19,6 +19,7 @@ from conformdag.models import (
     FindingLocation,
     FindingStatus,
     ForbiddenOperatorsConfig,
+    OperatorRule,
     Policy,
     RequiredOwnerConfig,
     RequiredTagsConfig,
@@ -70,6 +71,10 @@ def structural_fingerprint(policy: Policy, path: str, anchor: str, status: Findi
     """Build a stable finding identity from structural evidence, not line numbers."""
     value = f"{policy.id}:{policy.version}:{path}:{anchor}:{status.value}"
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split(".") if part.isdigit())
 
 
 class OwnerEvaluator:
@@ -293,6 +298,19 @@ class TopLevelIOEvaluator:
             for call in model.calls:
                 if not call.module_scope:
                     continue
+                if call.uncertain and configuration.uncertain_as_review:
+                    findings.append(
+                        _finding(
+                            context.policy,
+                            model,
+                            call.line,
+                            FindingStatus.NEEDS_REVIEW,
+                            "module-scope dynamic call could not be classified with "
+                            "high confidence",
+                            f"dynamic-call:{call.line}:{call.column}",
+                        )
+                    )
+                    continue
                 matched = next(
                     (
                         pattern
@@ -337,7 +355,34 @@ class ForbiddenOperatorEvaluator:
                 resolved = _resolve_imported_call(model, call)
                 if resolved not in configuration.operators:
                     continue
-                replacement = configuration.operators[resolved]
+                rule = configuration.operators[resolved]
+                if isinstance(rule, OperatorRule):
+                    if (
+                        context.airflow_profile is not None
+                        and rule.airflow_profiles
+                        and context.airflow_profile not in rule.airflow_profiles
+                    ):
+                        continue
+                    profile_version = (
+                        _version_tuple(context.airflow_profile.value)
+                        if context.airflow_profile is not None
+                        else None
+                    )
+                    if (
+                        profile_version is not None
+                        and rule.min_airflow_version
+                        and profile_version < _version_tuple(rule.min_airflow_version)
+                    ):
+                        continue
+                    if (
+                        profile_version is not None
+                        and rule.max_airflow_version
+                        and profile_version > _version_tuple(rule.max_airflow_version)
+                    ):
+                        continue
+                    replacement = rule.replacement
+                else:
+                    replacement = rule
                 findings.append(
                     _finding(
                         context.policy,

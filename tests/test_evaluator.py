@@ -10,7 +10,13 @@ from conformdag.evaluator import (
     redact_evidence,
     structural_fingerprint,
 )
-from conformdag.models import FindingStatus, RequiredOwnerConfig
+from conformdag.models import (
+    AirflowProfile,
+    FindingStatus,
+    ForbiddenOperatorsConfig,
+    OperatorRule,
+    RequiredOwnerConfig,
+)
 from conformdag.policy import load_policy_pack
 
 
@@ -99,3 +105,48 @@ def test_deterministic_policy_suite_evaluates_tags_defaults_io_and_operators() -
     assert by_policy["AIR-DET-004"] == [FindingStatus.PASS, FindingStatus.PASS]
     assert FindingStatus.FAIL in by_policy["AIR-DET-005"]
     assert len(by_policy["AIR-DET-006"]) == 2
+
+
+def test_uncertain_dynamic_module_call_is_review_not_blocking() -> None:
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
+    policy = next(item for item in pack.policies if item.id == "AIR-DET-005")
+    findings = evaluate_deterministic(
+        [policy], [_model("factory = get_factory()\nresult = factory()()\n")]
+    )[0]
+
+    assert findings
+    assert all(item.status is FindingStatus.NEEDS_REVIEW for item in findings)
+
+
+def test_forbidden_operator_rule_respects_airflow_profile() -> None:
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
+    original = next(item for item in pack.policies if item.id == "AIR-DET-006")
+    policy = original.model_copy(
+        update={
+            "configuration": ForbiddenOperatorsConfig(
+                operators={
+                    "airflow.operators.python.PythonOperator": OperatorRule(
+                        replacement="use-taskflow",
+                        airflow_profiles=[AirflowProfile.AIRFLOW_3_3_0],
+                    )
+                }
+            )
+        }
+    )
+    model = _model(
+        "from airflow.operators.python import PythonOperator\n"
+        "task = PythonOperator(task_id='task')\n"
+    )
+
+    from conformdag.evaluator import EvaluationContext, ForbiddenOperatorEvaluator
+
+    evaluator = ForbiddenOperatorEvaluator()
+    assert (
+        evaluator.evaluate(EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_2_11_2)) == []
+    )
+    assert (
+        evaluator.evaluate(EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_3_3_0))[
+            0
+        ].status
+        is FindingStatus.FAIL
+    )

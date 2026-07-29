@@ -140,9 +140,16 @@ class TopLevelIOConfig(ConformModel):
     uncertain_as_review: bool = True
 
 
+class OperatorRule(ConformModel):
+    replacement: str
+    airflow_profiles: list[AirflowProfile] = Field(default_factory=_empty_airflow_profiles)
+    min_airflow_version: str | None = None
+    max_airflow_version: str | None = None
+
+
 class ForbiddenOperatorsConfig(ConformModel):
     kind: Literal["forbidden-operators"] = "forbidden-operators"
-    operators: dict[str, str] = Field(default_factory=lambda: {})
+    operators: dict[str, str | OperatorRule] = Field(default_factory=lambda: {})
 
 
 class IdempotenceConfig(ConformModel):

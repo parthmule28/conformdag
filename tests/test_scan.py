@@ -36,3 +36,17 @@ def test_scan_supports_airflow_two_three_style_sources_without_execution(tmp_pat
     assert [item.status for item in owner_findings] == [FindingStatus.PASS, FindingStatus.FAIL]
     assert len(report.files_scanned) == 2
     assert report.issues == []
+
+
+def test_scan_marks_parse_failures_incomplete(tmp_path: Path) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "standards").mkdir()
+    (tmp_path / "dags").mkdir()
+    copyfile("policies/pack.yaml", tmp_path / "policies/pack.yaml")
+    copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
+    (tmp_path / "dags" / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+
+    report = scan_repository(tmp_path)
+
+    assert report.complete is False
+    assert report.issues[0].code == "PARSE_ERROR"

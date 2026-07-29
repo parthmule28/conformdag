@@ -152,7 +152,14 @@
         },
         "operators": {
           "additionalProperties": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/OperatorRule"
+              }
+            ]
           },
           "title": "Operators",
           "type": "object"
@@ -192,6 +199,51 @@
       ],
       "title": "LifecycleStatus",
       "type": "string"
+    },
+    "OperatorRule": {
+      "additionalProperties": false,
+      "properties": {
+        "airflow_profiles": {
+          "items": {
+            "$ref": "#/$defs/AirflowProfile"
+          },
+          "title": "Airflow Profiles",
+          "type": "array"
+        },
+        "max_airflow_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Airflow Version"
+        },
+        "min_airflow_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Airflow Version"
+        },
+        "replacement": {
+          "title": "Replacement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "replacement"
+      ],
+      "title": "OperatorRule",
+      "type": "object"
     },
     "OrchestrationBoundaryConfig": {
       "additionalProperties": false,

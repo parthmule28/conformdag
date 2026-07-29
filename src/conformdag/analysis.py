@@ -42,6 +42,7 @@ class CallRecord:
     line: int
     column: int
     module_scope: bool
+    uncertain: bool = False
 
 
 def _empty_defaults() -> dict[str, object]:
@@ -196,10 +197,16 @@ class _ModelVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         qualified_name = _qualified_name(node.func)
-        if qualified_name:
-            self.model.calls.append(
-                CallRecord(qualified_name, node.lineno, node.col_offset, self._function_depth == 0)
+        self.model.calls.append(
+            CallRecord(
+                qualified_name or "<dynamic>",
+                node.lineno,
+                node.col_offset,
+                self._function_depth == 0,
+                uncertain=qualified_name is None,
             )
+        )
+        if qualified_name:
             if self._is_dag_call(node):
                 self.model.dags.append(self._dag_record(node))
             elif qualified_name.rsplit(".", 1)[-1].endswith("Operator"):
