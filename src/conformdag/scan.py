@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,7 +15,8 @@ from conformdag.models import (
     RunMetadata,
     ScanReport,
 )
-from conformdag.policy import select_policy_pack
+from conformdag.policy import load_suppressions, select_policy_pack
+from conformdag.reporting import apply_suppressions, normalize_report
 
 
 def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> ScanReport:
@@ -36,7 +35,13 @@ def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> S
     )
     findings: list[Finding] = []
     issues = [
-        RunIssue(code="DISCOVERY", message=issue.message, path=Path(issue.path), phase="discovery")
+        RunIssue(
+            code="DISCOVERY",
+            message=issue.message,
+            path=Path(issue.path),
+            phase="discovery",
+            fatal=issue.message != "symlink excluded",
+        )
         for issue in discovery_issues
     ]
     models: list[SourceModel] = []
@@ -49,6 +54,7 @@ def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> S
                     message=parse_issue.message,
                     path=Path(parse_issue.path),
                     phase="analysis",
+                    fatal=True,
                 )
             )
         elif model:
@@ -67,12 +73,15 @@ def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> S
         evaluated = []
         skipped = [policy.id for policy in pack.policies]
 
-    payload = json.dumps([finding.model_dump(mode="json") for finding in findings], sort_keys=True)
-    fingerprint = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    complete = not issues
-    return ScanReport(
-        complete=complete,
-        result_fingerprint=fingerprint,
+    suppression_path = config.scan.suppressions
+    if not suppression_path.is_absolute():
+        suppression_path = root / suppression_path
+    suppressions = load_suppressions(suppression_path)
+    findings, suppression_issues = apply_suppressions(findings, suppressions)
+    issues.extend(suppression_issues)
+    report = ScanReport(
+        complete=not any(issue.fatal for issue in issues),
+        result_fingerprint="",
         files_scanned=[source.path.relative_to(root) for source in files],
         policies_evaluated=evaluated,
         policies_skipped=skipped,
@@ -86,3 +95,4 @@ def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> S
             timestamp=datetime.now(UTC),
         ),
     )
+    return normalize_report(report)

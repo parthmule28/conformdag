@@ -9,6 +9,7 @@ from rich.table import Table
 
 from conformdag import __version__
 from conformdag.policy import PolicyValidationError, select_policy_pack
+from conformdag.reporting import has_blocking_failures
 from conformdag.scan import scan_repository
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -110,7 +111,7 @@ def scan(
     )
     if report.issues:
         raise typer.Exit(code=3)
-    if any(finding.status.value == "FAIL" for finding in report.findings):
+    if has_blocking_failures(report):
         raise typer.Exit(code=1)
 
 

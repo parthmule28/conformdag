@@ -81,6 +81,12 @@
           "format": "path",
           "title": "Policy Pack",
           "type": "string"
+        },
+        "suppressions": {
+          "default": ".conformdag/suppressions.yaml",
+          "format": "path",
+          "title": "Suppressions",
+          "type": "string"
         }
       },
       "title": "ProjectScanConfig",

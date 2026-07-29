@@ -336,6 +336,7 @@ class SemanticResponse(ConformModel):
 
 class ProjectScanConfig(ConformModel):
     policy_pack: Path = Path("policies/pack.yaml")
+    suppressions: Path = Path(".conformdag/suppressions.yaml")
     include: list[str] = Field(default_factory=lambda: ["dags/**/*.py"])
     exclude: list[str] = Field(
         default_factory=lambda: ["**/.venv/**", "**/.git/**", "**/vendor/**", "**/generated/**"]
