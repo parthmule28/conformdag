@@ -1,6 +1,7 @@
 """CLI output and diagnostic routing tests."""
 
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -13,6 +14,48 @@ def test_terminal_scan_output_is_human_readable() -> None:
     assert result.exit_code == 0
     assert "ConformDAG scan complete" in result.stdout
     assert "Result fingerprint:" in result.stdout
+    assert "scan complete:" in result.stderr
+
+
+def test_json_scan_output_is_machine_readable_and_keeps_diagnostics_off_stdout() -> None:
+    result = CliRunner().invoke(app, ["scan", "--path", ".", "--format", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["report_version"] == "1"
+    assert "scan complete:" not in result.stdout
+    assert "scan complete:" in result.stderr
+
+
+def test_sarif_and_html_outputs_are_parseable_files(tmp_path: Path) -> None:
+    sarif_path = tmp_path / "report.sarif"
+    sarif = CliRunner().invoke(
+        app, ["scan", "--path", ".", "--format", "sarif", "--output", str(sarif_path)]
+    )
+    assert sarif.exit_code == 0
+    sarif_payload = json.loads(sarif_path.read_text(encoding="utf-8"))
+    assert sarif_payload["version"] == "2.1.0"
+    assert sarif_payload["runs"][0]["automationDetails"]["id"]
+
+    html_path = tmp_path / "report.html"
+    html = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            ".",
+            "--format",
+            "html",
+            "--output",
+            str(html_path),
+            "--no-evidence",
+        ],
+    )
+    assert html.exit_code == 0
+    rendered = html_path.read_text(encoding="utf-8")
+    assert '<html lang="en">' in rendered
+    assert '<th scope="col">Policy</th>' in rendered
+    assert "DAG owner=" not in rendered
 
 
 def test_html_scan_requires_an_explicit_destination() -> None:
