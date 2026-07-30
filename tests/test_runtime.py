@@ -35,6 +35,17 @@ def test_builds_custom_image_manifest(tmp_path: Path) -> None:
     assert manifest.network_enabled is False
 
 
+def test_custom_image_requires_immutable_digest(tmp_path: Path) -> None:
+    with pytest.raises(RuntimePhaseError, match="immutable sha256 digest"):
+        build_runtime_manifest(
+            tmp_path,
+            ProjectRuntimeConfig(enabled=True, image="registry.example/airflow:latest"),
+            ["AIR-DET-001"],
+            ["dags/**/*.py"],
+            [],
+        )
+
+
 def test_supported_profile_rejects_network_enablement(tmp_path: Path) -> None:
     with pytest.raises(RuntimePhaseError, match="network-enabled"):
         build_runtime_manifest(
@@ -48,6 +59,20 @@ def test_supported_profile_rejects_network_enablement(tmp_path: Path) -> None:
             ["dags/**/*.py"],
             [],
         )
+
+
+def test_supported_profile_resolves_pinned_image_and_providers(tmp_path: Path) -> None:
+    manifest = build_runtime_manifest(
+        tmp_path,
+        ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+        ["AIR-DET-001"],
+        ["dags/**/*.py"],
+        [],
+    )
+
+    assert manifest.supported_profile is True
+    assert manifest.image is not None and "@sha256:" in manifest.image
+    assert manifest.provider_versions["apache-airflow-providers-google"] == "22.1.0"
 
 
 def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path) -> None:
@@ -70,6 +95,7 @@ def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path)
     assert command[0] == "docker"
     assert "--network=none" in command
     assert "--read-only" in command
+    assert command[-2:] == ["--manifest", "/conformdag/runtime-manifest.json"]
     assert mocked.call_args.kwargs["shell"] is False
 
 

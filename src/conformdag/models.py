@@ -304,6 +304,8 @@ class RuntimeManifest(ConformModel):
     policy_ids: list[str]
     airflow_profile: AirflowProfile | None = None
     image: str | None = None
+    provider_versions: dict[str, str] = Field(default_factory=dict)
+    supported_profile: bool = False
     network_enabled: bool = False
     timeout_seconds: PositiveInt = 300
 
