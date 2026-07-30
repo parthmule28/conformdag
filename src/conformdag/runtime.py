@@ -123,6 +123,10 @@ def build_runtime_manifest(
         raise RuntimePhaseError("runtime analysis is not enabled")
     if config.airflow_version is None and not config.image:
         raise RuntimePhaseError("runtime requires an Airflow profile or custom image")
+    if config.network_enabled and config.airflow_version is not None:
+        raise RuntimePhaseError(
+            "network-enabled runtime execution is not supported for Airflow profiles"
+        )
     return RuntimeManifest(
         repository_root=root.resolve(),
         include=include,

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from conformdag.models import ProjectRuntimeConfig
+from conformdag.models import AirflowProfile, ProjectRuntimeConfig
 from conformdag.runtime import DockerRunner, RuntimePhaseError, build_runtime_manifest
 
 
@@ -33,6 +33,21 @@ def test_builds_custom_image_manifest(tmp_path: Path) -> None:
     assert manifest.image is not None
     assert manifest.image.endswith("a" * 64)
     assert manifest.network_enabled is False
+
+
+def test_supported_profile_rejects_network_enablement(tmp_path: Path) -> None:
+    with pytest.raises(RuntimePhaseError, match="network-enabled"):
+        build_runtime_manifest(
+            tmp_path,
+            ProjectRuntimeConfig(
+                enabled=True,
+                airflow_version=AirflowProfile.AIRFLOW_3_3_0,
+                network_enabled=True,
+            ),
+            ["AIR-DET-001"],
+            ["dags/**/*.py"],
+            [],
+        )
 
 
 def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path) -> None:
