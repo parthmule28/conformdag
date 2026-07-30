@@ -5,6 +5,11 @@
       "title": "Context Hash",
       "type": "string"
     },
+    "enforcement_hash": {
+      "default": "",
+      "title": "Enforcement Hash",
+      "type": "string"
+    },
     "evidence": {
       "title": "Evidence",
       "type": "string"
@@ -15,12 +20,28 @@
       "title": "Max Output Tokens",
       "type": "integer"
     },
+    "policy_contract_hash": {
+      "default": "",
+      "title": "Policy Contract Hash",
+      "type": "string"
+    },
     "policy_id": {
       "title": "Policy Id",
       "type": "string"
     },
+    "policy_version": {
+      "default": "unknown",
+      "title": "Policy Version",
+      "type": "string"
+    },
     "prompt_version": {
       "title": "Prompt Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1",
+      "default": "1",
+      "title": "Schema Version",
       "type": "string"
     },
     "system_prompt": {

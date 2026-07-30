@@ -317,7 +317,11 @@ class RuntimeObservation(ConformModel):
 
 
 class SemanticRequest(ConformModel):
+    schema_version: Literal["1"] = "1"
     policy_id: str
+    policy_version: str = "unknown"
+    policy_contract_hash: str = ""
+    enforcement_hash: str = ""
     prompt_version: str
     context_hash: str
     system_prompt: str

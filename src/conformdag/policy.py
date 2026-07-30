@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -102,6 +103,32 @@ def validate_policy_provenance(pack: PolicyPack, repository_root: Path) -> list[
 def active_policies(pack: PolicyPack) -> list[Policy]:
     """Return only policies that are eligible for evaluation."""
     return [policy for policy in pack.policies if policy.status is LifecycleStatus.ACTIVE]
+
+
+def _policy_hash(payload: object) -> str:
+    normalized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def policy_contract_hash(policy: Policy) -> str:
+    """Hash the policy contract independently from its enforcement machinery."""
+    return _policy_hash(
+        {
+            "id": policy.id,
+            "title": policy.title,
+            "severity": policy.severity.value,
+            "scope": policy.scope.model_dump(mode="json"),
+            "invariant": policy.invariant,
+            "safe_path": policy.safe_path,
+            "exceptions": policy.exceptions.model_dump(mode="json"),
+            "configuration": policy.configuration.model_dump(mode="json"),
+        }
+    )
+
+
+def policy_enforcement_hash(policy: Policy) -> str:
+    """Hash the enforcement contract used to execute or prompt a policy."""
+    return _policy_hash(policy.enforcement.model_dump(mode="json"))
 
 
 def load_suppressions(path: Path) -> list[Suppression]:

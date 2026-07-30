@@ -18,6 +18,7 @@ from conformdag.models import (
     SemanticRequest,
     SemanticResponse,
 )
+from conformdag.policy import policy_contract_hash, policy_enforcement_hash
 from conformdag.semantic import (
     DEFAULT_PROMPT_TEMPLATE,
     SemanticContext,
@@ -54,6 +55,9 @@ def build_semantic_request(policy: Policy, context: SemanticContext) -> Semantic
     system_prompt = DEFAULT_PROMPT_TEMPLATE.render(f"{policy.invariant}\n{instruction}")
     return SemanticRequest(
         policy_id=policy.id,
+        policy_version=policy.version,
+        policy_contract_hash=policy_contract_hash(policy),
+        enforcement_hash=policy_enforcement_hash(policy),
         prompt_version=DEFAULT_PROMPT_TEMPLATE.version,
         context_hash=context.context_hash,
         system_prompt=system_prompt,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, Literal
 
@@ -58,6 +59,9 @@ class BenchmarkManifest(ConformModel):
     dataset_id: str
     dataset_version: str
     license: BenchmarkLicense
+    policy_versions: dict[str, str] = Field(default_factory=dict)
+    policy_contract_hashes: dict[str, str] = Field(default_factory=dict)
+    enforcement_hashes: dict[str, str] = Field(default_factory=dict)
     cases: list[BenchmarkCase] = Field(min_length=1)
 
 
@@ -107,3 +111,11 @@ def load_benchmark_manifest(path: Path, repository_root: Path | None = None) -> 
 def benchmark_manifest_payload(manifest: BenchmarkManifest) -> dict[str, Any]:
     """Return the normalized JSON-compatible manifest representation."""
     return manifest.model_dump(mode="json")
+
+
+def benchmark_identity(manifest: BenchmarkManifest) -> str:
+    """Return a stable identity that changes with policy or schema inputs."""
+    payload = benchmark_manifest_payload(manifest)
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
