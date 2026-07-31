@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -27,7 +28,10 @@ from conformdag.semantic import (
 
 POLICY_INSTRUCTIONS = {
     "AIR-SEM-001": (
-        "Review external writes, retry behavior, and deduplication evidence for idempotence."
+        "Review external writes, retry behavior, and deduplication evidence for idempotence. "
+        "Conclude PASS or FAIL only when the supplied evidence establishes the write behavior "
+        "and retry/deduplication controls; otherwise return NEEDS_REVIEW and name the missing "
+        "evidence."
     ),
     "AIR-SEM-002": (
         "Review structural signals and evidence for business logic embedded in orchestration."
@@ -37,6 +41,12 @@ POLICY_INSTRUCTIONS = {
         "Review usage cues and documentation against the policy-declared abstraction registry."
     ),
 }
+
+
+def _policy_instruction(policy: Policy) -> str:
+    instruction = POLICY_INSTRUCTIONS.get(policy.id, policy.invariant)
+    configuration = json.dumps(policy.configuration.model_dump(mode="json"), sort_keys=True)
+    return f"{instruction}\nPolicy configuration:\n{configuration}"
 
 
 class SemanticProvider(Protocol):
@@ -51,8 +61,9 @@ class SemanticProvider(Protocol):
 
 def build_semantic_request(policy: Policy, context: SemanticContext) -> SemanticRequest:
     """Build a strict request with source content delimited as untrusted evidence."""
-    instruction = POLICY_INSTRUCTIONS.get(policy.id, policy.invariant)
-    system_prompt = DEFAULT_PROMPT_TEMPLATE.render(f"{policy.invariant}\n{instruction}")
+    system_prompt = DEFAULT_PROMPT_TEMPLATE.render(
+        f"{policy.invariant}\n{_policy_instruction(policy)}"
+    )
     return SemanticRequest(
         policy_id=policy.id,
         policy_version=policy.version,
@@ -73,6 +84,10 @@ def semantic_finding(
 ) -> Finding:
     """Normalize a provider decision as advisory evidence with a stable identity."""
     status = FindingStatus(response.status)
+    explanation = response.explanation
+    if policy.id == "AIR-SEM-001" and not response.evidence.strip():
+        status = FindingStatus.NEEDS_REVIEW
+        explanation = f"{explanation} Idempotence cannot be decided without bounded evidence."
     evidence = redact_evidence(response.evidence)
     fingerprint_value = (
         f"{policy.id}:{policy.version}:{context.context_hash}:{status.value}:{evidence}"
@@ -86,7 +101,7 @@ def semantic_finding(
         enforcement=EnforcementType.SEMANTIC,
         location=FindingLocation(file=source_path),
         evidence=FindingEvidence(text=evidence),
-        explanation=response.explanation,
+        explanation=explanation,
         remediation=response.remediation or policy.safe_path,
         confidence=response.confidence,
         fingerprint=fingerprint,

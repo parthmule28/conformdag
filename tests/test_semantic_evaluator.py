@@ -36,6 +36,25 @@ def test_builds_policy_specific_untrusted_request() -> None:
     assert request.prompt_version == "1"
     assert "[SOURCE dag.py]" not in request.system_prompt
     assert request.evidence.startswith("[SOURCE")
+    assert "external_write_markers" in request.system_prompt
+    assert "insert" in request.system_prompt
+    assert "return NEEDS_REVIEW" in request.system_prompt
+
+
+def test_idempotence_without_evidence_abstains() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    response = SemanticResponse(
+        status="PASS",
+        evidence="",
+        explanation="No duplicate write observed.",
+        confidence=Confidence.HIGH,
+    )
+
+    finding = semantic_finding(policy, response, _context())
+
+    assert finding.status.value == "NEEDS_REVIEW"
+    assert finding.confidence is Confidence.HIGH
+    assert "without bounded evidence" in (finding.explanation or "")
 
 
 def test_normalizes_abstention_as_advisory_finding() -> None:
