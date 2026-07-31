@@ -95,6 +95,7 @@ def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path)
     assert command[0] == "docker"
     assert "--network=none" in command
     assert "--read-only" in command
+    assert "--user=airflow" in command
     assert command[-2:] == ["--manifest", "/conformdag/runtime-manifest.json"]
     assert mocked.call_args.kwargs["shell"] is False
 

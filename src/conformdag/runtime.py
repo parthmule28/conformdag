@@ -123,7 +123,7 @@ class DockerRunner:
             "--rm",
             "--network=none",
             "--read-only",
-            "--user=65532:65532",
+            "--user=airflow",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges:true",
             "--cpus=1",
