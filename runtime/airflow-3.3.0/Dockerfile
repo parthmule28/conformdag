@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 apache/airflow:3.3.0-python3.12@sha256:2e43c8d61ebbad0ef6df6d6559bd3f3ddbc4d9cac7392029b13db00def6ba216
+FROM apache/airflow:3.3.0-python3.12@sha256:2e43c8d61ebbad0ef6df6d6559bd3f3ddbc4d9cac7392029b13db00def6ba216
 
 USER root
 COPY runtime/airflow-3.3.0/constraints.txt /opt/conformdag/constraints.txt
