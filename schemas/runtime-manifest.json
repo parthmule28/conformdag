@@ -60,6 +60,13 @@
       "title": "Policy Ids",
       "type": "array"
     },
+    "provider_versions": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Provider Versions",
+      "type": "object"
+    },
     "repository_root": {
       "format": "path",
       "title": "Repository Root",
@@ -70,6 +77,11 @@
       "default": "1",
       "title": "Schema Version",
       "type": "string"
+    },
+    "supported_profile": {
+      "default": false,
+      "title": "Supported Profile",
+      "type": "boolean"
     },
     "timeout_seconds": {
       "default": 300,

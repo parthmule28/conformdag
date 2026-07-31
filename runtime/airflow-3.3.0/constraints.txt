@@ -1,0 +1,6 @@
+# Airflow's published constraints are the authoritative transitive lock.
+--constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.3.0/constraints-3.12.txt
+apache-airflow-providers-standard==1.15.0
+apache-airflow-providers-postgres==6.8.0
+apache-airflow-providers-http==6.0.4
+apache-airflow-providers-google==22.1.0

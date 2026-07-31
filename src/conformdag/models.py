@@ -304,6 +304,8 @@ class RuntimeManifest(ConformModel):
     policy_ids: list[str]
     airflow_profile: AirflowProfile | None = None
     image: str | None = None
+    provider_versions: dict[str, str] = Field(default_factory=dict)
+    supported_profile: bool = False
     network_enabled: bool = False
     timeout_seconds: PositiveInt = 300
 
@@ -317,7 +319,11 @@ class RuntimeObservation(ConformModel):
 
 
 class SemanticRequest(ConformModel):
+    schema_version: Literal["1"] = "1"
     policy_id: str
+    policy_version: str = "unknown"
+    policy_contract_hash: str = ""
+    enforcement_hash: str = ""
     prompt_version: str
     context_hash: str
     system_prompt: str

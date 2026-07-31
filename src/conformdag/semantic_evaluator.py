@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -18,6 +20,7 @@ from conformdag.models import (
     SemanticRequest,
     SemanticResponse,
 )
+from conformdag.policy import policy_contract_hash, policy_enforcement_hash
 from conformdag.semantic import (
     DEFAULT_PROMPT_TEMPLATE,
     SemanticContext,
@@ -26,7 +29,10 @@ from conformdag.semantic import (
 
 POLICY_INSTRUCTIONS = {
     "AIR-SEM-001": (
-        "Review external writes, retry behavior, and deduplication evidence for idempotence."
+        "Review external writes, retry behavior, and deduplication evidence for idempotence. "
+        "Conclude PASS or FAIL only when the supplied evidence establishes the write behavior "
+        "and retry/deduplication controls; otherwise return NEEDS_REVIEW and name the missing "
+        "evidence."
     ),
     "AIR-SEM-002": (
         "Review structural signals and evidence for business logic embedded in orchestration."
@@ -36,6 +42,31 @@ POLICY_INSTRUCTIONS = {
         "Review usage cues and documentation against the policy-declared abstraction registry."
     ),
 }
+
+
+def _policy_instruction(policy: Policy, context_text: str) -> str:
+    instruction = POLICY_INSTRUCTIONS.get(policy.id, policy.invariant)
+    configuration = json.dumps(policy.configuration.model_dump(mode="json"), sort_keys=True)
+    details = f"{instruction}\nPolicy configuration:\n{configuration}"
+    if policy.id == "AIR-SEM-002":
+        raw_configuration = policy.configuration.model_dump(mode="json")
+        patterns = [str(item) for item in raw_configuration.get("signal_patterns", [])]
+        source_lines = sum(
+            1 for line in context_text.splitlines() if not line.startswith("[SOURCE ")
+        )
+        signal_counts = {
+            pattern: (
+                len(re.findall(r"\bfor\s+", context_text))
+                if pattern == "for-loop"
+                else context_text.lower().count(pattern.lower())
+            )
+            for pattern in patterns
+        }
+        details += "\nDeterministic structural signals are hints, not conclusions:\n" + json.dumps(
+            {"source_line_count": source_lines, "signal_counts": signal_counts},
+            sort_keys=True,
+        )
+    return details
 
 
 class SemanticProvider(Protocol):
@@ -50,10 +81,14 @@ class SemanticProvider(Protocol):
 
 def build_semantic_request(policy: Policy, context: SemanticContext) -> SemanticRequest:
     """Build a strict request with source content delimited as untrusted evidence."""
-    instruction = POLICY_INSTRUCTIONS.get(policy.id, policy.invariant)
-    system_prompt = DEFAULT_PROMPT_TEMPLATE.render(f"{policy.invariant}\n{instruction}")
+    system_prompt = DEFAULT_PROMPT_TEMPLATE.render(
+        f"{policy.invariant}\n{_policy_instruction(policy, context.text)}"
+    )
     return SemanticRequest(
         policy_id=policy.id,
+        policy_version=policy.version,
+        policy_contract_hash=policy_contract_hash(policy),
+        enforcement_hash=policy_enforcement_hash(policy),
         prompt_version=DEFAULT_PROMPT_TEMPLATE.version,
         context_hash=context.context_hash,
         system_prompt=system_prompt,
@@ -69,6 +104,10 @@ def semantic_finding(
 ) -> Finding:
     """Normalize a provider decision as advisory evidence with a stable identity."""
     status = FindingStatus(response.status)
+    explanation = response.explanation
+    if policy.id == "AIR-SEM-001" and not response.evidence.strip():
+        status = FindingStatus.NEEDS_REVIEW
+        explanation = f"{explanation} Idempotence cannot be decided without bounded evidence."
     evidence = redact_evidence(response.evidence)
     fingerprint_value = (
         f"{policy.id}:{policy.version}:{context.context_hash}:{status.value}:{evidence}"
@@ -82,7 +121,7 @@ def semantic_finding(
         enforcement=EnforcementType.SEMANTIC,
         location=FindingLocation(file=source_path),
         evidence=FindingEvidence(text=evidence),
-        explanation=response.explanation,
+        explanation=explanation,
         remediation=response.remediation or policy.safe_path,
         confidence=response.confidence,
         fingerprint=fingerprint,

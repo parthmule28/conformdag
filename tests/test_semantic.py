@@ -94,6 +94,15 @@ def test_cache_stores_only_normalized_response(tmp_path: Path) -> None:
     assert "safe evidence" not in stored
 
 
+def test_cache_identity_changes_with_policy_contract_inputs() -> None:
+    first = _request()
+    second = first.model_copy(update={"policy_contract_hash": "changed"})
+
+    assert semantic_cache_key(first, "test-model", {"temperature": 0.0}) != semantic_cache_key(
+        second, "test-model", {"temperature": 0.0}
+    )
+
+
 def test_custom_secret_pattern_is_applied() -> None:
     assert redact_text("credential=abc", [r"credential=\w+"]) == "[REDACTED]"
 

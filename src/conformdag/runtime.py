@@ -10,10 +10,55 @@ from pathlib import Path
 from typing import Any, cast
 
 from conformdag.models import (
+    AirflowProfile,
     ProjectRuntimeConfig,
     RuntimeManifest,
     RuntimeObservation,
 )
+
+
+@dataclass(frozen=True)
+class RuntimeProfile:
+    """Immutable metadata for a supported Airflow runtime image."""
+
+    airflow_profile: AirflowProfile
+    image: str
+    provider_versions: dict[str, str]
+
+
+RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
+    AirflowProfile.AIRFLOW_2_11_2: RuntimeProfile(
+        airflow_profile=AirflowProfile.AIRFLOW_2_11_2,
+        image=(
+            "apache/airflow:2.11.2-python3.12@sha256:"
+            "a69d3b7e8013f57338ca19a0bc4de862f62af178a21088cd4459f1081911c07c"
+        ),
+        provider_versions={
+            "apache-airflow-providers-standard": "1.9.0",
+            "apache-airflow-providers-postgres": "6.6.0",
+            "apache-airflow-providers-http": "6.0.0",
+            "apache-airflow-providers-google": "20.0.0",
+        },
+    ),
+    AirflowProfile.AIRFLOW_3_3_0: RuntimeProfile(
+        airflow_profile=AirflowProfile.AIRFLOW_3_3_0,
+        image=(
+            "apache/airflow:3.3.0-python3.12@sha256:"
+            "2e43c8d61ebbad0ef6df6d6559bd3f3ddbc4d9cac7392029b13db00def6ba216"
+        ),
+        provider_versions={
+            "apache-airflow-providers-standard": "1.15.0",
+            "apache-airflow-providers-postgres": "6.8.0",
+            "apache-airflow-providers-http": "6.0.4",
+            "apache-airflow-providers-google": "22.1.0",
+        },
+    ),
+}
+
+
+def runtime_profile(profile: AirflowProfile) -> RuntimeProfile:
+    """Return the immutable profile definition for a supported Airflow version."""
+    return RUNTIME_PROFILES[profile]
 
 
 class RuntimePhaseError(RuntimeError):
@@ -78,7 +123,7 @@ class DockerRunner:
             "--rm",
             "--network=none",
             "--read-only",
-            "--user=65532:65532",
+            "--user=airflow",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges:true",
             "--cpus=1",
@@ -91,7 +136,6 @@ class DockerRunner:
             "--tmpfs",
             "/tmp:rw,noexec,nosuid,size=64m",  # noqa: S108 - bounded container tmpfs
             image,
-            "conformdag-runtime",
             "--manifest",
             "/conformdag/runtime-manifest.json",
         ]
@@ -123,13 +167,25 @@ def build_runtime_manifest(
         raise RuntimePhaseError("runtime analysis is not enabled")
     if config.airflow_version is None and not config.image:
         raise RuntimePhaseError("runtime requires an Airflow profile or custom image")
+    if config.airflow_version is not None and config.image:
+        raise RuntimePhaseError("runtime cannot select both an Airflow profile and custom image")
+    if config.image and "@sha256:" not in config.image:
+        raise RuntimePhaseError("custom runtime image must include an immutable sha256 digest")
+    if config.network_enabled and config.airflow_version is not None:
+        raise RuntimePhaseError(
+            "network-enabled runtime execution is not supported for Airflow profiles"
+        )
+    profile = runtime_profile(config.airflow_version) if config.airflow_version else None
+    image = config.image or (profile.image if profile else None)
     return RuntimeManifest(
         repository_root=root.resolve(),
         include=include,
         exclude=exclude,
         policy_ids=policy_ids,
         airflow_profile=config.airflow_version,
-        image=config.image,
+        image=image,
+        provider_versions=profile.provider_versions if profile else {},
+        supported_profile=profile is not None,
         network_enabled=config.network_enabled,
         timeout_seconds=config.timeout_seconds,
     )

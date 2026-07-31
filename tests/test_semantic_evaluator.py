@@ -30,9 +30,47 @@ def test_builds_policy_specific_untrusted_request() -> None:
     request = build_semantic_request(policy, _context())
 
     assert request.policy_id == "AIR-SEM-001"
+    assert request.policy_version == policy.version
+    assert len(request.policy_contract_hash) == 64
+    assert len(request.enforcement_hash) == 64
     assert request.prompt_version == "1"
     assert "[SOURCE dag.py]" not in request.system_prompt
     assert request.evidence.startswith("[SOURCE")
+    assert "external_write_markers" in request.system_prompt
+    assert "insert" in request.system_prompt
+    assert "return NEEDS_REVIEW" in request.system_prompt
+
+
+def test_idempotence_without_evidence_abstains() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    response = SemanticResponse(
+        status="PASS",
+        evidence="",
+        explanation="No duplicate write observed.",
+        confidence=Confidence.HIGH,
+    )
+
+    finding = semantic_finding(policy, response, _context())
+
+    assert finding.status.value == "NEEDS_REVIEW"
+    assert finding.confidence is Confidence.HIGH
+    assert "without bounded evidence" in (finding.explanation or "")
+
+
+def test_orchestration_request_includes_structural_signal_hints() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-002")
+    context = SemanticContext(
+        "[SOURCE dag.py]\nfor row in rows:\n    database-query(row)",
+        "context",
+        ("dag.py",),
+        (),
+    )
+
+    request = build_semantic_request(policy, context)
+
+    assert "Deterministic structural signals are hints" in request.system_prompt
+    assert '"for-loop": 1' in request.system_prompt
+    assert '"database-query": 1' in request.system_prompt
 
 
 def test_normalizes_abstention_as_advisory_finding() -> None:

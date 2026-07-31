@@ -203,7 +203,11 @@ def semantic_cache_key(
 ) -> str:
     """Hash normalized semantic inputs without retaining raw model I/O."""
     payload = {
+        "schema_version": request.schema_version,
         "policy_id": request.policy_id,
+        "policy_version": request.policy_version,
+        "policy_contract_hash": request.policy_contract_hash,
+        "enforcement_hash": request.enforcement_hash,
         "prompt_version": request.prompt_version,
         "context_hash": request.context_hash,
         "model": model,

@@ -7,6 +7,7 @@ import pytest
 
 from conformdag.benchmark import (
     BenchmarkValidationError,
+    benchmark_identity,
     benchmark_manifest_payload,
     load_benchmark_manifest,
 )
@@ -45,6 +46,8 @@ def test_loads_and_normalizes_hashed_manifest(tmp_path: Path) -> None:
 
     assert manifest.cases[0].expected_status.value == "FAIL"
     assert benchmark_manifest_payload(manifest)["dataset_id"] == "synthetic-beta"
+    changed = manifest.model_copy(update={"policy_versions": {"AIR-DET-001": "2.0.0"}})
+    assert benchmark_identity(manifest) != benchmark_identity(changed)
 
 
 def test_rejects_changed_fixture_hash(tmp_path: Path) -> None:
