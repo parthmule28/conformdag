@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -43,10 +44,29 @@ POLICY_INSTRUCTIONS = {
 }
 
 
-def _policy_instruction(policy: Policy) -> str:
+def _policy_instruction(policy: Policy, context_text: str) -> str:
     instruction = POLICY_INSTRUCTIONS.get(policy.id, policy.invariant)
     configuration = json.dumps(policy.configuration.model_dump(mode="json"), sort_keys=True)
-    return f"{instruction}\nPolicy configuration:\n{configuration}"
+    details = f"{instruction}\nPolicy configuration:\n{configuration}"
+    if policy.id == "AIR-SEM-002":
+        raw_configuration = policy.configuration.model_dump(mode="json")
+        patterns = [str(item) for item in raw_configuration.get("signal_patterns", [])]
+        source_lines = sum(
+            1 for line in context_text.splitlines() if not line.startswith("[SOURCE ")
+        )
+        signal_counts = {
+            pattern: (
+                len(re.findall(r"\bfor\s+", context_text))
+                if pattern == "for-loop"
+                else context_text.lower().count(pattern.lower())
+            )
+            for pattern in patterns
+        }
+        details += "\nDeterministic structural signals are hints, not conclusions:\n" + json.dumps(
+            {"source_line_count": source_lines, "signal_counts": signal_counts},
+            sort_keys=True,
+        )
+    return details
 
 
 class SemanticProvider(Protocol):
@@ -62,7 +82,7 @@ class SemanticProvider(Protocol):
 def build_semantic_request(policy: Policy, context: SemanticContext) -> SemanticRequest:
     """Build a strict request with source content delimited as untrusted evidence."""
     system_prompt = DEFAULT_PROMPT_TEMPLATE.render(
-        f"{policy.invariant}\n{_policy_instruction(policy)}"
+        f"{policy.invariant}\n{_policy_instruction(policy, context.text)}"
     )
     return SemanticRequest(
         policy_id=policy.id,

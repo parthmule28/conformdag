@@ -57,6 +57,22 @@ def test_idempotence_without_evidence_abstains() -> None:
     assert "without bounded evidence" in (finding.explanation or "")
 
 
+def test_orchestration_request_includes_structural_signal_hints() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-002")
+    context = SemanticContext(
+        "[SOURCE dag.py]\nfor row in rows:\n    database-query(row)",
+        "context",
+        ("dag.py",),
+        (),
+    )
+
+    request = build_semantic_request(policy, context)
+
+    assert "Deterministic structural signals are hints" in request.system_prompt
+    assert '"for-loop": 1' in request.system_prompt
+    assert '"database-query": 1' in request.system_prompt
+
+
 def test_normalizes_abstention_as_advisory_finding() -> None:
     policy = next(item for item in _policies() if item.id == "AIR-SEM-004")
     response = SemanticResponse(
