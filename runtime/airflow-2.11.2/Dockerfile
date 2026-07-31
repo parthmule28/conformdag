@@ -9,5 +9,6 @@ USER airflow
 
 ENV AIRFLOW__CORE__LOAD_EXAMPLES=False \
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////tmp/airflow/airflow.db \
+    PYTHONPATH=/home/airflow/.local/lib/python3.12/site-packages \
     PYTHONDONTWRITEBYTECODE=1
 ENTRYPOINT ["python", "/usr/local/bin/conformdag-runtime"]
