@@ -75,6 +75,20 @@ def test_supported_profile_resolves_pinned_image_and_providers(tmp_path: Path) -
     assert manifest.provider_versions["apache-airflow-providers-google"] == "22.1.0"
 
 
+def test_legacy_profile_resolves_pinned_image_and_providers(tmp_path: Path) -> None:
+    manifest = build_runtime_manifest(
+        tmp_path,
+        ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_2_11_2),
+        ["AIR-DET-001"],
+        ["dags/**/*.py"],
+        [],
+    )
+
+    assert manifest.airflow_profile == AirflowProfile.AIRFLOW_2_11_2
+    assert manifest.image is not None and "@sha256:" in manifest.image
+    assert manifest.provider_versions["apache-airflow-providers-standard"] == "1.9.0"
+
+
 def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path) -> None:
     runner = DockerRunner()
     output = '{"observations": [{"policy_id": "AIR-DET-001", "status": "PASS"}]}'
@@ -96,8 +110,93 @@ def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path)
     assert "--network=none" in command
     assert "--read-only" in command
     assert "--user=airflow" in command
+    assert "--cap-drop=ALL" in command
+    assert "--security-opt=no-new-privileges:true" in command
+    assert "--cpus=1" in command
+    assert "--memory=512m" in command
+    assert "--pids-limit=128" in command
+    assert "/tmp:rw,noexec,nosuid,size=64m" in command  # noqa: S108 - boundary assertion
     assert command[-2:] == ["--manifest", "/conformdag/runtime-manifest.json"]
     assert mocked.call_args.kwargs["shell"] is False
+
+
+def test_runtime_import_failure_is_returned_as_structured_error(tmp_path: Path) -> None:
+    runner = DockerRunner()
+    output = (
+        '{"observations": [{"policy_id": "AIR-DET-001", "status": "ERROR", '
+        '"message": "import failed"}]}'
+    )
+    manifest = build_runtime_manifest(
+        tmp_path,
+        ProjectRuntimeConfig(enabled=True, image="airflow-custom@sha256:" + "c" * 64),
+        ["AIR-DET-001"],
+        ["dags/**/*.py"],
+        [],
+    )
+
+    with patch(
+        "conformdag.runtime.subprocess.run",
+        return_value=SimpleNamespace(stdout=output, stderr="", returncode=0),
+    ):
+        observations = runner.run_manifest(manifest, manifest.image or "", 30)
+
+    assert observations[0].status == "ERROR"
+    assert observations[0].message == "import failed"
+
+
+def test_runtime_rejects_malformed_output(tmp_path: Path) -> None:
+    runner = DockerRunner()
+    manifest = build_runtime_manifest(
+        tmp_path,
+        ProjectRuntimeConfig(enabled=True, image="airflow-custom@sha256:" + "d" * 64),
+        ["AIR-DET-001"],
+        ["dags/**/*.py"],
+        [],
+    )
+
+    with (
+        patch(
+            "conformdag.runtime.subprocess.run",
+            return_value=SimpleNamespace(stdout="not-json", stderr="", returncode=0),
+        ),
+        pytest.raises(RuntimePhaseError, match="invalid runtime observation output"),
+    ):
+        runner.run_manifest(manifest, manifest.image or "", 30)
+
+
+def test_runtime_failure_includes_container_diagnostics(tmp_path: Path) -> None:
+    runner = DockerRunner()
+    manifest = build_runtime_manifest(
+        tmp_path,
+        ProjectRuntimeConfig(enabled=True, image="airflow-custom@sha256:" + "e" * 64),
+        ["AIR-DET-001"],
+        ["dags/**/*.py"],
+        [],
+    )
+
+    with (
+        patch(
+            "conformdag.runtime.subprocess.run",
+            return_value=SimpleNamespace(stdout="", stderr="permission denied", returncode=1),
+        ),
+        pytest.raises(RuntimePhaseError, match="permission denied"),
+    ):
+        runner.run_manifest(manifest, manifest.image or "", 30)
+
+
+def test_runtime_daemon_failure_is_reported() -> None:
+    runner = DockerRunner()
+
+    with (
+        patch(
+            "conformdag.runtime.subprocess.run",
+            return_value=SimpleNamespace(
+                stdout="", stderr="Cannot connect to Docker", returncode=1
+            ),
+        ),
+        pytest.raises(RuntimePhaseError, match="Cannot connect to Docker"),
+    ):
+        runner.require_daemon()
 
 
 def test_digest_resolution_rejects_tag_only_images() -> None:

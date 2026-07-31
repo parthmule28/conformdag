@@ -9,7 +9,8 @@ from rich.console import Console
 from rich.table import Table
 
 from conformdag import __version__
-from conformdag.models import Policy, PolicyPack
+from conformdag.config import load_project_config
+from conformdag.models import AirflowProfile, Policy, PolicyPack, ProjectRuntimeConfig
 from conformdag.policy import PolicyValidationError, select_policy_pack
 from conformdag.reference import (
     EXIT_CODE_REFERENCE,
@@ -19,6 +20,7 @@ from conformdag.reference import (
     ReferenceEntry,
 )
 from conformdag.reporting import has_blocking_failures, render_html, render_sarif
+from conformdag.runtime import RuntimePhaseError, build_runtime_manifest
 from conformdag.scan import preview_model_context as build_model_context_preview
 from conformdag.scan import scan_repository
 
@@ -26,6 +28,16 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 policy_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(policy_app, name="policy")
 console = Console()
+RUNTIME_OPTION = typer.Option(
+    None,
+    "--runtime",
+    help="Enable a published runtime profile (2.11.2 or 3.3.0).",
+)
+RUNTIME_IMAGE_OPTION = typer.Option(
+    None,
+    "--runtime-image",
+    help="Enable an explicitly pinned custom runtime image.",
+)
 
 
 def _fail(error: Exception) -> NoReturn:
@@ -213,6 +225,8 @@ def scan(
     format: str = "json",
     no_evidence: bool = False,
     preview_model_context: bool = False,
+    runtime: AirflowProfile | None = RUNTIME_OPTION,
+    runtime_image: str | None = RUNTIME_IMAGE_OPTION,
 ) -> None:
     """Analyze sources and render JSON, SARIF, HTML, or terminal output."""
     root = path.resolve()
@@ -234,8 +248,24 @@ def scan(
                 )
             )
             return
+        if runtime is not None and runtime_image is not None:
+            raise RuntimePhaseError("--runtime and --runtime-image cannot be used together")
+        if runtime is not None or runtime_image is not None:
+            runtime_config = ProjectRuntimeConfig(
+                enabled=True,
+                airflow_version=runtime,
+                image=runtime_image,
+            )
+            config = load_project_config(root / "conformdag.yaml")
+            build_runtime_manifest(
+                root,
+                runtime_config,
+                [],
+                config.scan.include,
+                config.scan.exclude,
+            )
         report = scan_repository(root, selected_pack)
-    except PolicyValidationError as exc:
+    except (PolicyValidationError, RuntimePhaseError) as exc:
         _fail(exc)
     if format not in {"json", "sarif", "html", "terminal"}:
         _fail(ValueError("format must be one of: json, sarif, html, terminal"))

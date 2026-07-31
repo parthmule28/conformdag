@@ -73,6 +73,41 @@ def test_preview_model_context_is_local_and_provider_free() -> None:
     assert '"redacted_context"' in result.stdout
 
 
+def test_runtime_profile_is_explicitly_selectable() -> None:
+    result = CliRunner().invoke(app, ["scan", "--path", ".", "--runtime", "3.3.0"])
+
+    assert result.exit_code == 0
+    assert "scan complete:" in result.stderr
+
+
+def test_runtime_profile_and_custom_image_are_mutually_exclusive() -> None:
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            ".",
+            "--runtime",
+            "3.3.0",
+            "--runtime-image",
+            "airflow@sha256:" + "a" * 64,
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "cannot be used together" in result.output
+
+
+def test_custom_runtime_image_requires_digest() -> None:
+    result = CliRunner().invoke(
+        app,
+        ["scan", "--path", ".", "--runtime-image", "airflow:latest"],
+    )
+
+    assert result.exit_code == 2
+    assert "immutable sha256 digest" in result.output
+
+
 def test_policy_show_is_human_readable() -> None:
     result = CliRunner().invoke(
         app,
