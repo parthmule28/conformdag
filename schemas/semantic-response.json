@@ -8,10 +8,70 @@
       ],
       "title": "Confidence",
       "type": "string"
+    },
+    "SemanticAuditEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "criterion": {
+          "title": "Criterion",
+          "type": "string"
+        },
+        "excerpt": {
+          "maxLength": 240,
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "source_type": {
+          "enum": [
+            "source",
+            "runtime",
+            "policy",
+            "provider"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "unresolved": {
+          "default": false,
+          "title": "Unresolved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "criterion",
+        "source_type",
+        "excerpt"
+      ],
+      "title": "SemanticAuditEvidence",
+      "type": "object"
     }
   },
   "additionalProperties": false,
   "properties": {
+    "audit_evidence": {
+      "items": {
+        "$ref": "#/$defs/SemanticAuditEvidence"
+      },
+      "title": "Audit Evidence",
+      "type": "array"
+    },
+    "cache_hit": {
+      "default": false,
+      "title": "Cache Hit",
+      "type": "boolean"
+    },
     "confidence": {
       "$ref": "#/$defs/Confidence"
     },
@@ -22,6 +82,24 @@
     "explanation": {
       "title": "Explanation",
       "type": "string"
+    },
+    "latency_ms": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Latency Ms",
+      "type": "integer"
+    },
+    "pricing_provenance": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pricing Provenance"
     },
     "remediation": {
       "anyOf": [
@@ -35,6 +113,34 @@
       "default": null,
       "title": "Remediation"
     },
+    "repeatability": {
+      "default": "not-measured",
+      "enum": [
+        "not-measured",
+        "repeatable",
+        "varied"
+      ],
+      "title": "Repeatability",
+      "type": "string"
+    },
+    "retries": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Retries",
+      "type": "integer"
+    },
+    "served_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Served Model"
+    },
     "status": {
       "enum": [
         "PASS",
@@ -44,6 +150,14 @@
       ],
       "title": "Status",
       "type": "string"
+    },
+    "usage": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": "Usage",
+      "type": "object"
     }
   },
   "required": [

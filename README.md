@@ -16,7 +16,9 @@ ConformDAG is in active beta development. The current implementation includes:
 - optional BYOK semantic review through OpenAI-compatible endpoints; and
 - privacy-preserving context redaction, normalized caching, and benchmark-manifest validation.
 
-The public beta still requires the full benchmark corpus, runtime profile release work, and release automation before publication.
+The benchmark corpus, offline execution, deterministic quality gates, semantic baseline
+contracts, cache, and report generation are implemented. Runtime-profile release work,
+security automation, CI, and publication gates remain before the public beta.
 
 ## Development
 
@@ -30,13 +32,15 @@ mise run check
 The main commands are:
 
 ```bash
-uv run conformdag validate-policies --path policies/pack.yaml
-uv run conformdag list-policies --path policies/pack.yaml
-uv run conformdag explain AIR-DET-001 --path policies/pack.yaml
-uv run conformdag scan --path . --policy-pack policies/pack.yaml
+mise exec -- conformdag validate-policies --path policies/pack.yaml
+mise exec -- conformdag list-policies --path policies/pack.yaml
+mise exec -- conformdag explain AIR-DET-001 --path policies/pack.yaml
+mise exec -- conformdag scan --path . --policy-pack policies/pack.yaml
 ```
 
-See [docs/architecture.md](docs/architecture.md) for implementation boundaries and [docs/roadmap.md](docs/roadmap.md) for planned milestones.
+See [docs/user-guide.md](docs/user-guide.md) for installation and operational usage,
+[docs/architecture.md](docs/architecture.md) for implementation boundaries, and
+[docs/roadmap.md](docs/roadmap.md) for planned milestones.
 
 ## License
 

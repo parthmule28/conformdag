@@ -9,6 +9,8 @@ import pytest
 from conformdag.models import AirflowProfile, ProjectRuntimeConfig
 from conformdag.runtime import DockerRunner, RuntimePhaseError, build_runtime_manifest
 
+pytestmark = pytest.mark.runtime
+
 
 def test_runtime_requires_explicit_profile_or_custom_image(tmp_path: Path) -> None:
     with pytest.raises(RuntimePhaseError, match="requires an Airflow profile"):

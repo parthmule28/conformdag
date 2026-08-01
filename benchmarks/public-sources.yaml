@@ -1,0 +1,78 @@
+# Public sources used as provenance and pattern references for the beta corpus.
+# Source code is not copied into the synthetic release fixtures by default.
+sources:
+  - source_id: apache-airflow-2.11.2
+    kind: public
+    url: https://github.com/apache/airflow
+    revision: 2b39a518de02ca23be3b1de9fb4f8120fe18fbf5
+    paths:
+      - airflow/example_dags
+      - tests/system
+    license:
+      name: Apache-2.0
+      url: https://www.apache.org/licenses/LICENSE-2.0
+      attribution: Apache Software Foundation, Apache Airflow
+    redistribution: redistributable
+    transformation: "Reference-only official Airflow 2.11.2 examples and system tests; no source text copied into this fixture release."
+    privacy_review: "Completed 2026-08-01: reviewed as public project-owned example code; no private organizational corpus admitted."
+    secrets_review: "Completed 2026-08-01: source admission is metadata-only and no source files are redistributed here."
+  - source_id: apache-airflow-3.3.0
+    kind: public
+    url: https://github.com/apache/airflow
+    revision: f5f7953d949f61552c4feb8b3200be2a677a08c5
+    paths:
+      - airflow-core/src/airflow/example_dags
+      - providers
+    license:
+      name: Apache-2.0
+      url: https://www.apache.org/licenses/LICENSE-2.0
+      attribution: Apache Software Foundation, Apache Airflow
+    redistribution: redistributable
+    transformation: "Reference-only official Airflow 3.3.0 examples and provider system tests; no source text copied into this fixture release."
+    privacy_review: "Completed 2026-08-01: reviewed as public project-owned example code; no private organizational corpus admitted."
+    secrets_review: "Completed 2026-08-01: source admission is metadata-only and no source files are redistributed here."
+  - source_id: opendatabs-dags-airflow2
+    kind: public
+    url: https://github.com/opendatabs/dags-airflow2
+    revision: 1a13af0db434da1dfa8e6add81c1ff23fa17244c
+    paths:
+      - '*.py'
+      - helpers
+    license:
+      name: Apache-2.0
+      url: https://github.com/opendatabs/dags-airflow2/blob/main/LICENSE
+      attribution: Open Data Basel-Stadt
+    redistribution: redistributable
+    transformation: "Reference-only production-oriented open-data DAG patterns; no source text copied into this fixture release."
+    privacy_review: "Completed 2026-08-01: public repository reviewed; organization-specific identifiers are not admitted as fixtures."
+    secrets_review: "Completed 2026-08-01: source admission is metadata-only and no credentials or source files are redistributed here."
+  - source_id: mozilla-telemetry-airflow
+    kind: public
+    url: https://github.com/mozilla/telemetry-airflow
+    revision: 019aab5c1e63ca553a7b9e96b1609a6ecaa8ef3c
+    paths:
+      - dags
+      - utils
+    license:
+      name: MPL-2.0
+      url: https://www.mozilla.org/en-US/MPL/2.0/
+      attribution: Mozilla Corporation
+    redistribution: derived-only
+    transformation: "Pattern reference only; no Mozilla source, employee identifiers, or organization-specific configuration is copied into the benchmark."
+    privacy_review: "Completed 2026-08-01: public source reviewed; personal and organization-specific identifiers are excluded."
+    secrets_review: "Completed 2026-08-01: source admission is metadata-only and no credentials or source files are redistributed here."
+  - source_id: ethereum-etl-airflow
+    kind: public
+    url: https://github.com/blockchain-etl/ethereum-etl-airflow
+    revision: 27d0fb037cbe8b9ba62880f99c155823ab2e4a35
+    paths:
+      - dags
+      - tests
+    license:
+      name: MIT
+      url: https://github.com/blockchain-etl/ethereum-etl-airflow/blob/master/LICENSE
+      attribution: blockchain-etl contributors
+    redistribution: redistributable
+    transformation: "Reference-only Composer and cloud-provider DAG patterns; no source text copied into this fixture release."
+    privacy_review: "Completed 2026-08-01: public repository reviewed; external service identifiers are not admitted as fixtures."
+    secrets_review: "Completed 2026-08-01: source admission is metadata-only and no credentials or source files are redistributed here."

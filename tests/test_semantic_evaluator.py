@@ -3,7 +3,14 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from conformdag.models import Confidence, EnforcementType, Policy, SemanticRequest, SemanticResponse
+from conformdag.models import (
+    Confidence,
+    EnforcementType,
+    Policy,
+    SemanticAuditEvidence,
+    SemanticRequest,
+    SemanticResponse,
+)
 from conformdag.policy import load_policy_pack
 from conformdag.semantic import SemanticContext
 from conformdag.semantic_evaluator import (
@@ -71,6 +78,63 @@ def test_orchestration_request_includes_structural_signal_hints() -> None:
     assert "Deterministic structural signals are hints" in request.system_prompt
     assert '"for-loop": 1' in request.system_prompt
     assert '"database-query": 1' in request.system_prompt
+
+
+def test_sensitive_logging_request_redacts_before_provider_boundary() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-003")
+    context = SemanticContext(
+        "[SOURCE dag.py]\nlogging.info(token='unmasked-secret')",
+        "context",
+        ("dag.py",),
+        (),
+    )
+
+    request = build_semantic_request(policy, context)
+
+    assert "unmasked-secret" not in request.evidence
+    assert "[REDACTED]" in request.evidence
+    assert "unmasked-secret" not in request.system_prompt
+    assert "logging" in request.system_prompt
+
+
+def test_abstraction_request_uses_declared_registry_and_abstains_when_uncertain() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-004")
+    request = build_semantic_request(policy, _context())
+
+    assert "company.operators.SafePythonOperator" in request.system_prompt
+    assert "Do not infer approval from frequency or naming" in request.system_prompt
+    assert "return NEEDS_REVIEW" in request.system_prompt
+
+
+def test_semantic_finding_normalizes_audit_citations_and_marks_unknown_locations() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    response = SemanticResponse(
+        status="NEEDS_REVIEW",
+        evidence="retry evidence",
+        explanation="The retry contract is not visible.",
+        confidence=Confidence.LOW,
+        audit_evidence=[
+            SemanticAuditEvidence(
+                criterion="retry-safety",
+                source_type="source",
+                location="dag.py",
+                excerpt="retry configuration is not shown",
+            ),
+            SemanticAuditEvidence(
+                criterion="invented",
+                source_type="source",
+                location="missing.py",
+                excerpt="unsupported citation",
+            ),
+        ],
+    )
+
+    finding = semantic_finding(policy, response, _context())
+
+    assert len(finding.audit_evidence) == 2
+    assert finding.audit_evidence[0].unresolved is False
+    assert finding.audit_evidence[1].unresolved is True
+    assert finding.audit_evidence[1].location == "missing.py"
 
 
 def test_normalizes_abstention_as_advisory_finding() -> None:
