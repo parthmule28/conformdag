@@ -1,5 +1,7 @@
 """Tests for the validated Docker runtime boundary."""
 
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -169,6 +171,29 @@ def test_runtime_rejects_malformed_output(tmp_path: Path) -> None:
         pytest.raises(RuntimePhaseError, match="invalid runtime observation output"),
     ):
         runner.run_manifest(manifest, manifest.image or "", 30)
+
+
+def test_runtime_entrypoint_reserves_stdout_for_json_protocol() -> None:
+    entrypoint = Path("runtime/entrypoint.py").resolve()
+    probe = (
+        "import runpy\n"
+        f"module = runpy.run_path({str(entrypoint)!r}, run_name='runtime_probe')\n"
+        "protocol = module['_reserve_protocol_stdout']()\n"
+        "print('airflow diagnostic', flush=True)\n"
+        "protocol.write('{\"observations\": []}\\n')\n"
+        "protocol.close()\n"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == '{"observations": []}\n'
+    assert completed.stderr == "airflow diagnostic\n"
 
 
 def test_runtime_failure_includes_container_diagnostics(tmp_path: Path) -> None:
