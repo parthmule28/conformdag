@@ -87,19 +87,20 @@ jobs:
         env:
           CONFORMDAG_RUNTIME_PROFILE: ${{ matrix.profile }}
       - name: Scan image before publication
-        uses: docker/scout-action@v1
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          command: cves
-          image: local://conformdag-airflow-smoke:${{ matrix.profile }}
-          only-severities: critical,high
-          exit-code: true
-          sarif-file: scout-${{ matrix.profile }}.sarif
+          image-ref: conformdag-airflow-smoke:${{ matrix.profile }}
+          format: sarif
+          output: trivy-${{ matrix.profile }}.sarif
+          severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
+          exit-code: "1"
       - name: Upload vulnerability results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: runtime-vulnerability-results-${{ matrix.profile }}
-          path: scout-${{ matrix.profile }}.sarif
+          path: trivy-${{ matrix.profile }}.sarif
           if-no-files-found: warn
 
   runtime-images:
