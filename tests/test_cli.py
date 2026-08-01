@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+from typer.core import TyperGroup, TyperOption
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from conformdag.cli import app
@@ -138,12 +140,22 @@ def test_scan_help_exposes_single_purpose_boolean_flags() -> None:
     result = CliRunner().invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
 
     assert result.exit_code == 0
-    assert "--no-evidence" in result.stdout
-    assert "--no-no-evidence" not in result.stdout
-    assert "--preview-model-context" in result.stdout
-    assert "--no-preview-model-context" not in result.stdout
-    assert "--semantic" in result.stdout
-    assert "--semantic-structured-output" in result.stdout
+    root_command = get_command(app)
+    assert isinstance(root_command, TyperGroup)
+    scan_command = root_command.commands["scan"]
+    option_names = {
+        option_name
+        for parameter in scan_command.params
+        if isinstance(parameter, TyperOption)
+        for option_name in (*parameter.opts, *parameter.secondary_opts)
+    }
+
+    assert "--no-evidence" in option_names
+    assert "--no-no-evidence" not in option_names
+    assert "--preview-model-context" in option_names
+    assert "--no-preview-model-context" not in option_names
+    assert "--semantic" in option_names
+    assert "--semantic-structured-output" in option_names
 
 
 def test_semantic_scan_requires_environment_only_api_key() -> None:
