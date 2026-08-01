@@ -1,6 +1,7 @@
 """Tests for the opt-in semantic provider boundary."""
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import patch
 
@@ -254,7 +255,7 @@ def test_benchmark_semantic_runner_reuses_normalized_cache_and_checks_model(tmp_
             self.calls = 0
 
         def evaluate_many(
-            self, requests: list[SemanticRequest], max_concurrency: int = 4
+            self, requests: Sequence[SemanticRequest], max_concurrency: int = 4
         ) -> list[SemanticResponse]:
             self.calls += 1
             return [

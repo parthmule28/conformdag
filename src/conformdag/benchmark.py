@@ -52,6 +52,10 @@ class BenchmarkExpectedLocation(ConformModel):
     end_line: int | None = Field(default=None, ge=1)
 
 
+def _empty_source_admissions() -> list[BenchmarkSourceAdmission]:
+    return []
+
+
 class BenchmarkCase(ConformModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]+$")
     fixture: Path
@@ -82,7 +86,9 @@ class BenchmarkManifest(ConformModel):
     policy_versions: dict[str, str] = Field(default_factory=dict)
     policy_contract_hashes: dict[str, str] = Field(default_factory=dict)
     enforcement_hashes: dict[str, str] = Field(default_factory=dict)
-    source_admissions: list[BenchmarkSourceAdmission] = Field(default_factory=list)
+    source_admissions: list[BenchmarkSourceAdmission] = Field(
+        default_factory=_empty_source_admissions
+    )
     cases: list[BenchmarkCase] = Field(min_length=1)
 
 

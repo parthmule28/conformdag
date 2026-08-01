@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from conformdag.benchmark import (
+    BenchmarkCase,
     BenchmarkValidationError,
     benchmark_identity,
     benchmark_manifest_payload,
@@ -96,7 +97,7 @@ def test_synthetic_release_has_balanced_cases_and_admission_metadata() -> None:
     root = Path("benchmarks/synthetic")
     manifest = load_benchmark_manifest(root / "manifest.yaml", root)
 
-    by_policy: dict[str, list] = {}
+    by_policy: dict[str, list[BenchmarkCase]] = {}
     for case in manifest.cases:
         by_policy.setdefault(case.policy_id, []).append(case)
 
