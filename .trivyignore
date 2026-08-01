@@ -1,0 +1,7 @@
+# Ray 2.56.1 is required transitively by apache-airflow-providers-google 22.2.2.
+# It embeds Jackson 2.18.6 in the shaded ray_dist.jar. The current Ray release has
+# no build with the patched Jackson version; this narrowly scoped exception is for
+# the embedded library only and must be removed when Ray publishes a patched build.
+CVE-2026-54512
+CVE-2026-54513
+GHSA-r7wm-3cxj-wff9

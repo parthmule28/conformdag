@@ -60,7 +60,11 @@ accuracy baseline. Leave it disabled when those credentials and costs are not ap
 - [ ] Merge the reviewed release-preparation pull request, then create and push
   `v0.1.0-beta.1` from that exact `main` commit.
 - [ ] Confirm the tag workflow's attestations, image SBOMs, and high/critical image scan
-  results before approving the final PyPI deployment.
+  results before approving the final PyPI deployment. The Trivy gate ignores only findings
+  with no upstream fixed version; fixed high/critical findings remain blocking except for
+  the three documented Jackson CVEs in Ray's shaded `ray_dist.jar`, which are temporarily
+  allowlisted because the required Airflow Google provider has no published Ray build with
+  the patched Jackson dependency.
 - [ ] After publication, confirm the GHCR 3.3.0 runtime package is public and can be
   pulled anonymously; the supported `scan --runtime` profile depends on anonymous digest
   resolution.

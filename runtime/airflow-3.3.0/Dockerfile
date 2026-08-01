@@ -5,7 +5,17 @@ COPY runtime/airflow-3.3.0/constraints.txt /opt/conformdag/constraints.txt
 RUN apt-get update \
     && ACCEPT_EULA=Y apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/* \
-    && python -m pip install --no-cache-dir -r /opt/conformdag/constraints.txt
+    && sed '/^apache-airflow-providers-google==/d' /opt/conformdag/constraints.txt > /tmp/conformdag-base-constraints.txt \
+    && python -m pip install --no-cache-dir -r /tmp/conformdag-base-constraints.txt \
+    && python -m pip install --no-cache-dir --upgrade \
+        apache-airflow==3.3.0 \
+        apache-airflow-providers-google==22.2.2 \
+        google-cloud-aiplatform==1.155.0 \
+        GitPython==3.1.55 \
+        litellm==1.84.1 \
+        pyasn1==0.6.4 \
+    && rm -f /home/airflow/.local/bin/uv /home/airflow/.local/bin/uvx \
+    && rm -f /tmp/conformdag-base-constraints.txt /opt/conformdag/constraints.txt
 COPY runtime/entrypoint.py /usr/local/bin/conformdag-runtime
 RUN chmod 0555 /usr/local/bin/conformdag-runtime
 USER airflow

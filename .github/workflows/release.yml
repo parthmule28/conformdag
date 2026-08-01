@@ -94,6 +94,8 @@ jobs:
           output: trivy-${{ matrix.profile }}.sarif
           severity: CRITICAL,HIGH
           limit-severities-for-sarif: true
+          ignore-unfixed: true
+          trivyignores: .trivyignore
           exit-code: "1"
       - name: Upload vulnerability results
         if: always()

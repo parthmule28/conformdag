@@ -81,7 +81,7 @@ def test_supported_profile_resolves_pinned_image_and_providers(tmp_path: Path) -
 
     assert manifest.supported_profile is True
     assert manifest.image == "ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1"
-    assert manifest.provider_versions["apache-airflow-providers-google"] == "22.1.0"
+    assert manifest.provider_versions["apache-airflow-providers-google"] == "22.2.2"
 
 
 def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path) -> None:
