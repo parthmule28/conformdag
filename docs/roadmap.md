@@ -8,7 +8,7 @@
 - [x] Wire opt-in BYOK semantic evaluation for four semantic policies.
 - [x] Build a 240-case deterministic benchmark and CI release gates.
 - [x] Configure protected-main review, PyPI trusted publishing, and staged release jobs.
-- [ ] Record provider-backed semantic baseline measurements and known limitations.
+- [x] Record provider-backed integration measurements and semantic accuracy limitations.
 - [ ] Publish `0.1.0b1` after all release evidence is reviewed.
 
 ## Planned follow-up

@@ -2,7 +2,14 @@
 
 ## Installation and setup
 
-The beta release candidate currently runs from a checkout:
+Run the pinned public beta without installing it globally:
+
+```bash
+mise use python@3.12 uv@0.12.0
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag version
+```
+
+Contributors working from a checkout use the locked development environment:
 
 ```bash
 mise install
@@ -10,17 +17,10 @@ mise run setup
 mise exec -- uv run conformdag version
 ```
 
-After `0.1.0b1` is published, it can also be run without cloning through mise's pinned
-uv installation:
-
-```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag version
-```
-
 Initialize ConformDAG metadata in an Airflow repository:
 
 ```bash
-mise exec -- uv run conformdag init
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag init
 ```
 
 This creates `conformdag.yaml`, a policy-pack scaffold, authoring standards, and an
@@ -29,12 +29,12 @@ empty suppression file. Review and populate the policy pack before scanning.
 ## Policy-pack review
 
 ```bash
-mise exec -- uv run conformdag validate-policies --path policies/pack.yaml
-mise exec -- uv run conformdag list-policies --path policies/pack.yaml
-mise exec -- uv run conformdag policy show AIR-DET-001 --path policies/pack.yaml
-mise exec -- uv run conformdag policy review AIR-DET-001 --path policies/pack.yaml
-mise exec -- uv run conformdag policy explain AIR-DET-001 --path policies/pack.yaml
-mise exec -- uv run conformdag policy reference all
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag validate-policies --path policies/pack.yaml
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag list-policies --path policies/pack.yaml
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy show AIR-DET-001 --path policies/pack.yaml
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy review AIR-DET-001 --path policies/pack.yaml
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy explain AIR-DET-001 --path policies/pack.yaml
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy reference all
 ```
 
 `show` is a concise human summary. `review` adds provenance, configuration,
@@ -58,15 +58,16 @@ arguments, or cache files.
 The default scan never imports repository Python and never contacts a provider:
 
 ```bash
-mise exec -- uv run conformdag scan --path . --policy-pack policies/pack.yaml
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+  --path . --policy-pack policies/pack.yaml
 ```
 
 JSON is the canonical machine-readable output. Other projections are:
 
 ```bash
-mise exec -- uv run conformdag scan --path . --format terminal
-mise exec -- uv run conformdag scan --path . --format sarif --output report.sarif
-mise exec -- uv run conformdag scan --path . --format html --output report.html
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --format terminal
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --format sarif --output report.sarif
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --format html --output report.html
 ```
 
 Use `--no-evidence` when a rendered artifact must exclude source excerpts. Generated
@@ -107,7 +108,7 @@ the checkout:
 
 ```bash
 infisical run --env=dev --path=/ -- \
-  mise exec -- uv run conformdag scan \
+  mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
   --path . \
   --semantic \
   --semantic-base-url https://openrouter.ai/api/v1 \
@@ -122,8 +123,9 @@ API keys or raw provider payloads. Use `--preview-model-context` to inspect exac
 would be sent without calling a provider.
 
 Provider-backed accuracy measurements are not part of the current public corpus. The
-deterministic benchmark therefore reports semantic baselines as `not_executed`; see the
-[release checklist](release.md) for the evidence still required before publication.
+deterministic benchmark therefore reports semantic baselines as `not_executed`. Recorded
+provider smoke measurements cover integration, provenance, schema rejection, and cache
+behavior—not model accuracy; see the [release checklist](release.md).
 
 ## Runtime inspection
 
@@ -132,8 +134,8 @@ manifest. Supported profiles use no network, a read-only repository and root fil
 a non-root user, dropped capabilities, `no-new-privileges`, and bounded resources:
 
 ```bash
-mise exec -- uv run conformdag scan --path . --runtime 3.3.0
-mise exec -- uv run conformdag scan --path . --runtime 2.11.2
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --runtime 3.3.0
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --runtime 2.11.2
 ```
 
 The profile image is pulled and resolved to an immutable digest before execution. Airflow
@@ -155,7 +157,7 @@ mise run privacy
 Save deterministic benchmark evidence with:
 
 ```bash
-mise exec -- uv run conformdag benchmark benchmarks/synthetic \
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag benchmark benchmarks/synthetic \
   --policy-pack policies/pack.yaml \
   --output .conformdag/benchmark-report.json \
   --technical-report .conformdag/benchmark-report.md
