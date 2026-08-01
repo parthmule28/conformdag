@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from time import sleep
+from time import monotonic, sleep
 from typing import Any, cast
 
 import httpx
@@ -132,6 +132,7 @@ class OpenAICompatibleProvider:
         self._client = client
 
     def evaluate(self, request: SemanticRequest) -> SemanticResponse:
+        started = monotonic()
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -183,7 +184,20 @@ class OpenAICompatibleProvider:
                     raise SemanticProviderError(
                         f"provider served model {served_model!r}, requested {self.model!r}"
                     )
-                return result.model_copy(update={"served_model": served_model})
+                raw_usage = body.get("usage", {})
+                usage = {
+                    str(key): int(value)
+                    for key, value in raw_usage.items()
+                    if isinstance(value, int) and value >= 0
+                }
+                return result.model_copy(
+                    update={
+                        "served_model": served_model,
+                        "usage": usage,
+                        "retries": attempts,
+                        "latency_ms": max(0, round((monotonic() - started) * 1000)),
+                    }
+                )
             except (KeyError, IndexError, TypeError, ValueError) as exc:
                 raise SemanticProviderError(f"invalid structured provider response: {exc}") from exc
 
@@ -246,7 +260,11 @@ class SemanticCache:
         try:
             payload: Any = json.loads(self.path.read_text(encoding="utf-8"))
             value = payload.get(key)
-            return SemanticResponse.model_validate(value) if value else None
+            return (
+                SemanticResponse.model_validate(value).model_copy(update={"cache_hit": True})
+                if value
+                else None
+            )
         except (OSError, TypeError, ValueError):
             return None
 

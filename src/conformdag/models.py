@@ -353,6 +353,12 @@ class SemanticResponse(ConformModel):
     confidence: Confidence
     audit_evidence: list[SemanticAuditEvidence] = Field(default_factory=_empty_audit_evidence)
     served_model: str | None = None
+    usage: dict[str, NonNegativeInt] = Field(default_factory=dict)
+    retries: NonNegativeInt = 0
+    latency_ms: NonNegativeInt = 0
+    cache_hit: bool = False
+    repeatability: Literal["not-measured", "repeatable", "varied"] = "not-measured"
+    pricing_provenance: str | None = None
 
 
 class ProjectScanConfig(ConformModel):

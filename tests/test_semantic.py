@@ -89,7 +89,10 @@ def test_cache_stores_only_normalized_response(tmp_path: Path) -> None:
 
     cache.put(key, response)
 
-    assert cache.get(key) == response
+    cached = cache.get(key)
+    assert cached is not None
+    assert cached.model_copy(update={"cache_hit": False}) == response
+    assert cached.cache_hit is True
     stored = (tmp_path / "semantic-cache.json").read_text(encoding="utf-8")
     assert "system_prompt" not in stored
     assert "safe evidence" not in stored
@@ -125,6 +128,7 @@ def test_native_structured_output_is_opt_in_and_schema_constrained() -> None:
         200,
         json={
             "model": "test-model",
+            "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20},
             "choices": [
                 {
                     "message": {
@@ -148,6 +152,9 @@ def test_native_structured_output_is_opt_in_and_schema_constrained() -> None:
         result = provider.evaluate(request)
 
     assert result.served_model == "test-model"
+    assert result.usage["total_tokens"] == 20
+    assert result.retries == 0
+    assert result.latency_ms >= 0
     payload = mocked.call_args.args[0]
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
@@ -182,6 +189,26 @@ def test_served_model_mismatch_is_rejected() -> None:
         pytest.raises(SemanticProviderError, match="served model"),
     ):
         provider.evaluate(_request())
+
+
+def test_cache_hit_is_recorded_without_raw_model_io(tmp_path: Path) -> None:
+    request = _request()
+    cache = SemanticCache(tmp_path / "semantic-cache.json")
+    response = SemanticResponse(
+        status="PASS",
+        evidence="bounded evidence",
+        explanation="safe",
+        confidence=Confidence.HIGH,
+    )
+
+    cache.put("cache-key", response)
+    cached = cache.get("cache-key")
+
+    assert cached is not None
+    assert cached.cache_hit is True
+    stored = (tmp_path / "semantic-cache.json").read_text(encoding="utf-8")
+    assert request.evidence not in stored
+    assert cached.pricing_provenance is None
 
 
 def test_provider_retries_transient_failure_and_preserves_evidence_boundary() -> None:

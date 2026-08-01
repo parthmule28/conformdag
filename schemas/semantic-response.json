@@ -67,6 +67,11 @@
       "title": "Audit Evidence",
       "type": "array"
     },
+    "cache_hit": {
+      "default": false,
+      "title": "Cache Hit",
+      "type": "boolean"
+    },
     "confidence": {
       "$ref": "#/$defs/Confidence"
     },
@@ -77,6 +82,24 @@
     "explanation": {
       "title": "Explanation",
       "type": "string"
+    },
+    "latency_ms": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Latency Ms",
+      "type": "integer"
+    },
+    "pricing_provenance": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pricing Provenance"
     },
     "remediation": {
       "anyOf": [
@@ -89,6 +112,22 @@
       ],
       "default": null,
       "title": "Remediation"
+    },
+    "repeatability": {
+      "default": "not-measured",
+      "enum": [
+        "not-measured",
+        "repeatable",
+        "varied"
+      ],
+      "title": "Repeatability",
+      "type": "string"
+    },
+    "retries": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Retries",
+      "type": "integer"
     },
     "served_model": {
       "anyOf": [
@@ -111,6 +150,14 @@
       ],
       "title": "Status",
       "type": "string"
+    },
+    "usage": {
+      "additionalProperties": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": "Usage",
+      "type": "object"
     }
   },
   "required": [
