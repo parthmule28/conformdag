@@ -2,129 +2,176 @@
 
 ## Installation and setup
 
-ConformDAG is currently developed from a checkout. Install and lock the project
-through mise:
+The beta release candidate currently runs from a checkout:
 
-    mise install
-    mise run setup
+```bash
+mise install
+mise run setup
+mise exec -- uv run conformdag version
+```
 
-The supported local entry point is mise exec -- conformdag ...; mise owns the
-Python, uv, Ruff, Pyright, OpenSpec, and security-tool versions.
+After `0.1.0b1` is published, it can also be run without cloning through mise's pinned
+uv installation:
 
-Initialize a new project:
+```bash
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag version
+```
 
-    mise exec -- conformdag init
+Initialize ConformDAG metadata in an Airflow repository:
 
-This creates conformdag.yaml, a policy-pack scaffold, authoring standards, and
-an empty suppression file. Review and populate the policy pack before scanning.
+```bash
+mise exec -- uv run conformdag init
+```
+
+This creates `conformdag.yaml`, a policy-pack scaffold, authoring standards, and an
+empty suppression file. Review and populate the policy pack before scanning.
 
 ## Policy-pack review
 
-Validate provenance and schema:
+```bash
+mise exec -- uv run conformdag validate-policies --path policies/pack.yaml
+mise exec -- uv run conformdag list-policies --path policies/pack.yaml
+mise exec -- uv run conformdag policy show AIR-DET-001 --path policies/pack.yaml
+mise exec -- uv run conformdag policy review AIR-DET-001 --path policies/pack.yaml
+mise exec -- uv run conformdag policy explain AIR-DET-001 --path policies/pack.yaml
+mise exec -- uv run conformdag policy reference all
+```
 
-    mise exec -- conformdag validate-policies --path policies/pack.yaml
-
-List active and inactive policies:
-
-    mise exec -- conformdag list-policies --path policies/pack.yaml
-
-Use policy show for a concise human summary, policy review for provenance,
-configuration, exceptions, and enforcement details, and policy explain for the
-complete machine-readable JSON contract:
-
-    mise exec -- conformdag policy show AIR-DET-001 --path policies/pack.yaml
-    mise exec -- conformdag policy review AIR-DET-001 --path policies/pack.yaml
-    mise exec -- conformdag policy explain AIR-DET-001 --path policies/pack.yaml
+`show` is a concise human summary. `review` adds provenance, configuration,
+exceptions, and enforcement details. `explain` emits the complete machine-readable JSON
+contract. `reference` documents outcomes, reports, runtime terms, and exit codes.
 
 ## Configuration precedence
 
-Defaults are built into the package. The precedence order is:
+Configuration resolves in this order:
 
-1. command-line arguments;
-2. conformdag.yaml;
-3. environment-only secrets such as CONFORMDAG_MODEL_API_KEY;
+1. command-line options;
+2. `conformdag.yaml`;
+3. environment-only secrets such as `CONFORMDAG_MODEL_API_KEY`;
 4. package defaults.
 
-The project configuration controls scan include/exclude patterns, policy-pack
-selection, suppressions, semantic budgets, and runtime settings. Credentials
-are never read from YAML, policy packs, source files, or cache files.
+Credentials are never accepted from YAML, policy packs, source files, command-line
+arguments, or cache files.
 
-## Scanning and reports
+## Offline scans and reports
 
-Run the default offline source scan:
+The default scan never imports repository Python and never contacts a provider:
 
-    mise exec -- conformdag scan --path . --policy-pack policies/pack.yaml --format json
+```bash
+mise exec -- uv run conformdag scan --path . --policy-pack policies/pack.yaml
+```
 
-The canonical JSON report is machine-readable. Terminal output is for triage,
-SARIF is for code-scanning integrations, and HTML is a self-contained offline
-artifact:
+JSON is the canonical machine-readable output. Other projections are:
 
-    mise exec -- conformdag scan --path . --policy-pack policies/pack.yaml --format terminal
-    mise exec -- conformdag scan --path . --policy-pack policies/pack.yaml --format sarif --output report.sarif
-    mise exec -- conformdag scan --path . --policy-pack policies/pack.yaml --format html --output report.html
+```bash
+mise exec -- uv run conformdag scan --path . --format terminal
+mise exec -- uv run conformdag scan --path . --format sarif --output report.sarif
+mise exec -- uv run conformdag scan --path . --format html --output report.html
+```
 
-Use the built-in reference to explain outcomes, exit codes, runtime contracts,
-and report formats:
+Use `--no-evidence` when a rendered artifact must exclude source excerpts. Generated
+reports should be treated as potentially sensitive even though credential-like values
+are redacted.
 
-    mise exec -- conformdag policy reference all
+Exit codes are `0` for a complete successful run, `1` for a complete blocking policy
+failure, `2` for invalid input/configuration, and `3` for an incomplete or failed phase.
 
-Exit codes are 0 for a complete successful run, 1 for a complete blocking
-failure, 2 for invalid input, and 3 for an incomplete or failed evaluation.
+## Suppressions
 
-## Semantic privacy and baselines
+A suppression is a time-bounded, owned exception for one exact finding fingerprint and
+policy ID. It requires a reason and expiry. Expired suppressions reopen findings;
+duplicate or unmatched records are reported so stale exceptions remain auditable. A
+suppression does not change the policy contract or hide unrelated future findings.
 
-Semantic evaluation is opt-in and BYOK. It is disabled by default. Before any
-provider-backed evaluation, ConformDAG selects bounded context, redacts
-credential-like values locally, hashes the context and prompt, and wraps
-repository text as untrusted evidence. Raw prompts and responses are not
-written to the normalized cache by default.
+## Semantic review
 
-The semantic provider requires an exact configured model and an environment
-variable containing the API key. Unknown pricing remains unknown. The
-benchmark reports provider-dependent baselines as not_executed unless they are
-explicitly configured.
+Semantic evaluation is BYOK, opt-in, and networked. Configure non-secret settings in
+`conformdag.yaml`:
 
-## Runtime trust boundary
+```yaml
+semantic:
+  enabled: false
+  base_url: https://openrouter.ai/api/v1
+  model: deepseek/deepseek-v4-flash
+  api_key_env: CONFORMDAG_MODEL_API_KEY
+  temperature: 0.0
+  max_input_tokens: 32000
+  max_output_tokens: 4000
+  max_concurrency: 4
+  native_structured_output: true
+  cache_path: .conformdag/semantic-cache.json
+```
 
-Runtime mode is an explicit Docker execution boundary for Airflow import
-validation. The host validates a runtime manifest first; the image then reads
-the repository through a read-only mount. Supported profiles disable network
-access, drop capabilities, use a non-root user, use a read-only root
-filesystem, and apply CPU, memory, process, temporary-storage, and wall-clock
-limits. This is a constrained boundary, not a complete security sandbox.
+Inject the key into only the child process. For the Infisical project already linked to
+the checkout:
 
-Select a published profile explicitly:
+```bash
+infisical run --env=dev --path=/ -- \
+  mise exec -- uv run conformdag scan \
+  --path . \
+  --semantic \
+  --semantic-base-url https://openrouter.ai/api/v1 \
+  --semantic-model deepseek/deepseek-v4-flash \
+  --semantic-structured-output
+```
 
-    mise exec -- conformdag scan --path . --policy-pack policies/pack.yaml --runtime 3.3.0
+Before each request, ConformDAG bounds and redacts context locally. Repository text is
+delimited as untrusted evidence, model tools are disabled, and responses must satisfy a
+strict schema. The normalized cache stores validated decisions and audit metadata—not
+API keys or raw provider payloads. Use `--preview-model-context` to inspect exactly what
+would be sent without calling a provider.
 
-Airflow 3.3.0 is the maintained profile. Airflow 2.11.2 is retained as a
-legacy compatibility profile and is labelled EOL. Custom images are opt-in,
-must be explicitly supplied, and receive no supported-profile compatibility
-guarantee.
+Provider-backed accuracy measurements are not part of the current public corpus. The
+deterministic benchmark therefore reports semantic baselines as `not_executed`; see the
+[release checklist](release.md) for the evidence still required before publication.
 
-## Offline benchmark
+## Runtime inspection
 
-The deterministic benchmark verifies fixture hashes before non-executing
-analysis and does not contact a provider:
+Runtime mode imports DAGs inside a constrained Docker container after validating a host
+manifest. Supported profiles use no network, a read-only repository and root filesystem,
+a non-root user, dropped capabilities, `no-new-privileges`, and bounded resources:
 
-    mise run benchmark
+```bash
+mise exec -- uv run conformdag scan --path . --runtime 3.3.0
+mise exec -- uv run conformdag scan --path . --runtime 2.11.2
+```
 
-Save machine-readable and human-readable reports:
+The profile image is pulled and resolved to an immutable digest before execution. Airflow
+3.3.0 is maintained; 2.11.2 is an EOL compatibility profile. Docker and the selected
+image are trusted dependencies, so this boundary is not a perfect sandbox. A custom
+runtime image is unsupported and must be supplied by digest with `--runtime-image`.
 
-    mise exec -- conformdag benchmark benchmarks/synthetic \
-      --policy-pack policies/pack.yaml \
-      --output .conformdag/benchmark-report.json \
-      --technical-report .conformdag/benchmark-report.md
+## Benchmarks and local gates
 
-The report includes dataset identity, provenance, per-policy metrics, quality
-gates, operational fields, cache state, and explicit status for unexecuted
-semantic baselines.
+```bash
+mise run check
+mise run benchmark
+mise run test:coverage
+mise run schema
+mise run security
+mise run privacy
+```
 
-## Limitations
+Save deterministic benchmark evidence with:
 
-ConformDAG does not execute repository Python source in the default scan, does
-not claim Docker to be a perfect sandbox, and does not infer organizational
-approval from public DAG frequency. Semantic results remain advisory unless a
-policy explicitly defines blocking behavior. Policy authoring, distribution,
-multi-user roles, and centralized synchronization are deferred to a follow-up
-change.
+```bash
+mise exec -- uv run conformdag benchmark benchmarks/synthetic \
+  --policy-pack policies/pack.yaml \
+  --output .conformdag/benchmark-report.json \
+  --technical-report .conformdag/benchmark-report.md
+```
+
+The checked-in benchmark verifies fixture hashes, provenance, and labels before running
+240 offline cases. It reports per-policy and aggregate quality metrics plus explicit
+`null`/provenance values for measurements unavailable without a semantic corpus or
+provider telemetry.
+
+## Current limitations
+
+- The default scanner intentionally supports a bounded subset of Python/Airflow syntax;
+  unresolved dynamic behavior becomes review evidence rather than guessed execution.
+- Runtime mode requires Docker and does not replace review of untrusted code.
+- Semantic findings depend on the configured provider and remain advisory unless their
+  policy contract declares blocking behavior.
+- Interactive policy authoring, signed policy distribution, central synchronization,
+  multi-user roles, and dashboards are follow-up capabilities.

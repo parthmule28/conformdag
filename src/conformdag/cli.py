@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from typing import NoReturn
+from urllib.parse import urlsplit
 
 import typer
 from rich.console import Console
@@ -14,8 +15,14 @@ from conformdag.benchmark import (
     render_benchmark_report,
     run_deterministic_benchmark,
 )
-from conformdag.config import load_project_config
-from conformdag.models import AirflowProfile, Policy, PolicyPack, ProjectRuntimeConfig
+from conformdag.config import load_project_config, semantic_api_key
+from conformdag.models import (
+    AirflowProfile,
+    FindingStatus,
+    Policy,
+    PolicyPack,
+    RunIssue,
+)
 from conformdag.policy import PolicyValidationError, select_policy_pack
 from conformdag.reference import (
     EXIT_CODE_REFERENCE,
@@ -24,10 +31,11 @@ from conformdag.reference import (
     RUNTIME_REFERENCE,
     ReferenceEntry,
 )
-from conformdag.reporting import has_blocking_failures, render_html, render_sarif
-from conformdag.runtime import RuntimePhaseError, build_runtime_manifest
+from conformdag.reporting import has_blocking_failures, normalize_report, render_html, render_sarif
+from conformdag.runtime import RuntimePhaseError, build_runtime_manifest, execute_runtime
 from conformdag.scan import preview_model_context as build_model_context_preview
 from conformdag.scan import scan_repository
+from conformdag.semantic import CachedSemanticProvider, OpenAICompatibleProvider, SemanticCache
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 policy_app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -43,6 +51,36 @@ RUNTIME_IMAGE_OPTION = typer.Option(
     "--runtime-image",
     help="Enable an explicitly pinned custom runtime image.",
 )
+NO_EVIDENCE_OPTION = typer.Option(
+    False,
+    "--no-evidence",
+    help="Remove source evidence from rendered findings.",
+)
+PREVIEW_MODEL_CONTEXT_OPTION = typer.Option(
+    False,
+    "--preview-model-context",
+    help="Print the redacted semantic context without calling a provider.",
+)
+SEMANTIC_OPTION = typer.Option(
+    None,
+    "--semantic/--no-semantic",
+    help="Enable or disable BYOK semantic evaluation (defaults to project configuration).",
+)
+SEMANTIC_BASE_URL_OPTION = typer.Option(
+    None,
+    "--semantic-base-url",
+    help="Override the configured OpenAI-compatible API base URL.",
+)
+SEMANTIC_MODEL_OPTION = typer.Option(
+    None,
+    "--semantic-model",
+    help="Override the exact configured semantic model ID.",
+)
+SEMANTIC_STRUCTURED_OUTPUT_OPTION = typer.Option(
+    None,
+    "--semantic-structured-output/--no-semantic-structured-output",
+    help="Enable or disable provider-native strict JSON Schema output.",
+)
 BENCHMARK_PATH_ARGUMENT = typer.Argument(Path("benchmarks/synthetic"))
 BENCHMARK_POLICY_PACK_OPTION = typer.Option(Path("policies/pack.yaml"), "--policy-pack")
 BENCHMARK_OUTPUT_OPTION = typer.Option(None, "--output", help="Write the JSON report to this path.")
@@ -54,6 +92,15 @@ BENCHMARK_MARKDOWN_OPTION = typer.Option(
 def _fail(error: Exception) -> NoReturn:
     typer.echo(f"error: {error}", err=True)
     raise typer.Exit(code=2)
+
+
+def _validate_semantic_base_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if not parsed.hostname or parsed.scheme not in {"http", "https"}:
+        raise ValueError("semantic base URL must be an absolute HTTP(S) URL")
+    if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("semantic base URL must use HTTPS except for a loopback endpoint")
+    return value
 
 
 @app.command("init")
@@ -234,17 +281,36 @@ def scan(
     policy_pack: Path | None = None,
     output: Path | None = None,
     format: str = "json",
-    no_evidence: bool = False,
-    preview_model_context: bool = False,
+    no_evidence: bool = NO_EVIDENCE_OPTION,
+    preview_model_context: bool = PREVIEW_MODEL_CONTEXT_OPTION,
     runtime: AirflowProfile | None = RUNTIME_OPTION,
     runtime_image: str | None = RUNTIME_IMAGE_OPTION,
+    semantic: bool | None = SEMANTIC_OPTION,
+    semantic_base_url: str | None = SEMANTIC_BASE_URL_OPTION,
+    semantic_model: str | None = SEMANTIC_MODEL_OPTION,
+    semantic_structured_output: bool | None = SEMANTIC_STRUCTURED_OUTPUT_OPTION,
 ) -> None:
     """Analyze sources and render JSON, SARIF, HTML, or terminal output."""
+    if format not in {"json", "sarif", "html", "terminal"}:
+        _fail(ValueError("format must be one of: json, sarif, html, terminal"))
+    if format == "html" and output is None:
+        _fail(ValueError("HTML output requires --output"))
+    if format == "terminal" and output is not None:
+        _fail(ValueError("terminal output cannot be written with --output"))
+    if preview_model_context and (
+        runtime is not None or runtime_image is not None or semantic is True or output is not None
+    ):
+        _fail(
+            ValueError(
+                "--preview-model-context cannot be combined with runtime, semantic, or output"
+            )
+        )
     root = path.resolve()
     selected_pack = (
         (root / policy_pack) if policy_pack and not policy_pack.is_absolute() else policy_pack
     )
     try:
+        config = load_project_config(root / "conformdag.yaml")
         if preview_model_context:
             preview = build_model_context_preview(root, selected_pack)
             typer.echo(
@@ -261,13 +327,16 @@ def scan(
             return
         if runtime is not None and runtime_image is not None:
             raise RuntimePhaseError("--runtime and --runtime-image cannot be used together")
+        runtime_config = config.runtime
         if runtime is not None or runtime_image is not None:
-            runtime_config = ProjectRuntimeConfig(
-                enabled=True,
-                airflow_version=runtime,
-                image=runtime_image,
+            runtime_config = runtime_config.model_copy(
+                update={
+                    "enabled": True,
+                    "airflow_version": runtime,
+                    "image": runtime_image,
+                }
             )
-            config = load_project_config(root / "conformdag.yaml")
+        if runtime_config.enabled:
             build_runtime_manifest(
                 root,
                 runtime_config,
@@ -275,22 +344,137 @@ def scan(
                 config.scan.include,
                 config.scan.exclude,
             )
-        report = scan_repository(root, selected_pack)
-    except (PolicyValidationError, RuntimePhaseError) as exc:
-        _fail(exc)
-    if format not in {"json", "sarif", "html", "terminal"}:
-        _fail(ValueError("format must be one of: json, sarif, html, terminal"))
-    if format == "html" and output is None:
-        _fail(ValueError("HTML output requires --output"))
-    if format == "terminal" and output is not None:
-        _fail(ValueError("terminal output cannot be written with --output"))
 
+        semantic_enabled = config.semantic.enabled if semantic is None else semantic
+        provider = None
+        provider_name = None
+        selected_semantic_model = semantic_model or config.semantic.model
+        native_structured_output = (
+            config.semantic.native_structured_output
+            if semantic_structured_output is None
+            else semantic_structured_output
+        )
+        if semantic_enabled:
+            selected_base_url = semantic_base_url or config.semantic.base_url
+            if not selected_base_url:
+                raise ValueError(
+                    "semantic evaluation requires semantic.base_url or --semantic-base-url"
+                )
+            selected_base_url = _validate_semantic_base_url(selected_base_url)
+            if not selected_semantic_model:
+                raise ValueError("semantic evaluation requires semantic.model or --semantic-model")
+            api_key = semantic_api_key(config)
+            if not api_key:
+                raise ValueError(
+                    f"semantic evaluation requires environment variable "
+                    f"{config.semantic.api_key_env}"
+                )
+            direct_provider = OpenAICompatibleProvider(
+                selected_base_url,
+                selected_semantic_model,
+                api_key,
+                native_structured_output=native_structured_output,
+            )
+            cache_path = config.semantic.cache_path
+            if not cache_path.is_absolute():
+                cache_path = root / cache_path
+            provider = CachedSemanticProvider(
+                direct_provider,
+                SemanticCache(cache_path),
+                selected_semantic_model,
+                {
+                    "temperature": config.semantic.temperature,
+                    "max_output_tokens": config.semantic.max_output_tokens,
+                    "native_structured_output": native_structured_output,
+                },
+            )
+            provider_name = urlsplit(selected_base_url).netloc or selected_base_url
+
+        report = scan_repository(
+            root,
+            selected_pack,
+            semantic_provider=provider,
+            semantic_provider_name=provider_name,
+            semantic_model=selected_semantic_model if semantic_enabled else None,
+            semantic_native_structured_output=(
+                native_structured_output if semantic_enabled else None
+            ),
+            airflow_profile=runtime_config.airflow_version if runtime_config.enabled else None,
+        )
+    except (PolicyValidationError, RuntimePhaseError, ValueError) as exc:
+        _fail(exc)
+
+    if runtime_config.enabled:
+        try:
+            observations, image_digest = execute_runtime(
+                root,
+                runtime_config,
+                sorted(set(report.policies_evaluated + report.policies_skipped)),
+                config.scan.include,
+                config.scan.exclude,
+            )
+            runtime_issues = [
+                RunIssue(
+                    code="RUNTIME_OBSERVATION_ERROR",
+                    message=observation.message or "runtime analysis returned ERROR",
+                    phase="runtime",
+                    fatal=True,
+                )
+                for observation in observations
+                if observation.status is FindingStatus.ERROR
+            ]
+            report = report.model_copy(
+                update={
+                    "complete": report.complete and not runtime_issues,
+                    "runtime_observations": observations,
+                    "issues": [*report.issues, *runtime_issues],
+                    "run": report.run.model_copy(
+                        update={
+                            "runtime_profile": runtime_config.airflow_version,
+                            "runtime_image_digest": image_digest,
+                            "resolved_configuration": {
+                                **report.run.resolved_configuration,
+                                "runtime": {
+                                    "enabled": True,
+                                    "airflow_profile": (
+                                        runtime_config.airflow_version.value
+                                        if runtime_config.airflow_version is not None
+                                        else None
+                                    ),
+                                    "supported_profile": (
+                                        runtime_config.airflow_version is not None
+                                    ),
+                                    "network_enabled": runtime_config.network_enabled,
+                                    "timeout_seconds": runtime_config.timeout_seconds,
+                                },
+                            },
+                        }
+                    ),
+                }
+            )
+        except RuntimePhaseError as exc:
+            report = report.model_copy(
+                update={
+                    "complete": False,
+                    "issues": [
+                        *report.issues,
+                        RunIssue(
+                            code="RUNTIME_EXECUTION_ERROR",
+                            message=str(exc),
+                            phase="runtime",
+                            fatal=True,
+                        ),
+                    ],
+                }
+            )
+        report = normalize_report(report)
     output_report = report
     if no_evidence:
         output_report = report.model_copy(
             update={
                 "findings": [
-                    finding.model_copy(update={"evidence": None}) for finding in report.findings
+                    finding.model_copy(update={"evidence": None, "audit_evidence": []})
+                    for finding in report.findings
                 ]
             }
         )
@@ -316,9 +500,11 @@ def scan(
         f"{len(report.files_scanned)} files, {len(report.findings)} findings",
         err=True,
     )
-    if report.issues:
+    if any(issue.fatal for issue in report.issues):
         raise typer.Exit(code=3)
     if has_blocking_failures(report):
+        raise typer.Exit(code=1)
+    if any(observation.status is FindingStatus.FAIL for observation in report.runtime_observations):
         raise typer.Exit(code=1)
 
 

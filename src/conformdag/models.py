@@ -30,6 +30,14 @@ def _empty_issues() -> list[RunIssue]:
     return []
 
 
+def _empty_runtime_observations() -> list[RuntimeObservation]:
+    return []
+
+
+def _empty_semantic_runs() -> list[SemanticRunMetadata]:
+    return []
+
+
 class ConformModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -269,6 +277,7 @@ class Finding(ConformModel):
     confidence: Confidence | None = None
     audit_evidence: list[SemanticAuditEvidence] = Field(default_factory=_empty_audit_evidence)
     fingerprint: str
+    blocking: bool = False
     suppressed: bool = False
     suppression: Suppression | None = None
 
@@ -279,6 +288,28 @@ class RunIssue(ConformModel):
     path: Path | None = None
     phase: str
     fatal: bool = False
+
+
+class RuntimeObservation(ConformModel):
+    schema_version: Literal["1"] = "1"
+    status: FindingStatus
+    policy_id: str
+    message: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class SemanticRunMetadata(ConformModel):
+    policy_id: str
+    requested_model: str
+    served_model: str | None = None
+    context_hash: str
+    prompt_hash: str
+    usage: dict[str, NonNegativeInt] = Field(default_factory=dict)
+    retries: NonNegativeInt = 0
+    latency_ms: NonNegativeInt = 0
+    cache_hit: bool = False
+    repeatability: Literal["not-measured", "repeatable", "varied"] = "not-measured"
+    pricing_provenance: str | None = None
 
 
 class RunMetadata(ConformModel):
@@ -292,6 +323,7 @@ class RunMetadata(ConformModel):
     semantic_provider: str | None = None
     semantic_model: str | None = None
     prompt_hashes: dict[str, str] = Field(default_factory=dict)
+    semantic_runs: list[SemanticRunMetadata] = Field(default_factory=_empty_semantic_runs)
     resolved_configuration: dict[str, Any] = Field(default_factory=dict)
     environment: dict[str, str] = Field(default_factory=dict)
     timestamp: datetime
@@ -305,6 +337,9 @@ class ScanReport(ConformModel):
     policies_evaluated: list[str] = Field(default_factory=list)
     policies_skipped: list[str] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=_empty_findings)
+    runtime_observations: list[RuntimeObservation] = Field(
+        default_factory=_empty_runtime_observations
+    )
     issues: list[RunIssue] = Field(default_factory=_empty_issues)
     run: RunMetadata
 
@@ -321,14 +356,6 @@ class RuntimeManifest(ConformModel):
     supported_profile: bool = False
     network_enabled: bool = False
     timeout_seconds: PositiveInt = 300
-
-
-class RuntimeObservation(ConformModel):
-    schema_version: Literal["1"] = "1"
-    status: FindingStatus
-    policy_id: str
-    message: str | None = None
-    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class SemanticRequest(ConformModel):
@@ -376,10 +403,12 @@ class ProjectSemanticConfig(ConformModel):
     base_url: str | None = None
     model: str | None = None
     api_key_env: str = "CONFORMDAG_MODEL_API_KEY"
-    temperature: float = 0.0
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_input_tokens: PositiveInt = 32000
     max_output_tokens: PositiveInt = 4000
-    max_concurrency: PositiveInt = 4
+    max_concurrency: PositiveInt = Field(default=4, le=4)
+    native_structured_output: bool = False
+    cache_path: Path = Path(".conformdag/semantic-cache.json")
 
 
 class ProjectRuntimeConfig(ConformModel):

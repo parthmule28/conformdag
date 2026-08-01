@@ -27,8 +27,11 @@ dependencies = [
     "typer>=0.16,<1",
 ]
 
-[project.optional-dependencies]
-runtime = ["docker>=7,<8"]
+[project.urls]
+Homepage = "https://github.com/parthmule28/conformdag"
+Documentation = "https://github.com/parthmule28/conformdag/tree/main/docs"
+Issues = "https://github.com/parthmule28/conformdag/issues"
+Repository = "https://github.com/parthmule28/conformdag.git"
 
 [dependency-groups]
 dev = [
@@ -45,6 +48,9 @@ conformdag = "conformdag.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/conformdag"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/LICENSE", "/README.md", "/pyproject.toml"]
 
 [tool.pytest.ini_options]
 addopts = ["--strict-markers", "--strict-config"]

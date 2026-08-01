@@ -1,27 +1,53 @@
-"""Offline source-only scan orchestration for the first deterministic policy."""
+"""Source scan orchestration with an explicit optional semantic boundary."""
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 from conformdag import __version__
 from conformdag.analysis import SourceModel, analyze_source, discover_python_files
 from conformdag.config import load_project_config
 from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic
 from conformdag.models import (
+    AirflowProfile,
+    EnforcementType,
     Finding,
     RunIssue,
     RunMetadata,
     ScanReport,
+    SemanticRequest,
+    SemanticResponse,
+    SemanticRunMetadata,
 )
 from conformdag.policy import load_suppressions, select_policy_pack
 from conformdag.reporting import apply_suppressions, normalize_report
-from conformdag.semantic import SemanticContext, build_context
+from conformdag.semantic import SemanticContext, SemanticProviderError, build_context
+from conformdag.semantic_evaluator import build_semantic_request, semantic_finding
 
 
-def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> ScanReport:
-    """Run an offline scan and return a canonical report without importing source files."""
+class SemanticProvider(Protocol):
+    def evaluate_many(
+        self,
+        requests: Sequence[SemanticRequest],
+        max_concurrency: int = 4,
+    ) -> list[SemanticResponse]: ...
+
+
+def scan_repository(
+    repository_root: Path,
+    policy_pack: Path | None = None,
+    *,
+    semantic_provider: SemanticProvider | None = None,
+    semantic_provider_name: str | None = None,
+    semantic_model: str | None = None,
+    semantic_native_structured_output: bool | None = None,
+    airflow_profile: AirflowProfile | None = None,
+) -> ScanReport:
+    """Run source analysis and any explicitly supplied semantic provider."""
     root = repository_root.resolve()
     config = load_project_config(root / "conformdag.yaml")
     configured_pack = policy_pack or config.scan.policy_pack
@@ -65,7 +91,7 @@ def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> S
         findings, evaluated, skipped = evaluate_deterministic(
             pack.policies,
             models,
-            config.runtime.airflow_version,
+            airflow_profile or config.runtime.airflow_version,
         )
     except EvaluationPhaseError as exc:
         issues.append(
@@ -73,6 +99,85 @@ def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> S
         )
         evaluated = []
         skipped = [policy.id for policy in pack.policies]
+
+    prompt_hashes: dict[str, str] = {}
+    semantic_runs: list[SemanticRunMetadata] = []
+    if semantic_provider is not None:
+        if semantic_model is None:
+            raise ValueError("semantic_model is required when a semantic provider is supplied")
+        semantic_policies = [
+            policy
+            for policy in sorted(pack.policies, key=lambda item: item.id)
+            if policy.status.value == "ACTIVE"
+            and policy.enforcement.type in (EnforcementType.SEMANTIC, EnforcementType.HYBRID)
+        ]
+        policy_text = "\n\n".join(
+            f"{policy.id}: {policy.invariant}\nRemediation: {policy.safe_path or 'none'}"
+            for policy in semantic_policies
+        )
+        context = build_context(
+            policy_text,
+            {source.relative_path: source.content for source in files},
+            max_input_tokens=config.semantic.max_input_tokens,
+        )
+        if context.omitted_files:
+            issues.append(
+                RunIssue(
+                    code="SEMANTIC_CONTEXT_OMITTED",
+                    message="semantic context budget omitted: " + ", ".join(context.omitted_files),
+                    phase="semantic-context",
+                )
+            )
+        requests = [
+            build_semantic_request(policy, context).model_copy(
+                update={
+                    "temperature": config.semantic.temperature,
+                    "max_output_tokens": config.semantic.max_output_tokens,
+                }
+            )
+            for policy in semantic_policies
+        ]
+        try:
+            responses = semantic_provider.evaluate_many(
+                requests,
+                max_concurrency=config.semantic.max_concurrency,
+            )
+            if len(responses) != len(requests):
+                raise SemanticProviderError("provider returned an unexpected response count")
+            for policy, request, response in zip(
+                semantic_policies, requests, responses, strict=True
+            ):
+                findings.append(semantic_finding(policy, response, context))
+                prompt_hash = hashlib.sha256(request.system_prompt.encode("utf-8")).hexdigest()
+                prompt_hashes[policy.id] = prompt_hash
+                semantic_runs.append(
+                    SemanticRunMetadata(
+                        policy_id=policy.id,
+                        requested_model=semantic_model,
+                        served_model=response.served_model,
+                        context_hash=request.context_hash,
+                        prompt_hash=prompt_hash,
+                        usage=response.usage,
+                        retries=response.retries,
+                        latency_ms=response.latency_ms,
+                        cache_hit=response.cache_hit,
+                        repeatability=response.repeatability,
+                        pricing_provenance=response.pricing_provenance,
+                    )
+                )
+                if policy.id not in evaluated:
+                    evaluated.append(policy.id)
+                if policy.id in skipped:
+                    skipped.remove(policy.id)
+        except SemanticProviderError as exc:
+            issues.append(
+                RunIssue(
+                    code="SEMANTIC_PROVIDER_ERROR",
+                    message=str(exc),
+                    phase="semantic-evaluation",
+                    fatal=True,
+                )
+            )
 
     suppression_path = config.scan.suppressions
     if not suppression_path.is_absolute():
@@ -93,6 +198,29 @@ def scan_repository(repository_root: Path, policy_pack: Path | None = None) -> S
             input_hashes={source.relative_path: source.content_hash for source in files},
             policy_pack_id=pack.id,
             policy_pack_version=pack.version,
+            semantic_provider=semantic_provider_name if semantic_provider is not None else None,
+            semantic_model=semantic_model if semantic_provider is not None else None,
+            prompt_hashes=prompt_hashes,
+            semantic_runs=semantic_runs,
+            resolved_configuration={
+                "scan": {
+                    "include": config.scan.include,
+                    "exclude": config.scan.exclude,
+                    "follow_internal_symlinks": config.scan.follow_internal_symlinks,
+                },
+                "semantic": {
+                    "enabled": semantic_provider is not None,
+                    "temperature": config.semantic.temperature,
+                    "max_input_tokens": config.semantic.max_input_tokens,
+                    "max_output_tokens": config.semantic.max_output_tokens,
+                    "max_concurrency": config.semantic.max_concurrency,
+                    "native_structured_output": (
+                        config.semantic.native_structured_output
+                        if semantic_native_structured_output is None
+                        else semantic_native_structured_output
+                    ),
+                },
+            },
             timestamp=datetime.now(UTC),
         ),
     )

@@ -40,17 +40,29 @@ run = "uv run pytest -m 'not runtime' --cov=conformdag --cov-report=term-missing
 description = "Run Docker/Airflow runtime tests"
 run = "uv run pytest -m runtime"
 
+[tasks."test:runtime-smoke"]
+description = "Build and execute the selected real Docker/Airflow runtime profile"
+run = "uv run python scripts/runtime_smoke.py"
+
 [tasks.build]
 description = "Build wheel and source distribution"
 run = "uv build"
 
 [tasks.schema]
-description = "Regenerate and verify checked-in JSON Schemas"
-run = "uv run python scripts/export_schemas.py && git diff --exit-code -- schemas"
+description = "Verify checked-in JSON Schemas"
+run = "uv run python scripts/export_schemas.py --check"
+
+[tasks."schema:update"]
+description = "Regenerate checked-in JSON Schemas"
+run = "uv run python scripts/export_schemas.py"
 
 [tasks."scan:example"]
 description = "Scan the checked-in example repository"
 run = "uv run conformdag scan --path examples/sample-repository --policy-pack ../../policies/pack.yaml"
+
+[tasks."scan:semantic-example"]
+description = "Run the opt-in provider-backed example scan"
+run = "uv run conformdag scan --path examples/sample-repository --policy-pack ../../policies/pack.yaml --semantic --semantic-base-url $CONFORMDAG_SEMANTIC_BASE_URL --semantic-model $CONFORMDAG_SEMANTIC_MODEL --semantic-structured-output"
 
 [tasks.benchmark]
 description = "Run the public benchmark"

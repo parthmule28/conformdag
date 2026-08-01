@@ -2,45 +2,52 @@
 
 Turn Apache Airflow engineering standards into enforceable, explainable checks.
 
-ConformDAG is a local-first CLI that scans Airflow repositories against versioned organizational policies. It combines non-executing deterministic analysis with optional BYOK semantic review and produces cited terminal, JSON, SARIF, and static HTML reports.
+ConformDAG is a local-first CLI that scans Airflow repositories against versioned
+organizational policies. Source analysis is offline and non-executing by default.
+Dockerized Airflow import validation and BYOK semantic review are explicit opt-ins.
+Every engine contributes to one versioned JSON report that can also be rendered as
+terminal output, SARIF, or self-contained HTML.
 
-## Status
+## Beta release candidate
 
-ConformDAG is in active beta development. The current implementation includes:
+The `0.1.0b1` release candidate includes:
 
-- versioned YAML policy packs with provenance validation;
-- offline, non-executing AST analysis for deterministic policy checks;
-- JSON, terminal, SARIF, and self-contained HTML reports;
-- suppressions with expiry and stale-suppression diagnostics;
-- optional constrained Docker runtime inspection;
-- optional BYOK semantic review through OpenAI-compatible endpoints; and
-- privacy-preserving context redaction, normalized caching, and benchmark-manifest validation.
+- six deterministic Airflow policy evaluators with versioned policy contracts;
+- policy provenance validation and human/machine-readable policy inspection;
+- expiring suppressions with stale and unmatched-suppression diagnostics;
+- constrained Docker runtime profiles for Airflow 2.11.2 and 3.3.0;
+- four opt-in semantic policies through OpenAI-compatible endpoints, with local
+  redaction, strict response validation, bounded concurrency, and normalized caching;
+- canonical JSON, terminal, SARIF, and static HTML reports; and
+- a 240-case offline deterministic benchmark with per-policy release gates.
 
-The benchmark corpus, offline execution, deterministic quality gates, semantic baseline
-contracts, cache, and report generation are implemented. Runtime-profile release work,
-security automation, CI, and publication gates remain before the public beta.
+The package has not been published yet. Provider-backed semantic accuracy baselines
+remain a release-evidence item because the public benchmark currently contains no
+redistributable, labelled semantic corpus. This limitation does not weaken the offline
+deterministic gate and is tracked explicitly in the release checklist.
 
 ## Development
 
-The project uses [mise](https://mise.jdx.dev/) as its tool and task entry point. After the toolchain is configured, run:
+The project uses [mise](https://mise.jdx.dev/) as its tool and task entry point:
 
 ```bash
+mise install
 mise run setup
 mise run check
 ```
 
-The main commands are:
+Run the CLI from a checkout through the locked uv environment:
 
 ```bash
-mise exec -- conformdag validate-policies --path policies/pack.yaml
-mise exec -- conformdag list-policies --path policies/pack.yaml
-mise exec -- conformdag explain AIR-DET-001 --path policies/pack.yaml
-mise exec -- conformdag scan --path . --policy-pack policies/pack.yaml
+mise exec -- uv run conformdag validate-policies --path policies/pack.yaml
+mise exec -- uv run conformdag list-policies --path policies/pack.yaml
+mise exec -- uv run conformdag policy review AIR-DET-001 --path policies/pack.yaml
+mise exec -- uv run conformdag scan --path . --policy-pack policies/pack.yaml
 ```
 
-See [docs/user-guide.md](docs/user-guide.md) for installation and operational usage,
-[docs/architecture.md](docs/architecture.md) for implementation boundaries, and
-[docs/roadmap.md](docs/roadmap.md) for planned milestones.
+See the [user guide](docs/user-guide.md) for setup and operational usage, the
+[architecture](docs/architecture.md) for trust boundaries and data flow, and the
+[release checklist](docs/release.md) for the remaining publication gates.
 
 ## License
 

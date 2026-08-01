@@ -7,9 +7,10 @@ import inspect
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 
 def _arguments() -> argparse.Namespace:
@@ -48,6 +49,28 @@ def _stage_sources(repository_root: Path, manifest: dict[str, Any], target: Path
         shutil.copyfile(repository_root / relative, destination)
 
 
+def normalize_import_errors(
+    import_errors: dict[str, object], dag_folder: Path, staging_root: Path
+) -> dict[str, str]:
+    """Remove random container staging paths from report-visible diagnostics."""
+    normalized: dict[str, str] = {}
+    for raw_path, error in import_errors.items():
+        path = Path(raw_path)
+        try:
+            key = str(path.relative_to(dag_folder))
+        except ValueError:
+            key = path.name
+        normalized[key] = str(error).replace(str(staging_root), "<runtime>")
+    return normalized
+
+
+def _reserve_protocol_stdout() -> TextIO:
+    """Reserve the original stdout for JSON and route runtime output to stderr."""
+    protocol_stdout = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    return protocol_stdout
+
+
 def main() -> None:
     args = _arguments()
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
@@ -59,46 +82,56 @@ def main() -> None:
     os.environ["AIRFLOW__SCHEDULER__CHILD_PROCESS_LOG_DIRECTORY"] = "/tmp/airflow/logs/scheduler"  # noqa: S108
     os.environ["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN"] = "sqlite:////tmp/airflow/airflow.db"
 
-    from airflow.models import DagBag
+    with _reserve_protocol_stdout() as protocol_stdout:
+        from airflow.models import DagBag
 
-    with tempfile.TemporaryDirectory(prefix="conformdag-", dir="/tmp") as staging:
-        dag_folder = Path(staging) / "dags"
-        dag_folder.mkdir()
-        _stage_sources(repository_root, manifest, dag_folder)
-        dagbag_options = {
-            "dag_folder": str(dag_folder),
-            "include_examples": False,
-            "safe_mode": False,
-        }
-        supported_options = inspect.signature(DagBag).parameters
-        dagbag = DagBag(
-            **{name: value for name, value in dagbag_options.items() if name in supported_options}
-        )
-        import_errors = {str(path): str(error) for path, error in dagbag.import_errors.items()}
-        observations: list[dict[str, Any]] = []
-        for policy_id in manifest["policy_ids"]:
-            if import_errors:
-                observations.append(
-                    _observation(
-                        policy_id,
-                        "ERROR",
-                        "Airflow DAG import failed",
-                        dag_ids=sorted(dagbag.dags),
-                        import_errors=import_errors,
-                        airflow_profile=manifest.get("airflow_profile"),
+        with tempfile.TemporaryDirectory(prefix="conformdag-", dir="/tmp") as staging:
+            dag_folder = Path(staging) / "dags"
+            dag_folder.mkdir()
+            _stage_sources(repository_root, manifest, dag_folder)
+            dagbag_options = {
+                "dag_folder": str(dag_folder),
+                "include_examples": False,
+                "safe_mode": False,
+            }
+            supported_options = inspect.signature(DagBag).parameters
+            dagbag = DagBag(
+                **{
+                    name: value
+                    for name, value in dagbag_options.items()
+                    if name in supported_options
+                }
+            )
+            import_errors = normalize_import_errors(
+                dagbag.import_errors,
+                dag_folder,
+                Path(staging),
+            )
+            observations: list[dict[str, Any]] = []
+            for policy_id in manifest["policy_ids"]:
+                if import_errors:
+                    observations.append(
+                        _observation(
+                            policy_id,
+                            "ERROR",
+                            "Airflow DAG import failed",
+                            dag_ids=sorted(dagbag.dags),
+                            import_errors=import_errors,
+                            airflow_profile=manifest.get("airflow_profile"),
+                        )
                     )
-                )
-            else:
-                observations.append(
-                    _observation(
-                        policy_id,
-                        "PASS",
-                        None,
-                        dag_ids=sorted(dagbag.dags),
-                        airflow_profile=manifest.get("airflow_profile"),
+                else:
+                    observations.append(
+                        _observation(
+                            policy_id,
+                            "PASS",
+                            None,
+                            dag_ids=sorted(dagbag.dags),
+                            airflow_profile=manifest.get("airflow_profile"),
+                        )
                     )
-                )
-        print(json.dumps({"observations": observations}, sort_keys=True))
+            protocol_stdout.write(json.dumps({"observations": observations}, sort_keys=True) + "\n")
+            protocol_stdout.flush()
 
 
 if __name__ == "__main__":

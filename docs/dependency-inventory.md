@@ -13,14 +13,15 @@ Apache-2.0 distribution.
 | Rich | Terminal tables and readable output | MIT |
 | Jinja2 | Static HTML report rendering | BSD-3-Clause |
 | HTTPX | OpenAI-compatible provider transport | BSD-3-Clause |
-| Docker SDK optional extra | Optional host runtime integration | Apache-2.0 |
+| Docker CLI | Explicit host runtime boundary, invoked without a shell | External system dependency |
 | pytest and coverage | Development and test tooling | MIT / Apache-2.0 |
 | Ruff | Development lint and formatting | MIT |
 | Pyright | Development type checking | MIT |
 
-Airflow and provider dependencies are isolated in pinned runtime images and
-are not package dependencies of the host CLI. Each runtime profile records its
-base image digest, constraints, provider versions, and image scan results.
+Airflow and provider dependencies are isolated in versioned runtime images and
+are not package dependencies of the host CLI. Published profile tags are resolved
+to immutable digests before execution. Each release records constraints, provider
+versions, SBOM/provenance attestations, and image scan results.
 
 Any dependency with a non-permissive or unclear license requires a documented
 review before release. Generated reports, benchmark fixtures, and caches must

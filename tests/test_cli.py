@@ -1,11 +1,17 @@
 """CLI output and diagnostic routing tests."""
 
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
+from typer.core import TyperGroup, TyperOption
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from conformdag.cli import app
+from conformdag.models import FindingStatus, RuntimeObservation
+from conformdag.runtime import RuntimePhaseError
 
 
 def test_terminal_scan_output_is_human_readable() -> None:
@@ -74,10 +80,19 @@ def test_preview_model_context_is_local_and_provider_free() -> None:
 
 
 def test_runtime_profile_is_explicitly_selectable() -> None:
-    result = CliRunner().invoke(app, ["scan", "--path", ".", "--runtime", "3.3.0"])
+    digest = "ghcr.io/example/conformdag@sha256:" + "a" * 64
+    with patch(
+        "conformdag.cli.execute_runtime",
+        return_value=(
+            [RuntimeObservation(status=FindingStatus.PASS, policy_id="AIR-DET-001")],
+            digest,
+        ),
+    ):
+        result = CliRunner().invoke(app, ["scan", "--path", ".", "--runtime", "3.3.0"])
 
     assert result.exit_code == 0
     assert "scan complete:" in result.stderr
+    assert json.loads(result.stdout)["run"]["runtime_image_digest"] == digest
 
 
 def test_runtime_profile_and_custom_image_are_mutually_exclusive() -> None:
@@ -98,6 +113,19 @@ def test_runtime_profile_and_custom_image_are_mutually_exclusive() -> None:
     assert "cannot be used together" in result.output
 
 
+def test_runtime_execution_failure_is_a_structured_incomplete_report() -> None:
+    with patch(
+        "conformdag.cli.execute_runtime",
+        side_effect=RuntimePhaseError("Docker daemon is unavailable"),
+    ):
+        result = CliRunner().invoke(app, ["scan", "--path", ".", "--runtime", "3.3.0"])
+
+    assert result.exit_code == 3
+    payload = json.loads(result.stdout)
+    assert payload["complete"] is False
+    assert payload["issues"][-1]["code"] == "RUNTIME_EXECUTION_ERROR"
+
+
 def test_custom_runtime_image_requires_digest() -> None:
     result = CliRunner().invoke(
         app,
@@ -106,6 +134,70 @@ def test_custom_runtime_image_requires_digest() -> None:
 
     assert result.exit_code == 2
     assert "immutable sha256 digest" in result.output
+
+
+def test_scan_help_exposes_single_purpose_boolean_flags() -> None:
+    result = CliRunner().invoke(app, ["scan", "--help"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0
+    root_command = get_command(app)
+    assert isinstance(root_command, TyperGroup)
+    scan_command = root_command.commands["scan"]
+    option_names = {
+        option_name
+        for parameter in scan_command.params
+        if isinstance(parameter, TyperOption)
+        for option_name in (*parameter.opts, *parameter.secondary_opts)
+    }
+
+    assert "--no-evidence" in option_names
+    assert "--no-no-evidence" not in option_names
+    assert "--preview-model-context" in option_names
+    assert "--no-preview-model-context" not in option_names
+    assert "--semantic" in option_names
+    assert "--semantic-structured-output" in option_names
+
+
+def test_semantic_scan_requires_environment_only_api_key() -> None:
+    environment = dict(os.environ)
+    environment.pop("CONFORMDAG_MODEL_API_KEY", None)
+    with patch.dict(os.environ, environment, clear=True):
+        result = CliRunner().invoke(
+            app,
+            [
+                "scan",
+                "--path",
+                ".",
+                "--semantic",
+                "--semantic-base-url",
+                "https://openrouter.ai/api/v1",
+                "--semantic-model",
+                "deepseek/deepseek-v4-flash",
+            ],
+        )
+
+    assert result.exit_code == 2
+    assert "CONFORMDAG_MODEL_API_KEY" in result.output
+
+
+def test_semantic_scan_rejects_non_loopback_plain_http() -> None:
+    with patch.dict(os.environ, {"CONFORMDAG_MODEL_API_KEY": "test-key"}):
+        result = CliRunner().invoke(
+            app,
+            [
+                "scan",
+                "--path",
+                ".",
+                "--semantic",
+                "--semantic-base-url",
+                "http://model.example/v1",
+                "--semantic-model",
+                "test-model",
+            ],
+        )
+
+    assert result.exit_code == 2
+    assert "must use HTTPS" in result.output
 
 
 def test_policy_show_is_human_readable() -> None:

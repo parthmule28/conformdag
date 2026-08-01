@@ -36,6 +36,11 @@
           "title": "Audit Evidence",
           "type": "array"
         },
+        "blocking": {
+          "default": false,
+          "title": "Blocking",
+          "type": "boolean"
+        },
         "confidence": {
           "anyOf": [
             {
@@ -382,6 +387,13 @@
           "default": null,
           "title": "Semantic Provider"
         },
+        "semantic_runs": {
+          "items": {
+            "$ref": "#/$defs/SemanticRunMetadata"
+          },
+          "title": "Semantic Runs",
+          "type": "array"
+        },
         "timestamp": {
           "format": "date-time",
           "title": "Timestamp",
@@ -399,6 +411,47 @@
         "timestamp"
       ],
       "title": "RunMetadata",
+      "type": "object"
+    },
+    "RuntimeObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "payload": {
+          "additionalProperties": true,
+          "title": "Payload",
+          "type": "object"
+        },
+        "policy_id": {
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/FindingStatus"
+        }
+      },
+      "required": [
+        "status",
+        "policy_id"
+      ],
+      "title": "RuntimeObservation",
       "type": "object"
     },
     "SemanticAuditEvidence": {
@@ -447,6 +500,94 @@
         "excerpt"
       ],
       "title": "SemanticAuditEvidence",
+      "type": "object"
+    },
+    "SemanticRunMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_hit": {
+          "default": false,
+          "title": "Cache Hit",
+          "type": "boolean"
+        },
+        "context_hash": {
+          "title": "Context Hash",
+          "type": "string"
+        },
+        "latency_ms": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Latency Ms",
+          "type": "integer"
+        },
+        "policy_id": {
+          "title": "Policy Id",
+          "type": "string"
+        },
+        "pricing_provenance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pricing Provenance"
+        },
+        "prompt_hash": {
+          "title": "Prompt Hash",
+          "type": "string"
+        },
+        "repeatability": {
+          "default": "not-measured",
+          "enum": [
+            "not-measured",
+            "repeatable",
+            "varied"
+          ],
+          "title": "Repeatability",
+          "type": "string"
+        },
+        "requested_model": {
+          "title": "Requested Model",
+          "type": "string"
+        },
+        "retries": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Retries",
+          "type": "integer"
+        },
+        "served_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Served Model"
+        },
+        "usage": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": "Usage",
+          "type": "object"
+        }
+      },
+      "required": [
+        "policy_id",
+        "requested_model",
+        "context_hash",
+        "prompt_hash"
+      ],
+      "title": "SemanticRunMetadata",
       "type": "object"
     },
     "Severity": {
@@ -556,6 +697,13 @@
     },
     "run": {
       "$ref": "#/$defs/RunMetadata"
+    },
+    "runtime_observations": {
+      "items": {
+        "$ref": "#/$defs/RuntimeObservation"
+      },
+      "title": "Runtime Observations",
+      "type": "array"
     }
   },
   "required": [

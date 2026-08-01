@@ -19,7 +19,7 @@ OUTCOME_REFERENCE = (
     ReferenceEntry(
         "FAIL",
         "The selected policy was evaluated and a violation was found.",
-        "May block when deterministic.",
+        "Blocks for deterministic checks and semantic policies marked blocking.",
     ),
     ReferenceEntry(
         "NEEDS_REVIEW",
@@ -47,7 +47,7 @@ EXIT_CODE_REFERENCE = (
     ReferenceEntry("0", "Complete run with no unsuppressed blocking failures.", "Success."),
     ReferenceEntry(
         "1",
-        "Complete run with an unsuppressed blocking deterministic failure.",
+        "Complete run with an unsuppressed blocking policy failure.",
         "Conformance failure.",
     ),
     ReferenceEntry(

@@ -104,6 +104,24 @@ def test_cache_stores_only_normalized_response(tmp_path: Path) -> None:
     assert "safe evidence" not in stored
 
 
+def test_cache_redacts_normalized_provider_fields(tmp_path: Path) -> None:
+    cache = SemanticCache(tmp_path / "semantic-cache.json")
+    cache.put(
+        "key",
+        SemanticResponse(
+            status="PASS",
+            evidence="api_key=do-not-store",
+            explanation="password=hunter2",
+            confidence=Confidence.HIGH,
+        ),
+    )
+
+    stored = (tmp_path / "semantic-cache.json").read_text(encoding="utf-8")
+    assert "do-not-store" not in stored
+    assert "hunter2" not in stored
+    assert "[REDACTED]" in stored
+
+
 def test_cache_identity_changes_with_policy_contract_inputs() -> None:
     first = _request()
     second = first.model_copy(update={"policy_contract_hash": "changed"})
@@ -120,7 +138,7 @@ def test_custom_secret_pattern_is_applied() -> None:
 def test_prompt_template_is_versioned_and_hashed() -> None:
     rendered = DEFAULT_PROMPT_TEMPLATE.render("AIR-SEM-001 invariant")
 
-    assert DEFAULT_PROMPT_TEMPLATE.version == "1"
+    assert DEFAULT_PROMPT_TEMPLATE.version == "3"
     assert len(DEFAULT_PROMPT_TEMPLATE.prompt_hash) == 64
     assert "AIR-SEM-001 invariant" in rendered
     assert "untrusted-evidence" in rendered

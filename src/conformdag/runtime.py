@@ -19,7 +19,7 @@ from conformdag.models import (
 
 @dataclass(frozen=True)
 class RuntimeProfile:
-    """Immutable metadata for a supported Airflow runtime image."""
+    """Published metadata for a supported Airflow runtime image."""
 
     airflow_profile: AirflowProfile
     image: str
@@ -29,10 +29,7 @@ class RuntimeProfile:
 RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
     AirflowProfile.AIRFLOW_2_11_2: RuntimeProfile(
         airflow_profile=AirflowProfile.AIRFLOW_2_11_2,
-        image=(
-            "apache/airflow:2.11.2-python3.12@sha256:"
-            "a69d3b7e8013f57338ca19a0bc4de862f62af178a21088cd4459f1081911c07c"
-        ),
+        image="ghcr.io/parthmule28/conformdag/airflow-2.11.2:v0.1.0-beta.1",
         provider_versions={
             "apache-airflow-providers-standard": "1.9.0",
             "apache-airflow-providers-postgres": "6.6.0",
@@ -42,10 +39,7 @@ RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
     ),
     AirflowProfile.AIRFLOW_3_3_0: RuntimeProfile(
         airflow_profile=AirflowProfile.AIRFLOW_3_3_0,
-        image=(
-            "apache/airflow:3.3.0-python3.12@sha256:"
-            "2e43c8d61ebbad0ef6df6d6559bd3f3ddbc4d9cac7392029b13db00def6ba216"
-        ),
+        image="ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1",
         provider_versions={
             "apache-airflow-providers-standard": "1.15.0",
             "apache-airflow-providers-postgres": "6.8.0",
@@ -97,6 +91,13 @@ class DockerRunner:
         result = self.run(["version", "--format", "{{.Server.Version}}"], timeout_seconds)
         if result.returncode != 0:
             detail = result.stderr.strip() or "Docker daemon is unavailable"
+            raise RuntimePhaseError(detail)
+
+    def pull_image(self, image: str, timeout_seconds: int = 300) -> None:
+        """Pull a published profile before resolving its immutable digest."""
+        result = self.run(["pull", image], timeout_seconds)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or f"failed to pull runtime image: {image}"
             raise RuntimePhaseError(detail)
 
     def resolve_digest(self, image: str, timeout_seconds: int = 30) -> str:
@@ -198,3 +199,32 @@ def normalize_runtime_observations(
     return sorted(
         observations, key=lambda item: (item.policy_id, item.status.value, item.message or "")
     )
+
+
+def execute_runtime(
+    root: Path,
+    config: ProjectRuntimeConfig,
+    policy_ids: list[str],
+    include: list[str],
+    exclude: list[str],
+    runner: DockerRunner | None = None,
+) -> tuple[list[RuntimeObservation], str]:
+    """Execute one validated runtime profile and return observations plus its digest."""
+    manifest = build_runtime_manifest(root, config, policy_ids, include, exclude)
+    selected_image = manifest.image
+    if selected_image is None:
+        raise RuntimePhaseError("runtime manifest did not resolve an image")
+    docker = runner or DockerRunner()
+    docker.require_daemon()
+    if manifest.supported_profile:
+        docker.pull_image(selected_image, timeout_seconds=config.timeout_seconds)
+        image_digest = docker.resolve_digest(selected_image)
+    else:
+        image_digest = selected_image
+    immutable_manifest = manifest.model_copy(update={"image": image_digest})
+    observations = docker.run_manifest(
+        immutable_manifest,
+        image_digest,
+        timeout_seconds=config.timeout_seconds,
+    )
+    return normalize_runtime_observations(observations), image_digest

@@ -138,6 +138,7 @@ def semantic_finding(
         confidence=response.confidence,
         audit_evidence=audit_evidence,
         fingerprint=fingerprint,
+        blocking=policy.enforcement.blocking,
     )
 
 

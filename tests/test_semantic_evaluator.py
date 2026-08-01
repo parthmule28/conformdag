@@ -40,7 +40,7 @@ def test_builds_policy_specific_untrusted_request() -> None:
     assert request.policy_version == policy.version
     assert len(request.policy_contract_hash) == 64
     assert len(request.enforcement_hash) == 64
-    assert request.prompt_version == "1"
+    assert request.prompt_version == "3"
     assert "[SOURCE dag.py]" not in request.system_prompt
     assert request.evidence.startswith("[SOURCE")
     assert "external_write_markers" in request.system_prompt

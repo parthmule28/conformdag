@@ -14,7 +14,7 @@ revisions, licensing, transformation, privacy and secrets review metadata.
 Regenerate it with:
 
 ```text
-mise exec -- python scripts/generate_synthetic_benchmark.py
+mise exec -- uv run python scripts/generate_synthetic_benchmark.py
 ```
 
 Verify hashes and execute the deterministic cases offline with:
@@ -34,7 +34,7 @@ least 20 violations and 20 valid or safe-counterexamples, 95% precision, and
 To save both report formats:
 
 ```text
-mise exec -- conformdag benchmark benchmarks/synthetic \
+mise exec -- uv run conformdag benchmark benchmarks/synthetic \
   --policy-pack policies/pack.yaml \
   --output .conformdag/benchmark-report.json \
   --technical-report .conformdag/benchmark-report.md

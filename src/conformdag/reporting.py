@@ -85,16 +85,32 @@ def normalize_report(report: ScanReport) -> ScanReport:
     )
     issues = sorted(report.issues, key=lambda issue: (issue.phase, issue.code, str(issue.path)))
     files = sorted(report.files_scanned, key=str)
+    runtime_observations = sorted(
+        report.runtime_observations,
+        key=lambda observation: (
+            observation.policy_id,
+            observation.status.value,
+            observation.message or "",
+        ),
+    )
     payload = {
         "complete": report.complete,
         "files_scanned": [str(path) for path in files],
         "policies_evaluated": sorted(report.policies_evaluated),
         "policies_skipped": sorted(report.policies_skipped),
         "findings": [finding.model_dump(mode="json") for finding in findings],
+        "runtime_observations": [
+            observation.model_dump(mode="json") for observation in runtime_observations
+        ],
         "issues": [issue.model_dump(mode="json") for issue in issues],
         "input_hashes": dict(sorted(report.run.input_hashes.items())),
         "policy_pack_id": report.run.policy_pack_id,
         "policy_pack_version": report.run.policy_pack_version,
+        "runtime_profile": report.run.runtime_profile,
+        "runtime_image_digest": report.run.runtime_image_digest,
+        "semantic_provider": report.run.semantic_provider,
+        "semantic_model": report.run.semantic_model,
+        "prompt_hashes": dict(sorted(report.run.prompt_hashes.items())),
     }
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -103,6 +119,7 @@ def normalize_report(report: ScanReport) -> ScanReport:
         update={
             "files_scanned": files,
             "findings": findings,
+            "runtime_observations": runtime_observations,
             "issues": issues,
             "result_fingerprint": fingerprint,
         }
@@ -110,11 +127,11 @@ def normalize_report(report: ScanReport) -> ScanReport:
 
 
 def has_blocking_failures(report: ScanReport) -> bool:
-    """Return whether an unsuppressed deterministic failure should exit 1."""
+    """Return whether an unsuppressed blocking failure should exit 1."""
     return any(
         finding.status is FindingStatus.FAIL
         and not finding.suppressed
-        and finding.enforcement.value == "deterministic"
+        and (finding.enforcement.value == "deterministic" or finding.blocking)
         for finding in report.findings
     )
 
