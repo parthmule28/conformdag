@@ -52,6 +52,10 @@ run = "uv run conformdag benchmark benchmarks/synthetic --policy-pack policies/p
 description = "Run dependency and secret checks"
 run = "uv run pip-audit && gitleaks detect --source . --redact"
 
+[tasks.privacy]
+description = "Check generated artifacts for secrets and raw semantic I/O"
+run = "uv run python scripts/verify_artifact_privacy.py"
+
 [tasks."image-scan"]
 description = "Scan a runtime image with Docker Scout"
 run = "docker scout cves $CONFORMDAG_IMAGE"
