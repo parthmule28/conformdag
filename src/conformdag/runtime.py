@@ -34,7 +34,7 @@ RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
             "apache-airflow-providers-standard": "1.15.0",
             "apache-airflow-providers-postgres": "6.8.0",
             "apache-airflow-providers-http": "6.0.4",
-            "apache-airflow-providers-google": "22.1.0",
+            "apache-airflow-providers-google": "22.2.2",
         },
     ),
 }
