@@ -44,7 +44,7 @@ console = Console()
 RUNTIME_OPTION = typer.Option(
     None,
     "--runtime",
-    help="Enable a published runtime profile (2.11.2 or 3.3.0).",
+    help="Enable the maintained published runtime profile (3.3.0).",
 )
 RUNTIME_IMAGE_OPTION = typer.Option(
     None,

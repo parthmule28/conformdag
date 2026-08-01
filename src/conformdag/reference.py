@@ -68,7 +68,7 @@ RUNTIME_REFERENCE = (
     ),
     ReferenceEntry(
         "supported profile",
-        "Pinned Airflow 2.11.2 legacy or 3.3.0 maintained runtime.",
+        "Pinned Airflow 3.3.0 maintained runtime.",
         "Network is rejected and containment controls are mandatory.",
     ),
     ReferenceEntry(

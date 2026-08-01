@@ -2,7 +2,7 @@
 
 The public beta is released only from a reviewed `v0.1.0-beta.1` tag on `main`. The
 release workflow first re-runs quality, benchmark, schema, dependency, secret, privacy,
-and image-vulnerability gates. Only then does it publish the two GHCR runtime images;
+and image-vulnerability gates. Only then does it publish the GHCR runtime image;
 PyPI trusted publishing runs last. Python checksums are kept outside the distribution
 directory so they cannot be uploaded to PyPI as packages.
 
@@ -29,7 +29,6 @@ directory so they cannot be uploaded to PyPI as packages.
 - [x] Offline benchmark gate.
 - [x] Release validation.
 - [x] macOS host CLI and source analysis.
-- [x] Airflow runtime profile 2.11.2.
 - [x] Airflow runtime profile 3.3.0.
 
 The opt-in `Semantic provider smoke` job is intentionally not a protected-branch
@@ -41,8 +40,8 @@ accuracy baseline. Leave it disabled when those credentials and costs are not ap
 
 ## Release evidence
 
-- [x] Run the updated real Docker smoke jobs for both profiles. Pull request #4 passed the
-  Airflow 2.11.2 and 3.3.0 jobs on 2026-08-01 after the runtime JSON boundary fix.
+- [ ] Run the updated real Docker smoke job for the maintained 3.3.0 profile after this
+  release-scope change.
 - [x] Run a secret-injected OpenRouter scan with the configured exact model and retain
   only ignored normalized reports. On 2026-08-01, prompt v3 evaluated all four semantic
   policies over the one-DAG public sample with `deepseek/deepseek-v4-flash`; OpenRouter
@@ -62,8 +61,15 @@ accuracy baseline. Leave it disabled when those credentials and costs are not ap
   `v0.1.0-beta.1` from that exact `main` commit.
 - [ ] Confirm the tag workflow's attestations, image SBOMs, and high/critical image scan
   results before approving the final PyPI deployment.
-- [ ] After publication, confirm both GHCR runtime packages are public and can be pulled
-  anonymously; supported `scan --runtime` profiles depend on anonymous digest resolution.
+- [ ] After publication, confirm the GHCR 3.3.0 runtime package is public and can be
+  pulled anonymously; the supported `scan --runtime` profile depends on anonymous digest
+  resolution.
+
+Airflow 2.11.2 was removed from the beta before publication. It was initially built and
+tested as a legacy compatibility candidate, but its upstream end-of-life status means
+the project cannot responsibly promise the security fixes and maintenance cadence that a
+published supported profile requires. Its historical benchmark/source references remain
+provenance only; they do not indicate an active supported runtime.
 
 The workflow has no PyPI token or long-lived GHCR password. GitHub OIDC is used for PyPI
 trusted publishing and the scoped `GITHUB_TOKEN` is used for GHCR.

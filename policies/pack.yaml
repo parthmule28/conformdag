@@ -7,7 +7,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: high
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Ownership and metadata", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Every DAG declares an approved owner.
@@ -19,7 +19,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: medium
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Ownership and metadata", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: DAG tags use the policy-defined key and value vocabulary.
@@ -30,7 +30,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: high
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Execution safety", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Every task has an effective execution timeout within approved bounds.
@@ -41,7 +41,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: medium
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Execution safety", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Retry count and delay remain within policy bounds.
@@ -52,7 +52,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: critical
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Execution safety", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Module-level code does not perform configured high-confidence I/O.
@@ -63,7 +63,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: high
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Execution safety", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Operators and imports are approved for the selected Airflow profile.
@@ -74,7 +74,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: high
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Repeated task execution does not produce unsafe duplicate side effects.
@@ -85,7 +85,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: medium
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Business logic is separated from orchestration boundaries.
@@ -96,7 +96,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: critical
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Logs do not expose credentials or sensitive values.
@@ -107,7 +107,7 @@ policies:
     version: 1.0.0
     status: ACTIVE
     severity: low
-    airflow_profiles: ["2.11.2", "3.3.0"]
+    airflow_profiles: ["3.3.0"]
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Project abstractions preserve the declared operational intent.

@@ -142,9 +142,6 @@ def test_forbidden_operator_rule_respects_airflow_profile() -> None:
 
     evaluator = ForbiddenOperatorEvaluator()
     assert (
-        evaluator.evaluate(EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_2_11_2)) == []
-    )
-    assert (
         evaluator.evaluate(EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_3_3_0))[
             0
         ].status

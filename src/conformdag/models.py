@@ -75,7 +75,6 @@ class FindingStatus(StrEnum):
 
 
 class AirflowProfile(StrEnum):
-    AIRFLOW_2_11_2 = "2.11.2"
     AIRFLOW_3_3_0 = "3.3.0"
 
 

@@ -14,7 +14,7 @@ from conformdag.runtime import DockerRunner, RuntimePhaseError
 def main() -> int:
     raw_profile = os.environ.get("CONFORMDAG_RUNTIME_PROFILE")
     if raw_profile not in {profile.value for profile in AirflowProfile}:
-        print("CONFORMDAG_RUNTIME_PROFILE must be 2.11.2 or 3.3.0", file=sys.stderr)
+        print("CONFORMDAG_RUNTIME_PROFILE must be 3.3.0", file=sys.stderr)
         return 2
 
     profile = AirflowProfile(raw_profile)

@@ -2,7 +2,10 @@ FROM apache/airflow:3.3.0-python3.12@sha256:2e43c8d61ebbad0ef6df6d6559bd3f3ddbc4
 
 USER root
 COPY runtime/airflow-3.3.0/constraints.txt /opt/conformdag/constraints.txt
-RUN python -m pip install --no-cache-dir -r /opt/conformdag/constraints.txt
+RUN apt-get update \
+    && ACCEPT_EULA=Y apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-cache-dir -r /opt/conformdag/constraints.txt
 COPY runtime/entrypoint.py /usr/local/bin/conformdag-runtime
 RUN chmod 0555 /usr/local/bin/conformdag-runtime
 USER airflow

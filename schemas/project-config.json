@@ -2,7 +2,6 @@
   "$defs": {
     "AirflowProfile": {
       "enum": [
-        "2.11.2",
         "3.3.0"
       ],
       "title": "AirflowProfile",

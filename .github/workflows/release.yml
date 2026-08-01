@@ -75,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: ["2.11.2", "3.3.0"]
+        profile: ["3.3.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
@@ -114,8 +114,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - profile: "2.11.2"
-            dockerfile: runtime/airflow-2.11.2/Dockerfile
           - profile: "3.3.0"
             dockerfile: runtime/airflow-3.3.0/Dockerfile
     steps:

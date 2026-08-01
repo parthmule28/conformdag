@@ -25,7 +25,7 @@ def make_policy(policy_id: str = "AIR-DET-001") -> Policy:
         version="1.0.0",
         status=LifecycleStatus.ACTIVE,
         severity=Severity.HIGH,
-        airflow_profiles=[AirflowProfile.AIRFLOW_2_11_2, AirflowProfile.AIRFLOW_3_3_0],
+        airflow_profiles=[AirflowProfile.AIRFLOW_3_3_0],
         ownership=Ownership(owner="platform"),
         source=PolicySource(
             document=Path("standards/dags.md"),

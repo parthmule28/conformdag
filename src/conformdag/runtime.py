@@ -27,16 +27,6 @@ class RuntimeProfile:
 
 
 RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
-    AirflowProfile.AIRFLOW_2_11_2: RuntimeProfile(
-        airflow_profile=AirflowProfile.AIRFLOW_2_11_2,
-        image="ghcr.io/parthmule28/conformdag/airflow-2.11.2:v0.1.0-beta.1",
-        provider_versions={
-            "apache-airflow-providers-standard": "1.9.0",
-            "apache-airflow-providers-postgres": "6.6.0",
-            "apache-airflow-providers-http": "6.0.0",
-            "apache-airflow-providers-google": "20.0.0",
-        },
-    ),
     AirflowProfile.AIRFLOW_3_3_0: RuntimeProfile(
         airflow_profile=AirflowProfile.AIRFLOW_3_3_0,
         image="ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1",

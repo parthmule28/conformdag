@@ -68,7 +68,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: ["2.11.2", "3.3.0"]
+        profile: ["3.3.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
