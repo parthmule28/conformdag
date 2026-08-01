@@ -352,6 +352,7 @@ class SemanticResponse(ConformModel):
     remediation: str | None = None
     confidence: Confidence
     audit_evidence: list[SemanticAuditEvidence] = Field(default_factory=_empty_audit_evidence)
+    served_model: str | None = None
 
 
 class ProjectScanConfig(ConformModel):

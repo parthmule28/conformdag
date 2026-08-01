@@ -120,6 +120,7 @@ class OpenAICompatibleProvider:
         api_key: str,
         timeout_seconds: float = 60.0,
         max_retries: int = 2,
+        native_structured_output: bool = False,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -127,10 +128,11 @@ class OpenAICompatibleProvider:
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self.native_structured_output = native_structured_output
         self._client = client
 
     def evaluate(self, request: SemanticRequest) -> SemanticResponse:
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": request.system_prompt},
@@ -144,6 +146,15 @@ class OpenAICompatibleProvider:
             "temperature": request.temperature,
             "max_tokens": request.max_output_tokens,
         }
+        if self.native_structured_output:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "conformdag_semantic_response",
+                    "strict": True,
+                    "schema": SemanticResponse.model_json_schema(),
+                },
+            }
         headers = {"Authorization": f"Bearer {self.api_key}"}
         attempts = 0
         while True:
@@ -164,8 +175,15 @@ class OpenAICompatibleProvider:
             if response.status_code >= 400:
                 raise SemanticProviderError(f"provider returned HTTP {response.status_code}")
             try:
-                content = response.json()["choices"][0]["message"]["content"]
-                return SemanticResponse.model_validate(json.loads(content))
+                body = response.json()
+                content = body["choices"][0]["message"]["content"]
+                result = SemanticResponse.model_validate(json.loads(content))
+                served_model = body.get("model")
+                if served_model is not None and served_model != self.model:
+                    raise SemanticProviderError(
+                        f"provider served model {served_model!r}, requested {self.model!r}"
+                    )
+                return result.model_copy(update={"served_model": served_model})
             except (KeyError, IndexError, TypeError, ValueError) as exc:
                 raise SemanticProviderError(f"invalid structured provider response: {exc}") from exc
 

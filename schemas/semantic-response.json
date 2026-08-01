@@ -90,6 +90,18 @@
       "default": null,
       "title": "Remediation"
     },
+    "served_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Served Model"
+    },
     "status": {
       "enum": [
         "PASS",

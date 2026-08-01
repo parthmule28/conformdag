@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -114,6 +115,73 @@ def test_prompt_template_is_versioned_and_hashed() -> None:
     assert len(DEFAULT_PROMPT_TEMPLATE.prompt_hash) == 64
     assert "AIR-SEM-001 invariant" in rendered
     assert "untrusted-evidence" in rendered
+
+
+def test_native_structured_output_is_opt_in_and_schema_constrained() -> None:
+    provider = OpenAICompatibleProvider(
+        "https://model.example/v1", "test-model", "key", native_structured_output=True
+    )
+    response = httpx.Response(
+        200,
+        json={
+            "model": "test-model",
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            SemanticResponse(
+                                status="PASS",
+                                evidence="bounded",
+                                explanation="safe",
+                                confidence=Confidence.HIGH,
+                            ).model_dump(mode="json")
+                        )
+                    }
+                }
+            ],
+        },
+        request=httpx.Request("POST", "https://model.example/v1/chat/completions"),
+    )
+    request = _request()
+
+    with patch.object(provider, "_request", return_value=response) as mocked:
+        result = provider.evaluate(request)
+
+    assert result.served_model == "test-model"
+    payload = mocked.call_args.args[0]
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"]["strict"] is True
+
+
+def test_served_model_mismatch_is_rejected() -> None:
+    provider = OpenAICompatibleProvider("https://model.example/v1", "test-model", "key")
+    response = httpx.Response(
+        200,
+        json={
+            "model": "different-model",
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            SemanticResponse(
+                                status="PASS",
+                                evidence="bounded",
+                                explanation="safe",
+                                confidence=Confidence.HIGH,
+                            ).model_dump(mode="json")
+                        )
+                    }
+                }
+            ],
+        },
+        request=httpx.Request("POST", "https://model.example/v1/chat/completions"),
+    )
+
+    with (
+        patch.object(provider, "_request", return_value=response),
+        pytest.raises(SemanticProviderError, match="served model"),
+    ):
+        provider.evaluate(_request())
 
 
 def test_provider_retries_transient_failure_and_preserves_evidence_boundary() -> None:
