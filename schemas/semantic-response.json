@@ -8,10 +8,65 @@
       ],
       "title": "Confidence",
       "type": "string"
+    },
+    "SemanticAuditEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "criterion": {
+          "title": "Criterion",
+          "type": "string"
+        },
+        "excerpt": {
+          "maxLength": 240,
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "source_type": {
+          "enum": [
+            "source",
+            "runtime",
+            "policy",
+            "provider"
+          ],
+          "title": "Source Type",
+          "type": "string"
+        },
+        "unresolved": {
+          "default": false,
+          "title": "Unresolved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "criterion",
+        "source_type",
+        "excerpt"
+      ],
+      "title": "SemanticAuditEvidence",
+      "type": "object"
     }
   },
   "additionalProperties": false,
   "properties": {
+    "audit_evidence": {
+      "items": {
+        "$ref": "#/$defs/SemanticAuditEvidence"
+      },
+      "title": "Audit Evidence",
+      "type": "array"
+    },
     "confidence": {
       "$ref": "#/$defs/Confidence"
     },

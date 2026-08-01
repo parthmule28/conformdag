@@ -3,7 +3,14 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from conformdag.models import Confidence, EnforcementType, Policy, SemanticRequest, SemanticResponse
+from conformdag.models import (
+    Confidence,
+    EnforcementType,
+    Policy,
+    SemanticAuditEvidence,
+    SemanticRequest,
+    SemanticResponse,
+)
 from conformdag.policy import load_policy_pack
 from conformdag.semantic import SemanticContext
 from conformdag.semantic_evaluator import (
@@ -97,6 +104,37 @@ def test_abstraction_request_uses_declared_registry_and_abstains_when_uncertain(
     assert "company.operators.SafePythonOperator" in request.system_prompt
     assert "Do not infer approval from frequency or naming" in request.system_prompt
     assert "return NEEDS_REVIEW" in request.system_prompt
+
+
+def test_semantic_finding_normalizes_audit_citations_and_marks_unknown_locations() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    response = SemanticResponse(
+        status="NEEDS_REVIEW",
+        evidence="retry evidence",
+        explanation="The retry contract is not visible.",
+        confidence=Confidence.LOW,
+        audit_evidence=[
+            SemanticAuditEvidence(
+                criterion="retry-safety",
+                source_type="source",
+                location="dag.py",
+                excerpt="retry configuration is not shown",
+            ),
+            SemanticAuditEvidence(
+                criterion="invented",
+                source_type="source",
+                location="missing.py",
+                excerpt="unsupported citation",
+            ),
+        ],
+    )
+
+    finding = semantic_finding(policy, response, _context())
+
+    assert len(finding.audit_evidence) == 2
+    assert finding.audit_evidence[0].unresolved is False
+    assert finding.audit_evidence[1].unresolved is True
+    assert finding.audit_evidence[1].location == "missing.py"
 
 
 def test_normalizes_abstention_as_advisory_finding() -> None:

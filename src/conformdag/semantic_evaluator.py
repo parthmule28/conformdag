@@ -17,6 +17,7 @@ from conformdag.models import (
     FindingLocation,
     FindingStatus,
     Policy,
+    SemanticAuditEvidence,
     SemanticRequest,
     SemanticResponse,
 )
@@ -115,7 +116,11 @@ def semantic_finding(
     if policy.id == "AIR-SEM-001" and not response.evidence.strip():
         status = FindingStatus.NEEDS_REVIEW
         explanation = f"{explanation} Idempotence cannot be decided without bounded evidence."
-    evidence = redact_evidence(response.evidence)
+    audit_evidence = _normalize_audit_evidence(response, context)
+    evidence = redact_evidence(
+        "\n".join(f"[{item.criterion}] {item.excerpt}" for item in audit_evidence)
+        or response.evidence
+    )
     fingerprint_value = (
         f"{policy.id}:{policy.version}:{context.context_hash}:{status.value}:{evidence}"
     )
@@ -131,8 +136,35 @@ def semantic_finding(
         explanation=explanation,
         remediation=response.remediation or policy.safe_path,
         confidence=response.confidence,
+        audit_evidence=audit_evidence,
         fingerprint=fingerprint,
     )
+
+
+def _normalize_audit_evidence(
+    response: SemanticResponse, context: SemanticContext
+) -> list[SemanticAuditEvidence]:
+    supplied = response.audit_evidence or [
+        SemanticAuditEvidence(
+            criterion="provider-summary",
+            source_type="provider",
+            excerpt=response.evidence[:240],
+        )
+    ]
+    included = set(context.included_files)
+    normalized: list[SemanticAuditEvidence] = []
+    for item in supplied:
+        location = item.location
+        unresolved = item.unresolved or (location is not None and location not in included)
+        normalized.append(
+            item.model_copy(
+                update={
+                    "excerpt": redact_evidence(item.excerpt),
+                    "unresolved": unresolved,
+                }
+            )
+        )
+    return normalized
 
 
 def evaluate_semantic_policies(

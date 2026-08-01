@@ -22,6 +22,10 @@ def _empty_findings() -> list[Finding]:
     return []
 
 
+def _empty_audit_evidence() -> list[SemanticAuditEvidence]:
+    return []
+
+
 def _empty_issues() -> list[RunIssue]:
     return []
 
@@ -244,6 +248,14 @@ class Suppression(ConformModel):
     expires_at: datetime
 
 
+class SemanticAuditEvidence(ConformModel):
+    criterion: str
+    source_type: Literal["source", "runtime", "policy", "provider"]
+    location: str | None = None
+    excerpt: str = Field(max_length=240)
+    unresolved: bool = False
+
+
 class Finding(ConformModel):
     policy_id: str
     policy_version: str
@@ -255,6 +267,7 @@ class Finding(ConformModel):
     explanation: str | None = None
     remediation: str | None = None
     confidence: Confidence | None = None
+    audit_evidence: list[SemanticAuditEvidence] = Field(default_factory=_empty_audit_evidence)
     fingerprint: str
     suppressed: bool = False
     suppression: Suppression | None = None
@@ -338,6 +351,7 @@ class SemanticResponse(ConformModel):
     explanation: str
     remediation: str | None = None
     confidence: Confidence
+    audit_evidence: list[SemanticAuditEvidence] = Field(default_factory=_empty_audit_evidence)
 
 
 class ProjectScanConfig(ConformModel):
