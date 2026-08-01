@@ -19,6 +19,7 @@ jobs:
           cache: true
       - run: mise run setup
       - run: mise run check
+      - run: mise run test:runtime
       - run: mise run test:coverage
       - run: mise run benchmark
       - run: mise run schema
@@ -74,25 +75,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - profile: "2.11.2"
-            dockerfile: runtime/airflow-2.11.2/Dockerfile
-          - profile: "3.3.0"
-            dockerfile: runtime/airflow-3.3.0/Dockerfile
+        profile: ["2.11.2", "3.3.0"]
     steps:
       - uses: actions/checkout@v4
-      - name: Build local image for validation
-        uses: docker/build-push-action@v6
+      - uses: jdx/mise-action@v2
         with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          load: true
-          tags: conformdag-airflow-validation:${{ matrix.profile }}
+          cache: true
+      - run: mise run setup
+      - name: Build and execute the runtime profile
+        run: mise run test:runtime-smoke
+        env:
+          CONFORMDAG_RUNTIME_PROFILE: ${{ matrix.profile }}
       - name: Scan image before publication
         uses: docker/scout-action@v1
         with:
           command: cves
-          image: local://conformdag-airflow-validation:${{ matrix.profile }}
+          image: local://conformdag-airflow-smoke:${{ matrix.profile }}
           only-severities: critical,high
           exit-code: true
           sarif-file: scout-${{ matrix.profile }}.sarif

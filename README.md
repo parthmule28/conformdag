@@ -8,9 +8,9 @@ Dockerized Airflow import validation and BYOK semantic review are explicit opt-i
 Every engine contributes to one versioned JSON report that can also be rendered as
 terminal output, SARIF, or self-contained HTML.
 
-## Beta release candidate
+## Public beta
 
-The `0.1.0b1` release candidate includes:
+ConformDAG `0.1.0b1` includes:
 
 - six deterministic Airflow policy evaluators with versioned policy contracts;
 - policy provenance validation and human/machine-readable policy inspection;
@@ -21,10 +21,36 @@ The `0.1.0b1` release candidate includes:
 - canonical JSON, terminal, SARIF, and static HTML reports; and
 - a 240-case offline deterministic benchmark with per-policy release gates.
 
-The package has not been published yet. Provider-backed semantic accuracy baselines
-remain a release-evidence item because the public benchmark currently contains no
-redistributable, labelled semantic corpus. This limitation does not weaken the offline
-deterministic gate and is tracked explicitly in the release checklist.
+Provider-backed semantic accuracy baselines are not claimed because the public benchmark
+does not yet contain a redistributable, labelled semantic corpus. The recorded provider
+smoke measurements validate integration, provenance, schema rejection, and cache behavior;
+they are not accuracy measurements. This limitation does not weaken the offline
+deterministic gate.
+
+## Installation and quick start
+
+ConformDAG requires Python 3.12. With Python and uv managed through mise, run the pinned
+beta without installing it globally:
+
+```bash
+mise use python@3.12 uv@0.12.0
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag version
+```
+
+In an Airflow repository, create the non-destructive starter files and review the empty
+policy scaffold before adding organizational rules:
+
+```bash
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag init
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag validate-policies \
+  --path policies/pack.yaml
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+  --path . \
+  --policy-pack policies/pack.yaml
+```
+
+Source analysis is offline and non-executing unless runtime or semantic evaluation is
+explicitly enabled. See the user guide before enabling either networked opt-in.
 
 ## Development
 
@@ -47,7 +73,7 @@ mise exec -- uv run conformdag scan --path . --policy-pack policies/pack.yaml
 
 See the [user guide](docs/user-guide.md) for setup and operational usage, the
 [architecture](docs/architecture.md) for trust boundaries and data flow, and the
-[release checklist](docs/release.md) for the remaining publication gates.
+[release checklist](docs/release.md) for publication evidence and verification.
 
 ## License
 

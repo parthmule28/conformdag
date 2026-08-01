@@ -15,7 +15,9 @@ directory so they cannot be uploaded to PyPI as packages.
 - [x] The `pypi` environment limits deployment to the exact beta tag and contains no
   publishing secret.
 - [x] `main` is protected by pull requests, review/conversation resolution, current-branch
-  checks, deletion protection, and force-push protection.
+  checks, deletion protection, and force-push protection. Required approvals are
+  temporarily zero while the repository has one maintainer because GitHub does not count
+  self-approval; restore one required approval when a second trusted maintainer is added.
 - [x] Preliminary trademark/confusability screening was recorded on 2026-08-01. No exact
   or materially similar `ConformDAG` result was found in GitHub, PyPI, general web, WIPO,
   USPTO, EUIPO, or IP India searches available at the time. This is not legal advice or
@@ -37,9 +39,10 @@ variable `CONFORMDAG_RUN_SEMANTIC_SMOKE=true`, variables
 `CONFORMDAG_MODEL_API_KEY`. It performs a real provider-backed example scan, not an
 accuracy baseline. Leave it disabled when those credentials and costs are not approved.
 
-## Release evidence still required
+## Release evidence
 
-- [ ] Run the updated real Docker smoke jobs for both profiles in the audit pull request.
+- [x] Run the updated real Docker smoke jobs for both profiles. Pull request #4 passed the
+  Airflow 2.11.2 and 3.3.0 jobs on 2026-08-01 after the runtime JSON boundary fix.
 - [x] Run a secret-injected OpenRouter scan with the configured exact model and retain
   only ignored normalized reports. On 2026-08-01, prompt v3 evaluated all four semantic
   policies over the one-DAG public sample with `deepseek/deepseek-v4-flash`; OpenRouter
@@ -50,11 +53,17 @@ accuracy baseline. Leave it disabled when those credentials and costs are not ap
   semantic corpus, so LLM-only, hybrid, deterministic-plus-generic-reviewer, and
   generic-reviewer accuracy baselines remain `not_executed`. Do not describe those
   baselines as measured accuracy.
-- [ ] Review the final wheel/sdist contents, generated schemas, checksums, attestations,
-  image SBOMs, and high/critical image scan results.
+- [x] Review the final local wheel/sdist contents, generated schemas, and checksums before
+  creating the tag. The isolated wheel reported `0.1.0b1` and completed the public example
+  scan. Local SHA-256 values were `a79335ef...ab9c381` for the wheel and
+  `2d1b2fc...df06613` for the source distribution; the tag workflow independently
+  regenerates and publishes its full checksums.
+- [ ] Merge the reviewed release-preparation pull request, then create and push
+  `v0.1.0-beta.1` from that exact `main` commit.
+- [ ] Confirm the tag workflow's attestations, image SBOMs, and high/critical image scan
+  results before approving the final PyPI deployment.
 - [ ] After publication, confirm both GHCR runtime packages are public and can be pulled
   anonymously; supported `scan --runtime` profiles depend on anonymous digest resolution.
-- [ ] Create and push `v0.1.0-beta.1` only after every item above is accepted.
 
 The workflow has no PyPI token or long-lived GHCR password. GitHub OIDC is used for PyPI
 trusted publishing and the scoped `GITHUB_TOKEN` is used for GHCR.
