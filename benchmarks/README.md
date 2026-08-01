@@ -31,6 +31,15 @@ The deterministic release gate requires at least 40 cases per policy, at
 least 20 violations and 20 valid or safe-counterexamples, 95% precision, and
 90% recall.
 
+To save both report formats:
+
+```text
+mise exec -- conformdag benchmark benchmarks/synthetic \
+  --policy-pack policies/pack.yaml \
+  --output .conformdag/benchmark-report.json \
+  --technical-report .conformdag/benchmark-report.md
+```
+
 `synthetic/manifest.yaml` records fixture hashes, policy versions and hashes,
 source attribution, licensing, transformation history, and privacy/secrets review.
 No external organizational data or public source files are redistributed by this

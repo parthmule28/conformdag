@@ -138,6 +138,20 @@ class BenchmarkQualityGate:
 
 
 @dataclass(frozen=True)
+class BenchmarkBaseline:
+    """Execution/provenance record for one benchmark baseline."""
+
+    name: str
+    mode: str
+    status: str
+    requested_model: str | None
+    served_model: str | None
+    prompt_hash: str | None
+    cache_state: str
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class BenchmarkRunResult:
     """Offline benchmark outcome with stable, machine-readable fields."""
 
@@ -150,6 +164,7 @@ class BenchmarkRunResult:
     cases: list[BenchmarkCaseResult]
     metrics: dict[str, BenchmarkMetrics]
     quality_gates: list[BenchmarkQualityGate]
+    baselines: list[BenchmarkBaseline]
 
     @property
     def passed(self) -> bool:
@@ -157,6 +172,7 @@ class BenchmarkRunResult:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "report_version": "1",
             "dataset_id": self.dataset_id,
             "dataset_version": self.dataset_version,
             "benchmark_identity": self.benchmark_identity,
@@ -167,7 +183,53 @@ class BenchmarkRunResult:
             "cases": [asdict(case) for case in self.cases],
             "metrics": {name: asdict(value) for name, value in self.metrics.items()},
             "quality_gates": [asdict(gate) for gate in self.quality_gates],
+            "baselines": [asdict(baseline) for baseline in self.baselines],
         }
+
+
+def render_benchmark_report(result: BenchmarkRunResult) -> str:
+    """Render a concise human-readable benchmark report from normalized results."""
+    lines = [
+        "# ConformDAG Benchmark Report",
+        "",
+        f"- Dataset: `{result.dataset_id}` `{result.dataset_version}`",
+        f"- Identity: `{result.benchmark_identity}`",
+        f"- Result: **{'PASS' if result.passed else 'FAIL'}**",
+        f"- Cases: {result.passed_cases}/{result.total_cases} passed",
+        "",
+        "## Deterministic metrics",
+        "",
+        "| Population | Cases | Precision | Recall | F1 | Gate |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    gate_by_name = {gate.population: gate for gate in result.quality_gates}
+    for name, metrics in result.metrics.items():
+        gate = gate_by_name[name]
+        lines.append(
+            f"| {name} | {metrics.applicable_cases} | "
+            f"{metrics.precision if metrics.precision is not None else 'unknown'} | "
+            f"{metrics.recall if metrics.recall is not None else 'unknown'} | "
+            f"{metrics.f1 if metrics.f1 is not None else 'unknown'} | "
+            f"{'PASS' if gate.passed else 'FAIL'} |"
+        )
+        if gate.reasons:
+            lines.append(f"  - {name}: {'; '.join(gate.reasons)}")
+    lines.extend(
+        [
+            "",
+            "## Baselines",
+            "",
+            "| Baseline | Mode | Status | Reason |",
+            "|---|---|---|---|",
+        ]
+    )
+    for baseline in result.baselines:
+        lines.append(
+            f"| {baseline.name} | {baseline.mode} | {baseline.status} | "
+            f"{baseline.reason or ''} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _read_yaml(path: Path) -> Any:
@@ -396,6 +458,34 @@ def run_deterministic_benchmark(
         _quality_gate(policy_id, policy_metrics)
         for policy_id, policy_metrics in metrics.items()
     ]
+    baselines = [
+        BenchmarkBaseline(
+            name="deterministic",
+            mode="deterministic-only",
+            status="executed",
+            requested_model=None,
+            served_model=None,
+            prompt_hash=None,
+            cache_state="not-applicable",
+        ),
+        *[
+            BenchmarkBaseline(
+                name=name,
+                mode=mode,
+                status="not_executed",
+                requested_model=None,
+                served_model=None,
+                prompt_hash=None,
+                cache_state="not-used",
+                reason="provider configuration was not supplied; benchmark is offline by default",
+            )
+            for name, mode in (
+                ("llm-only", "llm-only"),
+                ("hybrid", "hybrid"),
+                ("generic-reviewer", "generic-reviewer"),
+            )
+        ],
+    ]
     return BenchmarkRunResult(
         dataset_id=manifest.dataset_id,
         dataset_version=manifest.dataset_version,
@@ -406,4 +496,5 @@ def run_deterministic_benchmark(
         cases=results,
         metrics=metrics,
         quality_gates=quality_gates,
+        baselines=baselines,
     )

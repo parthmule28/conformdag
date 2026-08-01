@@ -12,6 +12,7 @@ from conformdag.benchmark import (
     benchmark_identity,
     benchmark_manifest_payload,
     load_benchmark_manifest,
+    render_benchmark_report,
     run_deterministic_benchmark,
 )
 
@@ -151,3 +152,12 @@ def test_deterministic_benchmark_executes_all_cases_offline() -> None:
     assert result.metrics["aggregate"].precision == 1.0
     assert result.metrics["aggregate"].recall == 1.0
     assert all(gate.passed for gate in result.quality_gates)
+    assert [baseline.status for baseline in result.baselines] == [
+        "executed",
+        "not_executed",
+        "not_executed",
+        "not_executed",
+    ]
+    report = render_benchmark_report(result)
+    assert "# ConformDAG Benchmark Report" in report
+    assert "| aggregate | 240 | 1.0 | 1.0 | 1.0 | PASS |" in report
