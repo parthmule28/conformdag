@@ -112,6 +112,12 @@
           "default": null,
           "title": "Base Url"
         },
+        "cache_path": {
+          "default": ".conformdag/semantic-cache.json",
+          "format": "path",
+          "title": "Cache Path",
+          "type": "string"
+        },
         "enabled": {
           "default": false,
           "title": "Enabled",
@@ -120,6 +126,7 @@
         "max_concurrency": {
           "default": 4,
           "exclusiveMinimum": 0,
+          "maximum": 4,
           "title": "Max Concurrency",
           "type": "integer"
         },
@@ -147,8 +154,15 @@
           "default": null,
           "title": "Model"
         },
+        "native_structured_output": {
+          "default": false,
+          "title": "Native Structured Output",
+          "type": "boolean"
+        },
         "temperature": {
           "default": 0.0,
+          "maximum": 2.0,
+          "minimum": 0.0,
           "title": "Temperature",
           "type": "number"
         }

@@ -6,7 +6,7 @@ from typing import cast
 
 from conformdag.analysis import SourceFile, analyze_source
 from conformdag.evaluator import EvaluationContext, OwnerEvaluator
-from conformdag.models import RunMetadata, ScanReport, Suppression
+from conformdag.models import EnforcementType, RunMetadata, ScanReport, Suppression
 from conformdag.policy import load_policy_pack
 from conformdag.reporting import (
     apply_suppressions,
@@ -106,3 +106,22 @@ def test_sarif_and_html_render_from_the_same_canonical_finding() -> None:
     assert '<html lang="en">' in html
     assert "DAG owner=" not in html
     assert '<th scope="col">Policy</th>' in html
+
+
+def test_explicitly_blocking_semantic_failure_blocks() -> None:
+    finding = _finding().model_copy(
+        update={"enforcement": EnforcementType.SEMANTIC, "blocking": True}
+    )
+    report = ScanReport(
+        complete=True,
+        result_fingerprint="result",
+        findings=[finding],
+        run=RunMetadata(
+            tool_version="test",
+            policy_pack_id="default",
+            policy_pack_version="1",
+            timestamp=datetime(2026, 7, 30, tzinfo=UTC),
+        ),
+    )
+
+    assert has_blocking_failures(report) is True

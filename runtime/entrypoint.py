@@ -48,6 +48,21 @@ def _stage_sources(repository_root: Path, manifest: dict[str, Any], target: Path
         shutil.copyfile(repository_root / relative, destination)
 
 
+def normalize_import_errors(
+    import_errors: dict[str, object], dag_folder: Path, staging_root: Path
+) -> dict[str, str]:
+    """Remove random container staging paths from report-visible diagnostics."""
+    normalized: dict[str, str] = {}
+    for raw_path, error in import_errors.items():
+        path = Path(raw_path)
+        try:
+            key = str(path.relative_to(dag_folder))
+        except ValueError:
+            key = path.name
+        normalized[key] = str(error).replace(str(staging_root), "<runtime>")
+    return normalized
+
+
 def main() -> None:
     args = _arguments()
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
@@ -74,7 +89,11 @@ def main() -> None:
         dagbag = DagBag(
             **{name: value for name, value in dagbag_options.items() if name in supported_options}
         )
-        import_errors = {str(path): str(error) for path, error in dagbag.import_errors.items()}
+        import_errors = normalize_import_errors(
+            dagbag.import_errors,
+            dag_folder,
+            Path(staging),
+        )
         observations: list[dict[str, Any]] = []
         for policy_id in manifest["policy_ids"]:
             if import_errors:

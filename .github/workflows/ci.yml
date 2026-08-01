@@ -78,10 +78,13 @@ jobs:
       - run: mise run test:runtime
         env:
           CONFORMDAG_RUNTIME_PROFILE: ${{ matrix.profile }}
+      - run: mise run test:runtime-smoke
+        env:
+          CONFORMDAG_RUNTIME_PROFILE: ${{ matrix.profile }}
 
-  semantic:
-    name: Semantic baselines (opt-in)
-    if: ${{ vars.CONFORMDAG_RUN_SEMANTIC_BASELINES == 'true' }}
+  semantic-smoke:
+    name: Semantic provider smoke (opt-in)
+    if: ${{ vars.CONFORMDAG_RUN_SEMANTIC_SMOKE == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -89,4 +92,9 @@ jobs:
         with:
           cache: true
       - run: mise run setup
-      - run: echo "Provider credentials and endpoint configuration are required for this opt-in job."
+      - name: Run an explicit provider-backed scan
+        run: mise run scan:semantic-example
+        env:
+          CONFORMDAG_MODEL_API_KEY: ${{ secrets.CONFORMDAG_MODEL_API_KEY }}
+          CONFORMDAG_SEMANTIC_BASE_URL: ${{ vars.CONFORMDAG_SEMANTIC_BASE_URL }}
+          CONFORMDAG_SEMANTIC_MODEL: ${{ vars.CONFORMDAG_SEMANTIC_MODEL }}

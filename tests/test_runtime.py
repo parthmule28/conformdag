@@ -7,7 +7,12 @@ from unittest.mock import patch
 import pytest
 
 from conformdag.models import AirflowProfile, ProjectRuntimeConfig
-from conformdag.runtime import DockerRunner, RuntimePhaseError, build_runtime_manifest
+from conformdag.runtime import (
+    DockerRunner,
+    RuntimePhaseError,
+    build_runtime_manifest,
+    execute_runtime,
+)
 
 pytestmark = pytest.mark.runtime
 
@@ -73,7 +78,7 @@ def test_supported_profile_resolves_pinned_image_and_providers(tmp_path: Path) -
     )
 
     assert manifest.supported_profile is True
-    assert manifest.image is not None and "@sha256:" in manifest.image
+    assert manifest.image == "ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1"
     assert manifest.provider_versions["apache-airflow-providers-google"] == "22.1.0"
 
 
@@ -87,7 +92,7 @@ def test_legacy_profile_resolves_pinned_image_and_providers(tmp_path: Path) -> N
     )
 
     assert manifest.airflow_profile == AirflowProfile.AIRFLOW_2_11_2
-    assert manifest.image is not None and "@sha256:" in manifest.image
+    assert manifest.image == "ghcr.io/parthmule28/conformdag/airflow-2.11.2:v0.1.0-beta.1"
     assert manifest.provider_versions["apache-airflow-providers-standard"] == "1.9.0"
 
 
@@ -199,6 +204,39 @@ def test_runtime_daemon_failure_is_reported() -> None:
         pytest.raises(RuntimePhaseError, match="Cannot connect to Docker"),
     ):
         runner.require_daemon()
+
+
+def test_published_profile_is_pulled_and_executed_by_digest(tmp_path: Path) -> None:
+    runner = DockerRunner()
+    digest = "ghcr.io/parthmule28/conformdag/airflow-3.3.0@sha256:" + "f" * 64
+
+    with (
+        patch.object(runner, "require_daemon") as require_daemon,
+        patch.object(runner, "pull_image") as pull_image,
+        patch.object(runner, "resolve_digest", return_value=digest) as resolve_digest,
+        patch.object(runner, "run_manifest", return_value=[]) as run_manifest,
+    ):
+        observations, resolved = execute_runtime(
+            tmp_path,
+            ProjectRuntimeConfig(
+                enabled=True,
+                airflow_version=AirflowProfile.AIRFLOW_3_3_0,
+            ),
+            ["AIR-DET-001"],
+            ["dags/**/*.py"],
+            [],
+            runner,
+        )
+
+    assert observations == []
+    assert resolved == digest
+    require_daemon.assert_called_once_with()
+    pull_image.assert_called_once_with(
+        "ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1",
+        timeout_seconds=300,
+    )
+    resolve_digest.assert_called_once()
+    assert run_manifest.call_args.args[1] == digest
 
 
 def test_digest_resolution_rejects_tag_only_images() -> None:
