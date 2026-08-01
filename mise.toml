@@ -46,7 +46,7 @@ run = "uv run conformdag scan examples/sample-repository --policy-pack examples/
 
 [tasks.benchmark]
 description = "Run the public benchmark"
-run = "uv run conformdag benchmark benchmarks/"
+run = "uv run conformdag benchmark benchmarks/synthetic --policy-pack policies/pack.yaml"
 
 [tasks.security]
 description = "Run dependency and secret checks"

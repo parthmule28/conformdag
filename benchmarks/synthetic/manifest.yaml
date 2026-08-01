@@ -1,0 +1,3988 @@
+schema_version: '1'
+dataset_id: conformdag-synthetic-deterministic
+dataset_version: 2026.08.1
+license:
+  name: Apache-2.0
+  url: https://www.apache.org/licenses/LICENSE-2.0
+  attribution:
+policy_versions:
+  AIR-DET-001: 1.0.0
+  AIR-DET-002: 1.0.0
+  AIR-DET-003: 1.0.0
+  AIR-DET-004: 1.0.0
+  AIR-DET-005: 1.0.0
+  AIR-DET-006: 1.0.0
+policy_contract_hashes:
+  AIR-DET-001: 660304d1be4d2807c875865592f2743f324296a5a6e10425c3c33a736f1ccacb
+  AIR-DET-002: 167ef163ab255f530e8af1570dc165375064464cbb98651101726cef2974ebd5
+  AIR-DET-003: 9524c045d67666310ce454ca8db7e36f48df8637ce7b5e84c6928f636ef4442d
+  AIR-DET-004: 60b73bc710fde267e50b0aaa15c3e06110ec25d1f60df879ce52cc9be7bfb703
+  AIR-DET-005: ef1c64e73728be96339c4c9ba6d36b81b50f1739422d806a3d480a2fc3747f0f
+  AIR-DET-006: b3e0356e544544ace6415809c53aea3abac3d90e07702c8febe3937015cea4dc
+enforcement_hashes:
+  AIR-DET-001: f391189d15da4a6079d9192095b7f1acefedb5538ae1d55be5f53d438b31dd68
+  AIR-DET-002: 44e04992b82730600a4a55d6b8e40e513ba5f06df999991b9bc3431f9905db0c
+  AIR-DET-003: c18634845f49dc07bb821c5ab23ca404a2ebfdd98a9ca3f63e2c0518180bf8d6
+  AIR-DET-004: 583a498b21b2c672e3e5b7b5b1d3aed3d9160c3dc4ed09d74fc47c2dc787ac93
+  AIR-DET-005: 8a57ded5eaaaf52213721947ee3d06c10dab01be2ccda7f18b25709abafcd907
+  AIR-DET-006: 218e8c5851f9d47abb32f73b94b7f8a0f409bd713eff69692e63ea68ca396020
+source_admissions:
+- source_id: apache-airflow-2.11.2
+  kind: public
+  url: https://github.com/apache/airflow
+  revision: 2b39a518de02ca23be3b1de9fb4f8120fe18fbf5
+  paths:
+  - airflow/example_dags
+  - tests/system
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+    attribution: Apache Software Foundation, Apache Airflow
+  redistribution: redistributable
+  transformation: Reference-only official Airflow 2.11.2 examples and system 
+    tests; no source text copied into this fixture release.
+  privacy_review: 'Completed 2026-08-01: reviewed as public project-owned example
+    code; no private organizational corpus admitted.'
+  secrets_review: 'Completed 2026-08-01: source admission is metadata-only and no
+    source files are redistributed here.'
+  derived_from: []
+- source_id: apache-airflow-3.3.0
+  kind: public
+  url: https://github.com/apache/airflow
+  revision: f5f7953d949f61552c4feb8b3200be2a677a08c5
+  paths:
+  - airflow-core/src/airflow/example_dags
+  - providers
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+    attribution: Apache Software Foundation, Apache Airflow
+  redistribution: redistributable
+  transformation: Reference-only official Airflow 3.3.0 examples and provider 
+    system tests; no source text copied into this fixture release.
+  privacy_review: 'Completed 2026-08-01: reviewed as public project-owned example
+    code; no private organizational corpus admitted.'
+  secrets_review: 'Completed 2026-08-01: source admission is metadata-only and no
+    source files are redistributed here.'
+  derived_from: []
+- source_id: opendatabs-dags-airflow2
+  kind: public
+  url: https://github.com/opendatabs/dags-airflow2
+  revision: 1a13af0db434da1dfa8e6add81c1ff23fa17244c
+  paths:
+  - '*.py'
+  - helpers
+  license:
+    name: Apache-2.0
+    url: https://github.com/opendatabs/dags-airflow2/blob/main/LICENSE
+    attribution: Open Data Basel-Stadt
+  redistribution: redistributable
+  transformation: Reference-only production-oriented open-data DAG patterns; no 
+    source text copied into this fixture release.
+  privacy_review: 'Completed 2026-08-01: public repository reviewed; organization-specific
+    identifiers are not admitted as fixtures.'
+  secrets_review: 'Completed 2026-08-01: source admission is metadata-only and no
+    credentials or source files are redistributed here.'
+  derived_from: []
+- source_id: mozilla-telemetry-airflow
+  kind: public
+  url: https://github.com/mozilla/telemetry-airflow
+  revision: 019aab5c1e63ca553a7b9e96b1609a6ecaa8ef3c
+  paths:
+  - dags
+  - utils
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/en-US/MPL/2.0/
+    attribution: Mozilla Corporation
+  redistribution: derived-only
+  transformation: Pattern reference only; no Mozilla source, employee 
+    identifiers, or organization-specific configuration is copied into the 
+    benchmark.
+  privacy_review: 'Completed 2026-08-01: public source reviewed; personal and organization-specific
+    identifiers are excluded.'
+  secrets_review: 'Completed 2026-08-01: source admission is metadata-only and no
+    credentials or source files are redistributed here.'
+  derived_from: []
+- source_id: ethereum-etl-airflow
+  kind: public
+  url: https://github.com/blockchain-etl/ethereum-etl-airflow
+  revision: 27d0fb037cbe8b9ba62880f99c155823ab2e4a35
+  paths:
+  - dags
+  - tests
+  license:
+    name: MIT
+    url: 
+      https://github.com/blockchain-etl/ethereum-etl-airflow/blob/master/LICENSE
+    attribution: blockchain-etl contributors
+  redistribution: redistributable
+  transformation: Reference-only Composer and cloud-provider DAG patterns; no 
+    source text copied into this fixture release.
+  privacy_review: 'Completed 2026-08-01: public repository reviewed; external service
+    identifiers are not admitted as fixtures.'
+  secrets_review: 'Completed 2026-08-01: source admission is metadata-only and no
+    credentials or source files are redistributed here.'
+  derived_from: []
+- source_id: conformdag-synthetic-generator
+  kind: synthetic
+  url: https://github.com/parthmule28/conformdag
+  revision: synthetic-deterministic-v2
+  paths: []
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+    attribution:
+  redistribution: redistributable
+  transformation: Project-owned fixtures generated from named deterministic 
+    recipes; recipe patterns were reviewed against the admitted public source 
+    references.
+  privacy_review: 'Completed: generated source contains no organizational data.'
+  secrets_review: 'Completed: generated source contains no credentials or secret material.'
+  derived_from:
+  - apache-airflow-2.11.2
+  - apache-airflow-3.3.0
+  - opendatabs-dags-airflow2
+  - mozilla-telemetry-airflow
+  - ethereum-etl-airflow
+cases:
+- id: air-det-001-01
+  fixture: fixtures/air-det-001/case-01.py
+  fixture_sha256: 
+    69bd36888e24153ae9052a2ee576ac00f3238debceadc6b16519ab0c50085616
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-01.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 1
+- id: air-det-001-02
+  fixture: fixtures/air-det-001/case-02.py
+  fixture_sha256: 
+    4e18bcb89a1d1fc3869ee2f4902c246de13c3c51f25726b6069647dd6bb965b2
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-02.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 2
+- id: air-det-001-03
+  fixture: fixtures/air-det-001/case-03.py
+  fixture_sha256: 
+    37a1fc001a763576420d846fce45452db23c3243212390e02188acc894142619
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-03.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 3
+- id: air-det-001-04
+  fixture: fixtures/air-det-001/case-04.py
+  fixture_sha256: 
+    17083be2da96f61ed3b6391f53da156079385a569020b7cc52e7250094401d7f
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-04.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 4
+- id: air-det-001-05
+  fixture: fixtures/air-det-001/case-05.py
+  fixture_sha256: 
+    51ecc047861b9dfc29f6b7dbd2e0dd1d1e35cda51f6c804a38ebb110473e78da
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-05.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 5
+- id: air-det-001-06
+  fixture: fixtures/air-det-001/case-06.py
+  fixture_sha256: 
+    e0cb7897c0c485a69e63b8cbfcdde72cbdefee10d3855d409285caed34683a08
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-06.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 6
+- id: air-det-001-07
+  fixture: fixtures/air-det-001/case-07.py
+  fixture_sha256: 
+    11e1c730d0b40239fed9a290ed2a216c5b68f77b0aee15f1ddba20426235e9ee
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-07.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 7
+- id: air-det-001-08
+  fixture: fixtures/air-det-001/case-08.py
+  fixture_sha256: 
+    fd211fc4c2ba5c21b470a1af11105fc4c50dff50606d65546a11182232b76f11
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-08.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 8
+- id: air-det-001-09
+  fixture: fixtures/air-det-001/case-09.py
+  fixture_sha256: 
+    0fa7806711407cfa91941b85ed4810b7875d1b614baf9cf5021d1374f9b97226
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-09.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 9
+- id: air-det-001-10
+  fixture: fixtures/air-det-001/case-10.py
+  fixture_sha256: 
+    eac66a36ec94b3d7919a0478ae71d54b76ae13851431ed1e50fa06dd9ca99783
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-10.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 10
+- id: air-det-001-11
+  fixture: fixtures/air-det-001/case-11.py
+  fixture_sha256: 
+    44fff73a5b93c7ca1a9aa1e06b333d9ef93bd9e5edc42941e91e226ee132d71a
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-11.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 11
+- id: air-det-001-12
+  fixture: fixtures/air-det-001/case-12.py
+  fixture_sha256: 
+    14b203b6b297715ea0e2387e06c16cf55de4d18af64a9c3b32b481536875f9c6
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-12.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 12
+- id: air-det-001-13
+  fixture: fixtures/air-det-001/case-13.py
+  fixture_sha256: 
+    66fae5d6904fdc804d1612e0e425cfff9489385f3a4178e8c0884699c3560b84
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-13.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 13
+- id: air-det-001-14
+  fixture: fixtures/air-det-001/case-14.py
+  fixture_sha256: 
+    6414926e0599e1d808cdc25bd5b6b8c4bd2ff7af141a010b303fe5e531662cf0
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-14.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 14
+- id: air-det-001-15
+  fixture: fixtures/air-det-001/case-15.py
+  fixture_sha256: 
+    65be751761986e82e53f11430cb80126cf7fbb4a776c1166fdafe286df8d54cb
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-15.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 15
+- id: air-det-001-16
+  fixture: fixtures/air-det-001/case-16.py
+  fixture_sha256: 
+    9141ca92572abca479399934a7b908bc21a56944c260dba77a65b54bb7e74c0a
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-16.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 16
+- id: air-det-001-17
+  fixture: fixtures/air-det-001/case-17.py
+  fixture_sha256: 
+    ff2edb157e7d45199dc2bba832eb4d675c95db305edb4f77d927872a9139e844
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-17.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 17
+- id: air-det-001-18
+  fixture: fixtures/air-det-001/case-18.py
+  fixture_sha256: 
+    c68d56c792ddd4206546637db528793987c230f5d30b0deca9b7cf7db1748bc3
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-18.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 18
+- id: air-det-001-19
+  fixture: fixtures/air-det-001/case-19.py
+  fixture_sha256: 
+    e80be71161f1972c04fda02e1b488c5b858559645568523f0d244519bc1a6cb3
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-19.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 19
+- id: air-det-001-20
+  fixture: fixtures/air-det-001/case-20.py
+  fixture_sha256: 
+    71615caba9d6d96dcb8ff9085e7845750c3ee747800118473282abfa02f5d005
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-001/case-20.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-owner-v1
+  seed: 20
+- id: air-det-001-21
+  fixture: fixtures/air-det-001/case-21.py
+  fixture_sha256: 
+    956d0cb02297dbcbb03506e1db4b4f99a977e372d29605037cd4c59d74d6ee38
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-21.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 21
+- id: air-det-001-22
+  fixture: fixtures/air-det-001/case-22.py
+  fixture_sha256: 
+    78357297bf5fef873f6def2a65d82729515b4428faed45cb7be779edcb83f2dd
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-22.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 22
+- id: air-det-001-23
+  fixture: fixtures/air-det-001/case-23.py
+  fixture_sha256: 
+    e939b25c212b02e12bbca24b0beeb2daa1b2dfe7e7ae5401b07b06a9cff1e659
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-23.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 23
+- id: air-det-001-24
+  fixture: fixtures/air-det-001/case-24.py
+  fixture_sha256: 
+    8fabcd4e13a983bdb47c240cd4db452448ccf08805bb3bbe42b3129aa18d6b66
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-24.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 24
+- id: air-det-001-25
+  fixture: fixtures/air-det-001/case-25.py
+  fixture_sha256: 
+    793fce1b540c8909d4190dc1a0248069cfc0d09a2872aa99b8ed0212ae55124f
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-25.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 25
+- id: air-det-001-26
+  fixture: fixtures/air-det-001/case-26.py
+  fixture_sha256: 
+    896b41a22d537f341ef2e08a35f60191c878e57e3ee96d8ea65c7bec89f19141
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-26.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 26
+- id: air-det-001-27
+  fixture: fixtures/air-det-001/case-27.py
+  fixture_sha256: 
+    8eeb6dbc124207e315c69db7a9d03ff33e6ba8fc1dec483ed3667090c1e59a3b
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-27.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 27
+- id: air-det-001-28
+  fixture: fixtures/air-det-001/case-28.py
+  fixture_sha256: 
+    7fd6118749d28cfc3b1768b6a246950db10b2793aeb307b1ccac061e9e6717e1
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-28.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 28
+- id: air-det-001-29
+  fixture: fixtures/air-det-001/case-29.py
+  fixture_sha256: 
+    f3330090ad64fd0af5d6c6e2c37a494f41685b74b6ac1728b74487249247edfe
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-29.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 29
+- id: air-det-001-30
+  fixture: fixtures/air-det-001/case-30.py
+  fixture_sha256: 
+    5e19231b06798fc5800918eb78ba2e9e46f4d86db3370a66add04ac9c07d9645
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-30.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 30
+- id: air-det-001-31
+  fixture: fixtures/air-det-001/case-31.py
+  fixture_sha256: 
+    021cd46a936691344b3574816b62a532e2e1acd5db143be7fbb8072c965ec2a9
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-31.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 31
+- id: air-det-001-32
+  fixture: fixtures/air-det-001/case-32.py
+  fixture_sha256: 
+    a1df2f76e1ae10dc4b28be491cbb4a57c30f5efafbb2acdabc3b550af5d4d7c0
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-32.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 32
+- id: air-det-001-33
+  fixture: fixtures/air-det-001/case-33.py
+  fixture_sha256: 
+    27009d715f1f44ae6e564e7522d1a1fe315a7a44e4b532cbe381201ec839edc5
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-33.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 33
+- id: air-det-001-34
+  fixture: fixtures/air-det-001/case-34.py
+  fixture_sha256: 
+    a46a3e575cf7c79d2ef0b6e426fa3245a3262e3f1d14b07df231631dc1a54224
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-34.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 34
+- id: air-det-001-35
+  fixture: fixtures/air-det-001/case-35.py
+  fixture_sha256: 
+    3bfb2688ffea73df906a724896fe83480fc162d7b1a4e4f7de006835e058a541
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-35.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 35
+- id: air-det-001-36
+  fixture: fixtures/air-det-001/case-36.py
+  fixture_sha256: 
+    3220b91156bf7a61e88883da8e73adff3caf37c4ce9e484d3a88d37f05d37543
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-36.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 36
+- id: air-det-001-37
+  fixture: fixtures/air-det-001/case-37.py
+  fixture_sha256: 
+    12a2f9a0823ffbb6eda735d1e515d063e98f45b975bf60e222042fbcb55d6c9c
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-37.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 37
+- id: air-det-001-38
+  fixture: fixtures/air-det-001/case-38.py
+  fixture_sha256: 
+    6e5a4cbc7aad32c72f47e821db09ec302f44cb9be96f6ee77223d004de216e99
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-38.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 38
+- id: air-det-001-39
+  fixture: fixtures/air-det-001/case-39.py
+  fixture_sha256: 
+    5a3c8e031fa8560124cf22498e6447029547de86d47a6f7043e82b096263c2c5
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-39.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 39
+- id: air-det-001-40
+  fixture: fixtures/air-det-001/case-40.py
+  fixture_sha256: 
+    3ed52259b8ac420b8d6174305bfca4cc9624e7e690d2317001318becca61d045
+  policy_id: AIR-DET-001
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-001/case-40.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 40
+- id: air-det-002-01
+  fixture: fixtures/air-det-002/case-01.py
+  fixture_sha256: 
+    cdffe4e226b20cd74e0bfbfdd41c78210486e793b26ac7a18eedf08f8e359d1a
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-01.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 1
+- id: air-det-002-02
+  fixture: fixtures/air-det-002/case-02.py
+  fixture_sha256: 
+    f3c24e62f15179d37d477f9fb531cc8576a229dab6b15ff2c72eb617ce555eda
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-02.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 2
+- id: air-det-002-03
+  fixture: fixtures/air-det-002/case-03.py
+  fixture_sha256: 
+    0a00155d68cafeac41501c9aa48317b0ebcaeae2df4ae0e1723ef70224044973
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-03.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 3
+- id: air-det-002-04
+  fixture: fixtures/air-det-002/case-04.py
+  fixture_sha256: 
+    edeb517be8a575a719180f342c87ea3798a4c9d1ec2a044d46f6f9e041f890e5
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-04.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 4
+- id: air-det-002-05
+  fixture: fixtures/air-det-002/case-05.py
+  fixture_sha256: 
+    171f8abcc9aaa38b12af7c15cacdcc9da9e688bb7a6f3104aa96f5edbda2f393
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-05.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 5
+- id: air-det-002-06
+  fixture: fixtures/air-det-002/case-06.py
+  fixture_sha256: 
+    db36d7755a6cf722fa2296ec3b6840bc2365fa12f909b90965ddee3e857b53dd
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-06.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 6
+- id: air-det-002-07
+  fixture: fixtures/air-det-002/case-07.py
+  fixture_sha256: 
+    b5c512441f7ef4e75f531ff5ba5c96a321feaefcf744b014a71fbb83fe668b1e
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-07.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 7
+- id: air-det-002-08
+  fixture: fixtures/air-det-002/case-08.py
+  fixture_sha256: 
+    75ed1b1fa078b44a67690fb46c9608c0c37b9a53fb33225335527c442cae07cd
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-08.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 8
+- id: air-det-002-09
+  fixture: fixtures/air-det-002/case-09.py
+  fixture_sha256: 
+    74837959ccc75afc87e01d6184e00dbacd5fca7fae963c067ae8820b90cd46b1
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-09.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 9
+- id: air-det-002-10
+  fixture: fixtures/air-det-002/case-10.py
+  fixture_sha256: 
+    4459da53b499661d60096110a4804452d48007ef2f5d67653746138a2c1040c7
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-10.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 10
+- id: air-det-002-11
+  fixture: fixtures/air-det-002/case-11.py
+  fixture_sha256: 
+    d1dc59861516734d2c5214de16397ab86a24d4a5e51ae1b36a02ec37f909c95c
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-11.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 11
+- id: air-det-002-12
+  fixture: fixtures/air-det-002/case-12.py
+  fixture_sha256: 
+    11cb3c32bd7938ab90492db8a7a9dae5009d40fb78324be3e630473adee5310a
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-12.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 12
+- id: air-det-002-13
+  fixture: fixtures/air-det-002/case-13.py
+  fixture_sha256: 
+    dcebda86105c3d9b2c31fa686e46f0d95ebdbf75d83c706a7c468dd83b6ecfb8
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-13.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 13
+- id: air-det-002-14
+  fixture: fixtures/air-det-002/case-14.py
+  fixture_sha256: 
+    e0b96ee07fbfaf46f9b6a6dfbf897633709b49a0e997cdb96f3e3eedabf937ec
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-14.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 14
+- id: air-det-002-15
+  fixture: fixtures/air-det-002/case-15.py
+  fixture_sha256: 
+    31e0668e991dcb348e6280034e4d897d8bb8e651d013bde4a5e6bf05d113dfc6
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-15.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 15
+- id: air-det-002-16
+  fixture: fixtures/air-det-002/case-16.py
+  fixture_sha256: 
+    bd3bdcc9a723f9bd783795dfd1c9f12e251aa210e387e328d072e920aadea89b
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-16.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 16
+- id: air-det-002-17
+  fixture: fixtures/air-det-002/case-17.py
+  fixture_sha256: 
+    ce480c42f7d764be1b693dd029b1582f7267f01c0f6c2c53fbfc3e07b399969c
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-17.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 17
+- id: air-det-002-18
+  fixture: fixtures/air-det-002/case-18.py
+  fixture_sha256: 
+    9d006b200765364afb2d931c4f70a9ea012274fb2a23fbd2bf3c8926cb2e13e1
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-18.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 18
+- id: air-det-002-19
+  fixture: fixtures/air-det-002/case-19.py
+  fixture_sha256: 
+    012eb3318229bfd395677125714f96360613c059793da955485eda895009188f
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-19.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 19
+- id: air-det-002-20
+  fixture: fixtures/air-det-002/case-20.py
+  fixture_sha256: 
+    267da54b37e9090b572204f3812cc431d40d7759f4504370dc5f6744db135c4c
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-002/case-20.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: missing-required-tags-v1
+  seed: 20
+- id: air-det-002-21
+  fixture: fixtures/air-det-002/case-21.py
+  fixture_sha256: 
+    4d03f89c94860e4e4d941ea18b2fd16fa07064e0f11a9fba63733ed90ce8450c
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-21.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 21
+- id: air-det-002-22
+  fixture: fixtures/air-det-002/case-22.py
+  fixture_sha256: 
+    b215323feb96099210cfad932f3659740894dee0e519c02f423038108ea975b9
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-22.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 22
+- id: air-det-002-23
+  fixture: fixtures/air-det-002/case-23.py
+  fixture_sha256: 
+    2a7bb8ef26fd53396f5a8a676292e9c6294d40c7e91e9f62f224afe5ccbb61bb
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-23.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 23
+- id: air-det-002-24
+  fixture: fixtures/air-det-002/case-24.py
+  fixture_sha256: 
+    bdc0d16506e7afadf4b4dffa91b11d3989906d302aee2685d478099eeb23d4cc
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-24.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 24
+- id: air-det-002-25
+  fixture: fixtures/air-det-002/case-25.py
+  fixture_sha256: 
+    430c849586b56ad4786a4af15e2fbee916bcf11a02c30ff31cec733a9310fc18
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-25.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 25
+- id: air-det-002-26
+  fixture: fixtures/air-det-002/case-26.py
+  fixture_sha256: 
+    2b1d4ed3cfeb5583a1928351e7429f7421100e6651d04ecd567b231e019f4878
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-26.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 26
+- id: air-det-002-27
+  fixture: fixtures/air-det-002/case-27.py
+  fixture_sha256: 
+    bdb38a1d1e108f282198bf8c2f7c27008d94a019d3963cc19436e22c6fa690e9
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-27.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 27
+- id: air-det-002-28
+  fixture: fixtures/air-det-002/case-28.py
+  fixture_sha256: 
+    0ae7e9fa3422709bf9ac569d6c454c29b3e57b0ca732048e56a2d609fe68a33b
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-28.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 28
+- id: air-det-002-29
+  fixture: fixtures/air-det-002/case-29.py
+  fixture_sha256: 
+    8f936a737652dcbb3115c10e011897bc9ea73ea09710624efecbcabd68dba469
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-29.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 29
+- id: air-det-002-30
+  fixture: fixtures/air-det-002/case-30.py
+  fixture_sha256: 
+    7ef675089d2e84e8e6d674c550dd778ce7aac3780f43d97b8fe8390f3829e075
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-30.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 30
+- id: air-det-002-31
+  fixture: fixtures/air-det-002/case-31.py
+  fixture_sha256: 
+    41962d0f096aa1d2409bae3adf66e3d846035c36fa405c55fd6ece95222bfd3c
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-31.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 31
+- id: air-det-002-32
+  fixture: fixtures/air-det-002/case-32.py
+  fixture_sha256: 
+    3412db2a4639e1e36f2d7d4aca15603b4b7d913fd080b7f9f7356edb6d1d877e
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-32.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 32
+- id: air-det-002-33
+  fixture: fixtures/air-det-002/case-33.py
+  fixture_sha256: 
+    537c58285f51504f44632e9c9e93ff396db53cbcb5eda74cf3fd6eb72ff5b489
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-33.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 33
+- id: air-det-002-34
+  fixture: fixtures/air-det-002/case-34.py
+  fixture_sha256: 
+    742d827d47e7606e64efb2fb4fdd8ee8dac840502adede9017fd5d4b45cf7b35
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-34.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 34
+- id: air-det-002-35
+  fixture: fixtures/air-det-002/case-35.py
+  fixture_sha256: 
+    db03ff9b269e0a9cbfcec8bdf4856634bb94fdb91f16095f510f1d93d1217777
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-35.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 35
+- id: air-det-002-36
+  fixture: fixtures/air-det-002/case-36.py
+  fixture_sha256: 
+    885d2057ebdcbb9db2e5fbbc5efe97c3629762a16846964c41988b15e1494115
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-36.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 36
+- id: air-det-002-37
+  fixture: fixtures/air-det-002/case-37.py
+  fixture_sha256: 
+    96ddf914299f55fa5b8bce1da10a97737388c5dec4d70f96b81ec64a1dffd3ad
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-37.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 37
+- id: air-det-002-38
+  fixture: fixtures/air-det-002/case-38.py
+  fixture_sha256: 
+    b6e5af788699c7e3e64479f13c1cac782c2e5d735681e939b0b9c3a40430d181
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-38.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 38
+- id: air-det-002-39
+  fixture: fixtures/air-det-002/case-39.py
+  fixture_sha256: 
+    443e50095448013d7a49ed71be061f95f8ec4d4969f0cc54f45fb7c87705071a
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-39.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 39
+- id: air-det-002-40
+  fixture: fixtures/air-det-002/case-40.py
+  fixture_sha256: 
+    91c1e42002b3f9331875ad9c689a6b0d554cfff914a6208520f57a85ec3cf2a3
+  policy_id: AIR-DET-002
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-002/case-40.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 40
+- id: air-det-003-01
+  fixture: fixtures/air-det-003/case-01.py
+  fixture_sha256: 
+    0f72c6ce6489ca5c180d71b7e8b44a4cc541d1b6dd814f73975705bc67a7c160
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-01.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 1
+- id: air-det-003-02
+  fixture: fixtures/air-det-003/case-02.py
+  fixture_sha256: 
+    6ba65b55ee5923fd99a2e6b14c7fa99e7f0864555df073c6f499424709f65c85
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-02.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 2
+- id: air-det-003-03
+  fixture: fixtures/air-det-003/case-03.py
+  fixture_sha256: 
+    6b56cd4aa906c3aed5a324d9c3d4044e1c94ba384e45719a5cb63f3f404ffc09
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-03.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 3
+- id: air-det-003-04
+  fixture: fixtures/air-det-003/case-04.py
+  fixture_sha256: 
+    83ed2b77d7a510cd9c8d0b401c38e5355e7b941066fcd56ce4b33d1db5e0ea6b
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-04.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 4
+- id: air-det-003-05
+  fixture: fixtures/air-det-003/case-05.py
+  fixture_sha256: 
+    0854245bd833fa40127deb13e89467444cd3cc69808ae9725bb412cebf9d5096
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-05.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 5
+- id: air-det-003-06
+  fixture: fixtures/air-det-003/case-06.py
+  fixture_sha256: 
+    a972e5066fefc2be7b5101c146c56fa4f4f7560d97c1d1a0ed81517e0e735e0c
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-06.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 6
+- id: air-det-003-07
+  fixture: fixtures/air-det-003/case-07.py
+  fixture_sha256: 
+    be259428547df6ed69f7c3014b0a00c8d9927495c04d7168d19db6c6ccf40de6
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-07.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 7
+- id: air-det-003-08
+  fixture: fixtures/air-det-003/case-08.py
+  fixture_sha256: 
+    3dd9402812c0c11e94ac999beffb4c79a32d7bd29bd9928d7245a65d467993a0
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-08.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 8
+- id: air-det-003-09
+  fixture: fixtures/air-det-003/case-09.py
+  fixture_sha256: 
+    a3c485b068bf8e2aa432675050d928c067b11f1c5305d5c88650a2362b36db0f
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-09.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 9
+- id: air-det-003-10
+  fixture: fixtures/air-det-003/case-10.py
+  fixture_sha256: 
+    3c3dd243c029803ade33ce061f0ea3a3ebeee81b4eac2832ea9a6165ab0119f1
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-10.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 10
+- id: air-det-003-11
+  fixture: fixtures/air-det-003/case-11.py
+  fixture_sha256: 
+    5bda9913b2c7f3cff9f46e556da5b0d0e6159bec7e2f79fda278baa9c2b0fdfc
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-11.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 11
+- id: air-det-003-12
+  fixture: fixtures/air-det-003/case-12.py
+  fixture_sha256: 
+    1314eda0119ffb1d011fc1feba54eb210cdce918ef83ec477c49ad54fec24e08
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-12.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 12
+- id: air-det-003-13
+  fixture: fixtures/air-det-003/case-13.py
+  fixture_sha256: 
+    2635727774fcb8ed16f16437a6e81f761f3fc0891956b4088066e1b9ae59e175
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-13.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 13
+- id: air-det-003-14
+  fixture: fixtures/air-det-003/case-14.py
+  fixture_sha256: 
+    71a470f0c9377a35c481c2652f133ae06ac04601b445c53c63953c59c3b045d5
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-14.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 14
+- id: air-det-003-15
+  fixture: fixtures/air-det-003/case-15.py
+  fixture_sha256: 
+    ddfe4b977b16fc21f32cbf5c83fe10951684ef3e84b9f0e754a467ff19693f4c
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-15.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 15
+- id: air-det-003-16
+  fixture: fixtures/air-det-003/case-16.py
+  fixture_sha256: 
+    4ec1a153fc36f09fc68ea05ab954720d32db202a4a4a16c443f1d04dabd6a09d
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-16.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 16
+- id: air-det-003-17
+  fixture: fixtures/air-det-003/case-17.py
+  fixture_sha256: 
+    d211142319be22dfcdfbadbcc80de92fee7573bbf56791ac75a9c72f48bf046a
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-17.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 17
+- id: air-det-003-18
+  fixture: fixtures/air-det-003/case-18.py
+  fixture_sha256: 
+    f92011582d84153b81ed7f5db5e6c73c2988b05791c929e50639dfdbc4721931
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-18.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 18
+- id: air-det-003-19
+  fixture: fixtures/air-det-003/case-19.py
+  fixture_sha256: 
+    d9c75dc8306373be0ac0788511e4ce16685689e59c6f397c1eb8f41e9a9e1319
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-19.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 19
+- id: air-det-003-20
+  fixture: fixtures/air-det-003/case-20.py
+  fixture_sha256: 
+    3d3aadabef1a863e65804731aa6966763e3526a5526353570fc0f6ffd9d5c5f2
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-003/case-20.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: timeout-above-maximum-v1
+  seed: 20
+- id: air-det-003-21
+  fixture: fixtures/air-det-003/case-21.py
+  fixture_sha256: 
+    9e1485be391d45898daaf5643956daf8dfcd315f668f5cc4bb043e62f21103fe
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-21.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 21
+- id: air-det-003-22
+  fixture: fixtures/air-det-003/case-22.py
+  fixture_sha256: 
+    cbb199cec0d14b5f966487a3dcdfcf51aacc6ff51976968ab25803c83b89fc23
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-22.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 22
+- id: air-det-003-23
+  fixture: fixtures/air-det-003/case-23.py
+  fixture_sha256: 
+    a824716c7ba4d344c0fb11decc960d8b0a3b52374bd2768aa7315ce14222f5ca
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-23.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 23
+- id: air-det-003-24
+  fixture: fixtures/air-det-003/case-24.py
+  fixture_sha256: 
+    6dd0616f6056b8a7184cff704a5b8b91f2f15d6162afa843eb6a49c1c40086dc
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-24.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 24
+- id: air-det-003-25
+  fixture: fixtures/air-det-003/case-25.py
+  fixture_sha256: 
+    d2874f28db3e84697287476acf333f2f0c66fa3c9b01f0fa1ffe421d14f0d63b
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-25.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 25
+- id: air-det-003-26
+  fixture: fixtures/air-det-003/case-26.py
+  fixture_sha256: 
+    400a2b6b325b561025d8ddf03898d11c0b5569cd74ac7d609e5b03714b624b43
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-26.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 26
+- id: air-det-003-27
+  fixture: fixtures/air-det-003/case-27.py
+  fixture_sha256: 
+    745fc82f999dfc7e496328e337c7a29c90dc5542ed5dabd330950f38352e5c3a
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-27.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 27
+- id: air-det-003-28
+  fixture: fixtures/air-det-003/case-28.py
+  fixture_sha256: 
+    791a1990efba9bb6287f2f6d204fd61c9a3d0d81abf67756ccb13feda0a05d62
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-28.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 28
+- id: air-det-003-29
+  fixture: fixtures/air-det-003/case-29.py
+  fixture_sha256: 
+    501f2b6ff33ec4608bb74e857815fbc16cb586f66113695a018efe5727c3ecb3
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-29.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 29
+- id: air-det-003-30
+  fixture: fixtures/air-det-003/case-30.py
+  fixture_sha256: 
+    65e3902ae29b8ca98ae76a2f56f8a01b0cd75f0268c99730df2fca3363cdcc3e
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-30.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 30
+- id: air-det-003-31
+  fixture: fixtures/air-det-003/case-31.py
+  fixture_sha256: 
+    ca42304a71c15b66b6f70d81ecc85fd4b8cd4b93adb0e280c4bf11795dcc8f6c
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-31.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 31
+- id: air-det-003-32
+  fixture: fixtures/air-det-003/case-32.py
+  fixture_sha256: 
+    8736d0b62b0017537fdb774a8d20582b1e549e096714a7cdf84fe223f232c5df
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-32.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 32
+- id: air-det-003-33
+  fixture: fixtures/air-det-003/case-33.py
+  fixture_sha256: 
+    d9a3e15692d5649b7e912ee82bd563941da7f67c71b00e41786afb328014e8de
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-33.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 33
+- id: air-det-003-34
+  fixture: fixtures/air-det-003/case-34.py
+  fixture_sha256: 
+    bbbbf131b98a6e920195d6646a7b2575f2ed6fe6f129b05d4932b182d9b81cce
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-34.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 34
+- id: air-det-003-35
+  fixture: fixtures/air-det-003/case-35.py
+  fixture_sha256: 
+    fa821f41c4085f0432195ae8d4a4da7651e257ac886028760aecbde6b92ee291
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-35.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 35
+- id: air-det-003-36
+  fixture: fixtures/air-det-003/case-36.py
+  fixture_sha256: 
+    2ea799f33dbea5636f3e0a132f0d4cfc03da73df76e1b224f00d45b25fb290b6
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-36.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 36
+- id: air-det-003-37
+  fixture: fixtures/air-det-003/case-37.py
+  fixture_sha256: 
+    0cfe24fe17db9c8df8cc369beda525885846e6b01bd015fc541c29030b818c0a
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-37.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 37
+- id: air-det-003-38
+  fixture: fixtures/air-det-003/case-38.py
+  fixture_sha256: 
+    652ae2f764530ab2d51201668f891cdc98e7e1d3e20164f3e97461ebd698a40c
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-38.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 38
+- id: air-det-003-39
+  fixture: fixtures/air-det-003/case-39.py
+  fixture_sha256: 
+    34cc8d966b7f54d41d50ba0a5ee1299daebd1fd99a5461a30ffa17bc549a3caf
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-39.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 39
+- id: air-det-003-40
+  fixture: fixtures/air-det-003/case-40.py
+  fixture_sha256: 
+    e0564396b6bb1a9d943ecff69a255abe475c990dbb7139b72742563c5253738d
+  policy_id: AIR-DET-003
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-003/case-40.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 40
+- id: air-det-004-01
+  fixture: fixtures/air-det-004/case-01.py
+  fixture_sha256: 
+    c8ad682b7d9be004b2bae29abb1fb04eb3db57bb64d80ff8d03d84020a73b20f
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-01.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 1
+- id: air-det-004-02
+  fixture: fixtures/air-det-004/case-02.py
+  fixture_sha256: 
+    e8e1aee83c644b78dcfac3f9f9286591e1928038beb652d93ec7ca757ecd8f5a
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-02.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 2
+- id: air-det-004-03
+  fixture: fixtures/air-det-004/case-03.py
+  fixture_sha256: 
+    68fa527e1bf8a0b2642685f5b20044330f61a45863d95eb92b6a3fb6686c3779
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-03.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 3
+- id: air-det-004-04
+  fixture: fixtures/air-det-004/case-04.py
+  fixture_sha256: 
+    d3ea809a23091815cb1d7756f84606a8d39d715f4cd8d99ff78166752034bae0
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-04.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 4
+- id: air-det-004-05
+  fixture: fixtures/air-det-004/case-05.py
+  fixture_sha256: 
+    b0047d4113c078aa4f2581ec7b3c4087347802ac355a84db91bbaed34a8f85f9
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-05.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 5
+- id: air-det-004-06
+  fixture: fixtures/air-det-004/case-06.py
+  fixture_sha256: 
+    8a04ebe0ebc93d814eec6022d307c2779bd9126dde9484f223fb2bb501d44d68
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-06.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 6
+- id: air-det-004-07
+  fixture: fixtures/air-det-004/case-07.py
+  fixture_sha256: 
+    bd0de40920088a302bc9bfffc2566f9c6bdbcf4e342e4b8a77268c1980f8d278
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-07.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 7
+- id: air-det-004-08
+  fixture: fixtures/air-det-004/case-08.py
+  fixture_sha256: 
+    a699f52adc72cea52241bfe7f56c217c6462bef0d4462a94161b82ea19d756f9
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-08.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 8
+- id: air-det-004-09
+  fixture: fixtures/air-det-004/case-09.py
+  fixture_sha256: 
+    4b64da1aec74931c0496ce3e9be17b814779cab95899c009484e0a15813e959e
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-09.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 9
+- id: air-det-004-10
+  fixture: fixtures/air-det-004/case-10.py
+  fixture_sha256: 
+    b149068857d3f343a2fd388dc70616b1f47d7005288c4e6c7bd0a4e6e0d90ed0
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-10.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 10
+- id: air-det-004-11
+  fixture: fixtures/air-det-004/case-11.py
+  fixture_sha256: 
+    dc5dd88fe97f78ee0082f2028c6838be51b73df531abdbdeb70b4fbf67f7c344
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-11.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 11
+- id: air-det-004-12
+  fixture: fixtures/air-det-004/case-12.py
+  fixture_sha256: 
+    ba3a12a7e06d76394ae2fb01be6748d3dfbd091721b34a0147433e7793e95372
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-12.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 12
+- id: air-det-004-13
+  fixture: fixtures/air-det-004/case-13.py
+  fixture_sha256: 
+    09becf04f962cbfc29202913ee66077c7a1db984e8fd4aac24778cc3ecd8994f
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-13.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 13
+- id: air-det-004-14
+  fixture: fixtures/air-det-004/case-14.py
+  fixture_sha256: 
+    e127ea8abd747d47a3863b4213f6e3a0a800250cedc40b1036ace5e2ff8c39e0
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-14.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 14
+- id: air-det-004-15
+  fixture: fixtures/air-det-004/case-15.py
+  fixture_sha256: 
+    cbec8bae83041e5090645a620762a1931da9df999be324713a01dfba3cd911bc
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-15.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 15
+- id: air-det-004-16
+  fixture: fixtures/air-det-004/case-16.py
+  fixture_sha256: 
+    afed620466547ebf0586f7a40caed3265d3c475165bbd2e0c56a16bbe43c648e
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-16.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 16
+- id: air-det-004-17
+  fixture: fixtures/air-det-004/case-17.py
+  fixture_sha256: 
+    d948c052a32e3be6fe3d3d73a4948a3d56ecbb104971e2e5f3dd239d0e0486fc
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-17.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 17
+- id: air-det-004-18
+  fixture: fixtures/air-det-004/case-18.py
+  fixture_sha256: 
+    8d89bc6f69ef9cebdf90433ba5236617ead9830485a17c85c0273b77103f40cc
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-18.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 18
+- id: air-det-004-19
+  fixture: fixtures/air-det-004/case-19.py
+  fixture_sha256: 
+    f7a7bfbe90e669b8838735ff4ef2a6af9b0ba1b2defd21b7b059e29f624a08aa
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-19.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 19
+- id: air-det-004-20
+  fixture: fixtures/air-det-004/case-20.py
+  fixture_sha256: 
+    ff6276a6845ac1fb05fa5adef75f8814ba6a880366e8569a8f0643513f4ff78c
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-004/case-20.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: retry-bounds-exceeded-v1
+  seed: 20
+- id: air-det-004-21
+  fixture: fixtures/air-det-004/case-21.py
+  fixture_sha256: 
+    70ba3c21a348abfdaec578d526bda55d2f7e48f6d9230f538369f178884acea3
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-21.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 21
+- id: air-det-004-22
+  fixture: fixtures/air-det-004/case-22.py
+  fixture_sha256: 
+    4e79d7b26da0976b82907f7a7bb36711678fe12d9234ecb2024859460c2b62db
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-22.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 22
+- id: air-det-004-23
+  fixture: fixtures/air-det-004/case-23.py
+  fixture_sha256: 
+    56ee8f54b5d95b91ed216f4dbd29f6599c33d352bef036926bbba2c0fc6d4469
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-23.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 23
+- id: air-det-004-24
+  fixture: fixtures/air-det-004/case-24.py
+  fixture_sha256: 
+    f1bd4395b186673e40d9cfc6f53ae47c4c5276940e5526c8c2cec0d81b3bb8bd
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-24.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 24
+- id: air-det-004-25
+  fixture: fixtures/air-det-004/case-25.py
+  fixture_sha256: 
+    f1efbfbe66b17de9cc28b927d55ca5081f4eb42e529ce2dc97ee11affeda9092
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-25.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 25
+- id: air-det-004-26
+  fixture: fixtures/air-det-004/case-26.py
+  fixture_sha256: 
+    191ecf3039fedcbe1a7a9f958735953a783e33a87e5eb835f2a879fd0d3af1d3
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-26.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 26
+- id: air-det-004-27
+  fixture: fixtures/air-det-004/case-27.py
+  fixture_sha256: 
+    c409d324dbedd886331fcbce02b2cbed8c31490aec9ef141c78d9b74b8693d2a
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-27.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 27
+- id: air-det-004-28
+  fixture: fixtures/air-det-004/case-28.py
+  fixture_sha256: 
+    6c7b2c1a7d1e7334a15c159459de96c52af0bdd1bfde37eab12079969bde4480
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-28.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 28
+- id: air-det-004-29
+  fixture: fixtures/air-det-004/case-29.py
+  fixture_sha256: 
+    4b0382c4f64d288a21e4f46de0455387de0a8c5a4cf0c03de3c55281c62d12a6
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-29.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 29
+- id: air-det-004-30
+  fixture: fixtures/air-det-004/case-30.py
+  fixture_sha256: 
+    d72193eecedfe1b73a9317c8d0c8da476f48079062c1564ea130667fc91126b7
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-30.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 30
+- id: air-det-004-31
+  fixture: fixtures/air-det-004/case-31.py
+  fixture_sha256: 
+    1410ad80200f39709babf318f33e4c8b2594c54b3cab71698e19bdc82c0e22be
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-31.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 31
+- id: air-det-004-32
+  fixture: fixtures/air-det-004/case-32.py
+  fixture_sha256: 
+    4a5d2246f034e0e1589cb3486c6010149b6d4f843c25a3542d5e32adca139a12
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-32.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 32
+- id: air-det-004-33
+  fixture: fixtures/air-det-004/case-33.py
+  fixture_sha256: 
+    b42b6a46c5231b5d86678fbbfd379b30f9d48310099199e839e5f035e2204f33
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-33.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 33
+- id: air-det-004-34
+  fixture: fixtures/air-det-004/case-34.py
+  fixture_sha256: 
+    0f6b1c34ec5af25846c0ca7cab84269c76228e3a374218289dde344ca1da3c87
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-34.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 34
+- id: air-det-004-35
+  fixture: fixtures/air-det-004/case-35.py
+  fixture_sha256: 
+    391453144229b191425a9122a15e4bd75b2a6535270b4264fbc4424b55d6683e
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-35.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 35
+- id: air-det-004-36
+  fixture: fixtures/air-det-004/case-36.py
+  fixture_sha256: 
+    12bf02af163c413d226f2c7ea00ab11e2132781869c56d7ca66d0c73230fa9ee
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-36.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 36
+- id: air-det-004-37
+  fixture: fixtures/air-det-004/case-37.py
+  fixture_sha256: 
+    3a0087802749a288451d32671048e53c1c3ce8c62494a9eaebc1fc10a699175e
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-37.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 37
+- id: air-det-004-38
+  fixture: fixtures/air-det-004/case-38.py
+  fixture_sha256: 
+    326370860efc3b13d32fd9353892a5566235e73372314bccbec4407422b66155
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-38.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 38
+- id: air-det-004-39
+  fixture: fixtures/air-det-004/case-39.py
+  fixture_sha256: 
+    301fa869c63b0e3aa38bb6f274cf8f401feff6c03eb42ba51c9bc5dd8d52ef8a
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-39.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 39
+- id: air-det-004-40
+  fixture: fixtures/air-det-004/case-40.py
+  fixture_sha256: 
+    cad103c8a55152334070514e3fb04f6b580616384637378ecc13dfb33ef8f85c
+  policy_id: AIR-DET-004
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-004/case-40.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 40
+- id: air-det-005-01
+  fixture: fixtures/air-det-005/case-01.py
+  fixture_sha256: 
+    0f60010c536c2e21ca0d55544010499f3156d53311ccf5d07edced56c1c707ca
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-01.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 1
+- id: air-det-005-02
+  fixture: fixtures/air-det-005/case-02.py
+  fixture_sha256: 
+    c7ec14f4d152b470a1043104136d1c5839e7da55e69d792f9429cab47d9f8e03
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-02.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 2
+- id: air-det-005-03
+  fixture: fixtures/air-det-005/case-03.py
+  fixture_sha256: 
+    c542e85a36719879eddc699642756eb54e62ce54a284d97833015e06f61e0b88
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-03.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 3
+- id: air-det-005-04
+  fixture: fixtures/air-det-005/case-04.py
+  fixture_sha256: 
+    2faa87b3e7614997867a1e5856736756e392a864baaa4bb7c77f172ebf282804
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-04.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 4
+- id: air-det-005-05
+  fixture: fixtures/air-det-005/case-05.py
+  fixture_sha256: 
+    8363f1e5cd7785e3af1ed61e80df3bf63d98a3470bb88e83ac559e0fdc7e7240
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-05.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 5
+- id: air-det-005-06
+  fixture: fixtures/air-det-005/case-06.py
+  fixture_sha256: 
+    77011dafdd7595ad426f2f3ba92ce156ed0710dccef9b489467a5f8176f7d139
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-06.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 6
+- id: air-det-005-07
+  fixture: fixtures/air-det-005/case-07.py
+  fixture_sha256: 
+    9c22a0523350250bd93bfc4aafe805a45d6340ac9db33c1dc3e820acaaf5e511
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-07.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 7
+- id: air-det-005-08
+  fixture: fixtures/air-det-005/case-08.py
+  fixture_sha256: 
+    9fb58b06f1b64a820b45609ee5feca89e2dd952fafd6807d06b052f599d595ad
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-08.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 8
+- id: air-det-005-09
+  fixture: fixtures/air-det-005/case-09.py
+  fixture_sha256: 
+    6a9a0bf3f4f4ca1a93127ab1eaba451074b007243b06b87b02f21d53d395c35e
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-09.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 9
+- id: air-det-005-10
+  fixture: fixtures/air-det-005/case-10.py
+  fixture_sha256: 
+    a2dd1959f90f2cad1a118d2849ed1437a5c1c0d459b82319fc549b216ca0398b
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-10.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 10
+- id: air-det-005-11
+  fixture: fixtures/air-det-005/case-11.py
+  fixture_sha256: 
+    599bb4c881f2e43315a068066ceb29d92913a888af3c61fd9f5b547a9b598130
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-11.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 11
+- id: air-det-005-12
+  fixture: fixtures/air-det-005/case-12.py
+  fixture_sha256: 
+    431886562cbf0b805e65a941b11ed1abaad552def090c9a1f9284025b1de62db
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-12.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 12
+- id: air-det-005-13
+  fixture: fixtures/air-det-005/case-13.py
+  fixture_sha256: 
+    193f04e063e0e09944aa3e4a929c32ec0a12e3de3f0d46275d102031e7a17ada
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-13.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 13
+- id: air-det-005-14
+  fixture: fixtures/air-det-005/case-14.py
+  fixture_sha256: 
+    d982f8aa95989b830a0ec65247f57439dbf09df2b725eb470a63aca8b61e1671
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-14.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 14
+- id: air-det-005-15
+  fixture: fixtures/air-det-005/case-15.py
+  fixture_sha256: 
+    59699ce9a858ae257c98c80a01d5b99ddd4a4498cbecb942783fcd5c6468368f
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-15.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 15
+- id: air-det-005-16
+  fixture: fixtures/air-det-005/case-16.py
+  fixture_sha256: 
+    8e66f94ec7a70b733c0435597a6f598a7da420db04e6b5ce48079377b1e2b42c
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-16.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 16
+- id: air-det-005-17
+  fixture: fixtures/air-det-005/case-17.py
+  fixture_sha256: 
+    2ef9e2b86b218cdeafc370a1e463faae4786b0ed596c5d2b5b724f89c907a422
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-17.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 17
+- id: air-det-005-18
+  fixture: fixtures/air-det-005/case-18.py
+  fixture_sha256: 
+    9fe5cd3490293c2bdf906d5a164da70333dac755c3f4a51f3005470898079585
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-18.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 18
+- id: air-det-005-19
+  fixture: fixtures/air-det-005/case-19.py
+  fixture_sha256: 
+    4878e13f3c2fcbdd8786d093a3983134d736c9d69cdcb248127721f2bf5d711d
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-19.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 19
+- id: air-det-005-20
+  fixture: fixtures/air-det-005/case-20.py
+  fixture_sha256: 
+    6673bced8d523eed33747bba067c1b0daa1a15e3db4c635eddf5bcf805dec1c4
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-005/case-20.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: module-scope-network-call-v1
+  seed: 20
+- id: air-det-005-21
+  fixture: fixtures/air-det-005/case-21.py
+  fixture_sha256: 
+    275f4bff24addba2e5c40b187fec073f7a8684df89695b690cf931e9a7cc59d0
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-21.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 21
+- id: air-det-005-22
+  fixture: fixtures/air-det-005/case-22.py
+  fixture_sha256: 
+    f8a588f665d45ba603cfbc66e2f9fabb68f0d1084019676a5fae1c759f5ceeac
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-22.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 22
+- id: air-det-005-23
+  fixture: fixtures/air-det-005/case-23.py
+  fixture_sha256: 
+    f7fe2d96499d8cb9f7a931b9f4969190e8b9b4abdf69e97abfbe5b35431964f6
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-23.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 23
+- id: air-det-005-24
+  fixture: fixtures/air-det-005/case-24.py
+  fixture_sha256: 
+    1a619a17706b1129875ebe77a7a4c911ead7b4e37034e3d1afad6b5b8d93e5a7
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-24.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 24
+- id: air-det-005-25
+  fixture: fixtures/air-det-005/case-25.py
+  fixture_sha256: 
+    71ab0779619aecd0ed133944c5e507f9d6b642e4b8af629d8c7ddd255648a8f2
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-25.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 25
+- id: air-det-005-26
+  fixture: fixtures/air-det-005/case-26.py
+  fixture_sha256: 
+    7c13fbf3fe9bdd37c1a0a49672541b1a8759faacdf6e7a5cdbb7b8ae5eef8785
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-26.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 26
+- id: air-det-005-27
+  fixture: fixtures/air-det-005/case-27.py
+  fixture_sha256: 
+    93e7911bfd131ac20573489d9d8ad26b05f4969b1104370c27cd539abea9f17b
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-27.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 27
+- id: air-det-005-28
+  fixture: fixtures/air-det-005/case-28.py
+  fixture_sha256: 
+    6e0bf0d30cda77b1c4c7b971912caf54a2a976a95dbc35d2bae1e0bb34609d04
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-28.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 28
+- id: air-det-005-29
+  fixture: fixtures/air-det-005/case-29.py
+  fixture_sha256: 
+    9ae8f37dd552dd58aa00a671dde0900ed05c68b0ba4bc8c201ed479e7c940969
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-29.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 29
+- id: air-det-005-30
+  fixture: fixtures/air-det-005/case-30.py
+  fixture_sha256: 
+    0ca18b210c38b3f17cd10e59e40db2d4b4a651a689b3bd356441cb8fff141046
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-30.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 30
+- id: air-det-005-31
+  fixture: fixtures/air-det-005/case-31.py
+  fixture_sha256: 
+    06ecd669f0000f7742ebd3b2a004ad2a56c5363a47fad2da0b4e47d055d7ff03
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-31.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 31
+- id: air-det-005-32
+  fixture: fixtures/air-det-005/case-32.py
+  fixture_sha256: 
+    96202ff310b37b4221526fe6743ee5ca12757a7db61bd7926d4fcd53c23445d0
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-32.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 32
+- id: air-det-005-33
+  fixture: fixtures/air-det-005/case-33.py
+  fixture_sha256: 
+    236ed2ae344b8420409737b88ad2e8a21aef55b28ab6567f9deb431c1635afcc
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-33.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 33
+- id: air-det-005-34
+  fixture: fixtures/air-det-005/case-34.py
+  fixture_sha256: 
+    7f585f54ebedc372269d0f9fac32a5011c817ee28317bab02f617e46401951a7
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-34.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 34
+- id: air-det-005-35
+  fixture: fixtures/air-det-005/case-35.py
+  fixture_sha256: 
+    852d31f6d7da63ee8979083b14c72200dbd9b17aabdde682261554ffcfd1d63f
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-35.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 35
+- id: air-det-005-36
+  fixture: fixtures/air-det-005/case-36.py
+  fixture_sha256: 
+    5f825fb202958bc371f4a4ad6101075f2879e9885100c960fbf8e85dd88e2272
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-36.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 36
+- id: air-det-005-37
+  fixture: fixtures/air-det-005/case-37.py
+  fixture_sha256: 
+    1c9bb63c7b1c7173a0e0baf8fe267a0b9f1d5fc3355148829a5ec6e539a40010
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-37.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 37
+- id: air-det-005-38
+  fixture: fixtures/air-det-005/case-38.py
+  fixture_sha256: 
+    0cb639dab45ae9f1b66c08475e2405d255c28111d80e0c66200ffb55f1eb56c0
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-38.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 38
+- id: air-det-005-39
+  fixture: fixtures/air-det-005/case-39.py
+  fixture_sha256: 
+    dccb3f1efcdb1174cea26a2db8885bb3ae9e2af8ec76cadbb88a835c8fd7fcaf
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-39.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 39
+- id: air-det-005-40
+  fixture: fixtures/air-det-005/case-40.py
+  fixture_sha256: 
+    3a945449e82df3f58c7fe8ec134502076c45005ae72358dc20b5b3bca86c341f
+  policy_id: AIR-DET-005
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-005/case-40.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 40
+- id: air-det-006-01
+  fixture: fixtures/air-det-006/case-01.py
+  fixture_sha256: 
+    09a6588fc2984de45dc292e88970d32bf4ed32b24c6829ebbc9dc176c07ddb7b
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-01.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 1
+- id: air-det-006-02
+  fixture: fixtures/air-det-006/case-02.py
+  fixture_sha256: 
+    cf7de9c53c33bfbc22ff23155b96fb33fc02dec368d7f79bf4535939b3aa739c
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-02.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 2
+- id: air-det-006-03
+  fixture: fixtures/air-det-006/case-03.py
+  fixture_sha256: 
+    34d16acd42027dfd8eccca4185eafcc0ffc9a2da85b87749dbe726f9145ee112
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-03.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 3
+- id: air-det-006-04
+  fixture: fixtures/air-det-006/case-04.py
+  fixture_sha256: 
+    d5254e172698bd62dd7a53d1513dacd569b3fcedd0cf98f24f43cee2823651cf
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-04.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 4
+- id: air-det-006-05
+  fixture: fixtures/air-det-006/case-05.py
+  fixture_sha256: 
+    9b8d42578de4ac4e9fcb9180c1dbd20caa6bfbb027f69e159327683a4e664768
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-05.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 5
+- id: air-det-006-06
+  fixture: fixtures/air-det-006/case-06.py
+  fixture_sha256: 
+    541068150a8a33cf4971cd2494c16dff03f2e06c4b203bdfeb46df07d6ce198a
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-06.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 6
+- id: air-det-006-07
+  fixture: fixtures/air-det-006/case-07.py
+  fixture_sha256: 
+    4eab205216841c70aa6e164176ee7ddcc05d57c2250f5fd211d2f6bbdddbd332
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-07.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 7
+- id: air-det-006-08
+  fixture: fixtures/air-det-006/case-08.py
+  fixture_sha256: 
+    b60c5c798a2867a5b4eaacaa0cc0f5af60ee903d4d09f57e102cb3bde254552b
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-08.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 8
+- id: air-det-006-09
+  fixture: fixtures/air-det-006/case-09.py
+  fixture_sha256: 
+    937b21385f24ef358e5973c41b884cc5bb933d6c7fb992564474c1b9e7395256
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-09.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 9
+- id: air-det-006-10
+  fixture: fixtures/air-det-006/case-10.py
+  fixture_sha256: 
+    d1b0f3a93a6683cb4636519b9ac9841b04d61ac9d46d87f17921316d496c0eb2
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-10.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 10
+- id: air-det-006-11
+  fixture: fixtures/air-det-006/case-11.py
+  fixture_sha256: 
+    c3463b9e8c629aca47d710c4d393161df206abe4b47897a57baacdf327785a63
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-11.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 11
+- id: air-det-006-12
+  fixture: fixtures/air-det-006/case-12.py
+  fixture_sha256: 
+    f29bdc9dd8a214376ec8233d0a8c5d48332eaa26ba83d249e68e4c76db967ed6
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-12.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 12
+- id: air-det-006-13
+  fixture: fixtures/air-det-006/case-13.py
+  fixture_sha256: 
+    f8b3750b1f3c89ec74d8b7d99320de31ca8fe000370a9111159df80cdd603138
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-13.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 13
+- id: air-det-006-14
+  fixture: fixtures/air-det-006/case-14.py
+  fixture_sha256: 
+    0345031aef09cafc50c335cd24fb44842efb2bc00d5ca6387ae6b1709a382e18
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-14.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 14
+- id: air-det-006-15
+  fixture: fixtures/air-det-006/case-15.py
+  fixture_sha256: 
+    b75429a0ad465a2d5b0de962193638298bc3ba4fd135c437a4920c331d938a27
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-15.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 15
+- id: air-det-006-16
+  fixture: fixtures/air-det-006/case-16.py
+  fixture_sha256: 
+    5a28da25929940ee41260346f1ed5911e75ebe38506f23bf4461d4b16cd657c6
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-16.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 16
+- id: air-det-006-17
+  fixture: fixtures/air-det-006/case-17.py
+  fixture_sha256: 
+    aee3fb84bc08e6d60967eb1ec4cf62fc3890453efb0d333ffda32c998777058d
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-17.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 17
+- id: air-det-006-18
+  fixture: fixtures/air-det-006/case-18.py
+  fixture_sha256: 
+    2d7ffaa02433560494e3fe119fb7989fe5403c4a6bd4248dddec401ac59b2000
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-18.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 18
+- id: air-det-006-19
+  fixture: fixtures/air-det-006/case-19.py
+  fixture_sha256: 
+    9c68dca32e6b8df152b17ea7de3904f07210f94abe521f2495fe6657d757c2c7
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-19.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 19
+- id: air-det-006-20
+  fixture: fixtures/air-det-006/case-20.py
+  fixture_sha256: 
+    e44443719707c1ca336b30e0d5a642fb1bdafb35523fab0bd0c48a17040bff37
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: violation
+  expected_applicable: true
+  expected_status: FAIL
+  expected_location:
+    file: fixtures/air-det-006/case-20.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe: forbidden-operator-v1
+  seed: 20
+- id: air-det-006-21
+  fixture: fixtures/air-det-006/case-21.py
+  fixture_sha256: 
+    091281a42bfba0f57f3744b9ee4b7ef3dcf5436845abc1fd71ef59381e58dabb
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-21.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 21
+- id: air-det-006-22
+  fixture: fixtures/air-det-006/case-22.py
+  fixture_sha256: 
+    023df9d214c3987fb6c44a1a75c14d6544490f050cda51efd141d41703ec6e0d
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-22.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 22
+- id: air-det-006-23
+  fixture: fixtures/air-det-006/case-23.py
+  fixture_sha256: 
+    305cfd49d6003168e78892ca7125caee7f4e94918235b8066495fb738f36f5b3
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-23.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 23
+- id: air-det-006-24
+  fixture: fixtures/air-det-006/case-24.py
+  fixture_sha256: 
+    1930caba5c656286d19cf970a6b564b697bf6c8996e1d7226611bce58b854e1b
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-24.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 24
+- id: air-det-006-25
+  fixture: fixtures/air-det-006/case-25.py
+  fixture_sha256: 
+    d553dc5ad25b13c2cfd4f380841b6f55ed0d1111406300bc0cdaa495834b761a
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-25.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 25
+- id: air-det-006-26
+  fixture: fixtures/air-det-006/case-26.py
+  fixture_sha256: 
+    1012bbed7585e4438af5baf37745c211313267902f31cd6fc244279504c839b3
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-26.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 26
+- id: air-det-006-27
+  fixture: fixtures/air-det-006/case-27.py
+  fixture_sha256: 
+    ce644c5b8ed2ae0eb93f04bab5824f99adf77d5bbae43a1032edc0cb56390eaa
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-27.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 27
+- id: air-det-006-28
+  fixture: fixtures/air-det-006/case-28.py
+  fixture_sha256: 
+    25198b58e90bf5318035e3758d349d2a23fd0e108d9097067c439e6841e51e3b
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-28.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 28
+- id: air-det-006-29
+  fixture: fixtures/air-det-006/case-29.py
+  fixture_sha256: 
+    efdfb4c4f26f05905ee933912d34165421a1402ebce773df9beb63b3dfb89f1a
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-29.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 29
+- id: air-det-006-30
+  fixture: fixtures/air-det-006/case-30.py
+  fixture_sha256: 
+    76f3b4e79c38f5ea5134671dd9dcb95027ef56ddf3c3bcbbc6c3734acb0e4441
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-30.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 30
+- id: air-det-006-31
+  fixture: fixtures/air-det-006/case-31.py
+  fixture_sha256: 
+    147bd0ff96de9d12c6f0063ddc4aa492cb5c96fe336a410fc2d3b110fcc9ec3d
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-31.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 31
+- id: air-det-006-32
+  fixture: fixtures/air-det-006/case-32.py
+  fixture_sha256: 
+    a0834fb9880ee15b901a06ab4736a950a6014f19d6b6ffa3ab26f70f9bb08d68
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-32.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 32
+- id: air-det-006-33
+  fixture: fixtures/air-det-006/case-33.py
+  fixture_sha256: 
+    56ed6b13ecfb45c4170cc6b07fb33e71c8e8c7e0a8bb62ca34cc4b892ca6d959
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-33.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 33
+- id: air-det-006-34
+  fixture: fixtures/air-det-006/case-34.py
+  fixture_sha256: 
+    2d765a70bf9e96cd7f05ee41eece0e8fe443924167dea60d0b81ebe182e03c9c
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-34.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 34
+- id: air-det-006-35
+  fixture: fixtures/air-det-006/case-35.py
+  fixture_sha256: 
+    7bb361b927ed707e4d31abeb8c07bbc45fe5f5f176d43fd64057f0fd8a43ae65
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-35.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 35
+- id: air-det-006-36
+  fixture: fixtures/air-det-006/case-36.py
+  fixture_sha256: 
+    09f6539a7779f8409b9104e7e7cff00560da21f8cf11676c6430d44e89479f2a
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-36.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 36
+- id: air-det-006-37
+  fixture: fixtures/air-det-006/case-37.py
+  fixture_sha256: 
+    aa794bb87faef0d3dbb2c1f7255227af054b2994bb3c838b1de653b2c64f139e
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-37.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 37
+- id: air-det-006-38
+  fixture: fixtures/air-det-006/case-38.py
+  fixture_sha256: 
+    cc086bce97451f9c29109c3142311d0a956a46fb9ace8b4fc2a1aa2a00ef51f0
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-38.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 38
+- id: air-det-006-39
+  fixture: fixtures/air-det-006/case-39.py
+  fixture_sha256: 
+    9b89c133f58cfe24134e29f18890e042407f21e68df446f0829651203d5befcb
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: safe-counterexample
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-39.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 39
+- id: air-det-006-40
+  fixture: fixtures/air-det-006/case-40.py
+  fixture_sha256: 
+    ba079c9f34c7e657ad092b4e087c6a9088b88aa239a1986a2959cd8adbc81c88
+  policy_id: AIR-DET-006
+  source_id: conformdag-synthetic-generator
+  label: valid
+  expected_applicable: true
+  expected_status: PASS
+  expected_location:
+    file: fixtures/air-det-006/case-40.py
+    start_line:
+    end_line:
+  expected_evidence: synthetic fixture generated from the policy recipe
+  mutation_recipe:
+  seed: 40

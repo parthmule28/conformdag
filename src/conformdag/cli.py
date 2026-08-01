@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from conformdag import __version__
+from conformdag.benchmark import BenchmarkValidationError, run_deterministic_benchmark
 from conformdag.config import load_project_config
 from conformdag.models import AirflowProfile, Policy, PolicyPack, ProjectRuntimeConfig
 from conformdag.policy import PolicyValidationError, select_policy_pack
@@ -38,6 +39,8 @@ RUNTIME_IMAGE_OPTION = typer.Option(
     "--runtime-image",
     help="Enable an explicitly pinned custom runtime image.",
 )
+BENCHMARK_PATH_ARGUMENT = typer.Argument(Path("benchmarks/synthetic"))
+BENCHMARK_POLICY_PACK_OPTION = typer.Option(Path("policies/pack.yaml"), "--policy-pack")
 
 
 def _fail(error: Exception) -> NoReturn:
@@ -315,3 +318,21 @@ def scan(
 def version() -> None:
     """Show the installed ConformDAG version."""
     typer.echo(__version__)
+
+
+@app.command("benchmark")
+def benchmark(
+    path: Path = BENCHMARK_PATH_ARGUMENT,
+    policy_pack: Path = BENCHMARK_POLICY_PACK_OPTION,
+) -> None:
+    """Verify and run the local deterministic benchmark without provider or network access."""
+    root = Path.cwd().resolve()
+    manifest_path = path / "manifest.yaml" if path.is_dir() else path
+    selected_pack = policy_pack if policy_pack.is_absolute() else root / policy_pack
+    try:
+        result = run_deterministic_benchmark(manifest_path, selected_pack, root)
+    except (BenchmarkValidationError, ValueError, OSError) as exc:
+        _fail(exc)
+    typer.echo(json.dumps(result.as_dict(), indent=2, sort_keys=True))
+    if not result.passed:
+        raise typer.Exit(code=1)
