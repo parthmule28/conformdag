@@ -90,6 +90,15 @@ def test_sensitive_logging_request_redacts_before_provider_boundary() -> None:
     assert "logging" in request.system_prompt
 
 
+def test_abstraction_request_uses_declared_registry_and_abstains_when_uncertain() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-004")
+    request = build_semantic_request(policy, _context())
+
+    assert "company.operators.SafePythonOperator" in request.system_prompt
+    assert "Do not infer approval from frequency or naming" in request.system_prompt
+    assert "return NEEDS_REVIEW" in request.system_prompt
+
+
 def test_normalizes_abstention_as_advisory_finding() -> None:
     policy = next(item for item in _policies() if item.id == "AIR-SEM-004")
     response = SemanticResponse(

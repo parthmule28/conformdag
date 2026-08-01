@@ -43,7 +43,9 @@ POLICY_INSTRUCTIONS = {
         "redacted locally; never reconstruct or repeat a masked value."
     ),
     "AIR-SEM-004": (
-        "Review usage cues and documentation against the policy-declared abstraction registry."
+        "Review usage cues and documentation against the policy-declared abstraction registry. "
+        "Do not infer approval from frequency or naming; return NEEDS_REVIEW when equivalence "
+        "to a registered abstraction cannot be established from the evidence."
     ),
 }
 
