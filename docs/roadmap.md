@@ -1,16 +1,23 @@
 # Roadmap
 
-## Public beta
+## Beta foundation
 
-1. Bootstrap the Python/mise project and public schemas.
-2. Implement policy validation and one end-to-end deterministic scan.
-3. Complete the six deterministic Airflow policies and report formats.
-4. Add pinned Airflow 2.11.2 and 3.3.0 runtime profiles.
-5. Add optional BYOK semantic evaluation for the four semantic policies.
-6. Build the public benchmark and release evidence.
+- [x] Bootstrap the Python/mise project and public schemas.
+- [x] Implement six deterministic Airflow policies and canonical report formats.
+- [x] Add constrained Airflow 2.11.2 and 3.3.0 runtime profiles.
+- [x] Wire opt-in BYOK semantic evaluation for four semantic policies.
+- [x] Build a 240-case deterministic benchmark and CI release gates.
+- [x] Configure protected-main review, PyPI trusted publishing, and staged release jobs.
+- [ ] Record provider-backed semantic baseline measurements and known limitations.
+- [ ] Publish `0.1.0b1` after all release evidence is reviewed.
 
-## Later
+## Planned follow-up
 
-- Policy compiler from standards documents.
-- dbt adapter after Airflow quality and demand gates pass.
-- Exporters and repository integrations.
+- Interactive policy authoring and validation from standards documents.
+- Git-based synchronization of signed/versioned policy bundles.
+- A centralized dashboard for collaboration, audit history, exceptions, and monitoring.
+- dbt support after the Airflow quality and demand gates pass.
+- Additional exporters and repository integrations.
+
+The local CLI remains fully usable without the future online service. Multi-user roles
+and permissions belong to that service, not to the beta CLI.

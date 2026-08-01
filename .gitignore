@@ -21,6 +21,7 @@ openspec/
 .env
 .env.*
 !.env.example
+.infisical.json
 
 # Build artifacts
 dist/

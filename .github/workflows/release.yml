@@ -7,15 +7,28 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  packages: write
-  attestations: write
 
 jobs:
+  validate:
+    name: Validate release candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run setup
+      - run: mise run check
+      - run: mise run test:coverage
+      - run: mise run benchmark
+      - run: mise run schema
+      - run: mise run security
+      - run: mise run privacy
+
   package:
     name: Build and attest Python distributions
+    needs: validate
     runs-on: ubuntu-latest
-    environment: pypi
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
@@ -23,23 +36,81 @@ jobs:
           cache: true
       - run: mise run setup
       - run: mise run build
-      - name: Generate distribution checksums
-        run: sha256sum dist/* | tee dist/SHA256SUMS
+      - name: Stage distributions and checksums
+        run: |
+          mkdir -p release/python
+          cp dist/*.whl dist/*.tar.gz release/python/
+          sha256sum release/python/* > release/SHA256SUMS
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
           name: conformdag-python-distributions
-          path: dist/
-      - name: Attest distributions
-        uses: actions/attest-build-provenance@v2
+          path: release/
+
+  package-attestation:
+    name: Attest Python distributions
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download validated distributions
+        uses: actions/download-artifact@v4
         with:
-          subject-path: "dist/*"
-      - name: Publish to PyPI with trusted publishing
-        uses: pypa/gh-action-pypi-publish@release/v1
+          name: conformdag-python-distributions
+          path: release
+      - name: Attest distributions
+        uses: actions/attest@v4
+        with:
+          subject-path: "release/python/*"
+
+  runtime-image-validation:
+    name: Validate Airflow ${{ matrix.profile }} image
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: "2.11.2"
+            dockerfile: runtime/airflow-2.11.2/Dockerfile
+          - profile: "3.3.0"
+            dockerfile: runtime/airflow-3.3.0/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build local image for validation
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: conformdag-airflow-validation:${{ matrix.profile }}
+      - name: Scan image before publication
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: local://conformdag-airflow-validation:${{ matrix.profile }}
+          only-severities: critical,high
+          exit-code: true
+          sarif-file: scout-${{ matrix.profile }}.sarif
+      - name: Upload vulnerability results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-vulnerability-results-${{ matrix.profile }}
+          path: scout-${{ matrix.profile }}.sarif
+          if-no-files-found: warn
 
   runtime-images:
-    name: Build and scan Airflow ${{ matrix.profile }} image
+    name: Publish Airflow ${{ matrix.profile }} image
+    needs: [package, runtime-image-validation]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -56,7 +127,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and publish image with SBOM and provenance
+      - name: Publish image with SBOM and provenance
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -65,18 +136,22 @@ jobs:
           tags: ghcr.io/${{ github.repository }}/airflow-${{ matrix.profile }}:${{ github.ref_name }}
           sbom: true
           provenance: mode=max
-      - name: Scan published image
-        uses: docker/scout-action@v1
+
+  publish-python:
+    name: Publish Python distributions
+    needs: [package-attestation, runtime-images]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download validated distributions
+        uses: actions/download-artifact@v4
         with:
-          command: cves
-          image: ghcr.io/${{ github.repository }}/airflow-${{ matrix.profile }}:${{ github.ref_name }}
-          only-severities: critical,high
-          exit-code: true
-          sarif-file: scout-${{ matrix.profile }}.sarif
-      - name: Upload vulnerability results
-        if: always()
-        uses: actions/upload-artifact@v4
+          name: conformdag-python-distributions
+          path: release
+      - name: Publish to PyPI with trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          name: runtime-vulnerability-results-${{ matrix.profile }}
-          path: scout-${{ matrix.profile }}.sarif
-          if-no-files-found: warn
+          packages-dir: release/python

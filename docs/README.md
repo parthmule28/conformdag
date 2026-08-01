@@ -1,10 +1,8 @@
-# Project Documentation
+# Project documentation
 
-- [Architecture](architecture.md): the current implementation boundaries and data flow.
-- [Roadmap](roadmap.md): milestones for the public beta and later capabilities.
+- [User guide](user-guide.md): installation, configuration, scans, reports, and exits.
+- [Architecture](architecture.md): components, data flow, and trust boundaries.
+- [Release checklist](release.md): publication gates and release evidence.
+- [Dependency inventory](dependency-inventory.md): package and tool purposes.
+- [Roadmap](roadmap.md): completed beta scope and follow-up capabilities.
 - [Architecture decision records](adr/README.md): durable technical decisions.
-# Documentation
-
-- User guide: user-guide.md
-- Architecture: architecture.md
-- Roadmap: roadmap.md
