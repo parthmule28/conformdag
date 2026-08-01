@@ -103,8 +103,7 @@ def test_synthetic_release_has_balanced_cases_and_admission_metadata() -> None:
     assert set(by_policy) == {f"AIR-DET-00{index}" for index in range(1, 7)}
     assert all(len(cases) == 40 for cases in by_policy.values())
     assert all(
-        sum(case.label == "violation" for case in cases) == 20
-        for cases in by_policy.values()
+        sum(case.label == "violation" for case in cases) == 20 for cases in by_policy.values()
     )
     assert all(
         sum(case.label in {"valid", "safe-counterexample"} for case in cases) == 20
@@ -122,9 +121,7 @@ def test_synthetic_release_has_balanced_cases_and_admission_metadata() -> None:
     assert all(
         case.mutation_recipe is not None for case in manifest.cases if case.label == "violation"
     )
-    assert all(
-        case.mutation_recipe is None for case in manifest.cases if case.label != "violation"
-    )
+    assert all(case.mutation_recipe is None for case in manifest.cases if case.label != "violation")
 
 
 def test_synthetic_regeneration_preserves_manifest_hash() -> None:

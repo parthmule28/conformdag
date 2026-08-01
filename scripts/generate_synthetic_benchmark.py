@@ -27,10 +27,7 @@ MUTATION_RECIPES = {
 def _dag(name: str, *, owner: str | None = "platform", tags: bool = True) -> str:
     owner_text = f', owner="{owner}"' if owner is not None else ""
     tags_text = ', tags=["domain:data", "owner:platform"]' if tags else ""
-    return (
-        "from airflow import DAG\n"
-        f'dag = DAG("{name}"{owner_text}{tags_text})\n'
-    )
+    return f'from airflow import DAG\ndag = DAG("{name}"{owner_text}{tags_text})\n'
 
 
 def _fixture(policy_id: str, index: int, violation: bool) -> tuple[str, str | None]:
@@ -64,8 +61,7 @@ def _fixture(policy_id: str, index: int, violation: bool) -> tuple[str, str | No
         operator = "PythonOperator" if violation else "EmptyOperator"
         module = "airflow.operators.python" if violation else "airflow.operators.empty"
         return _dag(name) + (
-            f"from {module} import {operator}\n"
-            f'{operator}(task_id="task", dag=dag)\n'
+            f'from {module} import {operator}\n{operator}(task_id="task", dag=dag)\n'
         ), "forbidden-operator-v1" if violation else None
     raise ValueError(f"unsupported deterministic policy: {policy_id}")
 

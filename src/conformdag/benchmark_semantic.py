@@ -98,8 +98,7 @@ def run_semantic_baseline(
         raise BenchmarkBaselineError("benchmark produced an incomplete response set")
     served_models = tuple(sorted({response.served_model or model for response in normalized}))
     prompt_hashes = tuple(
-        hashlib.sha256(request.system_prompt.encode("utf-8")).hexdigest()
-        for request in requests
+        hashlib.sha256(request.system_prompt.encode("utf-8")).hexdigest() for request in requests
     )
     return SemanticBaselineResult(
         mode=mode,

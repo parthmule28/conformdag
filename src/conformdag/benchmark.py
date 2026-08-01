@@ -225,8 +225,7 @@ def render_benchmark_report(result: BenchmarkRunResult) -> str:
     )
     for baseline in result.baselines:
         lines.append(
-            f"| {baseline.name} | {baseline.mode} | {baseline.status} | "
-            f"{baseline.reason or ''} |"
+            f"| {baseline.name} | {baseline.mode} | {baseline.status} | {baseline.reason or ''} |"
         )
     lines.append("")
     return "\n".join(lines)
@@ -308,13 +307,11 @@ def _metrics(
         labels[case.case_id] == "violation" and case.actual_status == "FAIL" for case in cases
     )
     true_negatives = sum(
-        labels[case.case_id] in {"valid", "safe-counterexample"}
-        and case.actual_status == "PASS"
+        labels[case.case_id] in {"valid", "safe-counterexample"} and case.actual_status == "PASS"
         for case in cases
     )
     false_positives = sum(
-        labels[case.case_id] in {"valid", "safe-counterexample"}
-        and case.actual_status == "FAIL"
+        labels[case.case_id] in {"valid", "safe-counterexample"} and case.actual_status == "FAIL"
         for case in cases
     )
     false_negatives = sum(
@@ -450,13 +447,11 @@ def run_deterministic_benchmark(
         for policy_id in sorted({case.policy_id for case in manifest.cases})
     }
     metrics = {
-        policy_id: _metrics(cases, labels, elapsed)
-        for policy_id, cases in by_policy.items()
+        policy_id: _metrics(cases, labels, elapsed) for policy_id, cases in by_policy.items()
     }
     metrics["aggregate"] = _metrics(results, labels, elapsed)
     quality_gates = [
-        _quality_gate(policy_id, policy_metrics)
-        for policy_id, policy_metrics in metrics.items()
+        _quality_gate(policy_id, policy_metrics) for policy_id, policy_metrics in metrics.items()
     ]
     baselines = [
         BenchmarkBaseline(
