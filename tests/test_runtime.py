@@ -84,20 +84,6 @@ def test_supported_profile_resolves_pinned_image_and_providers(tmp_path: Path) -
     assert manifest.provider_versions["apache-airflow-providers-google"] == "22.1.0"
 
 
-def test_legacy_profile_resolves_pinned_image_and_providers(tmp_path: Path) -> None:
-    manifest = build_runtime_manifest(
-        tmp_path,
-        ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_2_11_2),
-        ["AIR-DET-001"],
-        ["dags/**/*.py"],
-        [],
-    )
-
-    assert manifest.airflow_profile == AirflowProfile.AIRFLOW_2_11_2
-    assert manifest.image == "ghcr.io/parthmule28/conformdag/airflow-2.11.2:v0.1.0-beta.1"
-    assert manifest.provider_versions["apache-airflow-providers-standard"] == "1.9.0"
-
-
 def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path) -> None:
     runner = DockerRunner()
     output = '{"observations": [{"policy_id": "AIR-DET-001", "status": "PASS"}]}'

@@ -135,13 +135,14 @@ a non-root user, dropped capabilities, `no-new-privileges`, and bounded resource
 
 ```bash
 mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --runtime 3.3.0
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --runtime 2.11.2
 ```
 
 The profile image is pulled and resolved to an immutable digest before execution. Airflow
-3.3.0 is maintained; 2.11.2 is an EOL compatibility profile. Docker and the selected
-image are trusted dependencies, so this boundary is not a perfect sandbox. A custom
-runtime image is unsupported and must be supplied by digest with `--runtime-image`.
+3.3.0 is the maintained beta profile. Airflow 2.11.2 was initially evaluated as a
+compatibility profile but excluded before publication because it reached upstream end of
+life and would weaken the beta's security/update maintenance boundary. Docker and the
+selected image are trusted dependencies, so this boundary is not a perfect sandbox. A
+custom runtime image is unsupported and must be supplied by digest with `--runtime-image`.
 
 ## Benchmarks and local gates
 

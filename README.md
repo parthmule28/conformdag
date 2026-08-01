@@ -15,7 +15,7 @@ ConformDAG `0.1.0b1` includes:
 - six deterministic Airflow policy evaluators with versioned policy contracts;
 - policy provenance validation and human/machine-readable policy inspection;
 - expiring suppressions with stale and unmatched-suppression diagnostics;
-- constrained Docker runtime profiles for Airflow 2.11.2 and 3.3.0;
+- a constrained Docker runtime profile for maintained Airflow 3.3.0;
 - four opt-in semantic policies through OpenAI-compatible endpoints, with local
   redaction, strict response validation, bounded concurrency, and normalized caching;
 - canonical JSON, terminal, SARIF, and static HTML reports; and
@@ -26,6 +26,12 @@ does not yet contain a redistributable, labelled semantic corpus. The recorded p
 smoke measurements validate integration, provenance, schema rejection, and cache behavior;
 they are not accuracy measurements. This limitation does not weaken the offline
 deterministic gate.
+
+Airflow 2.11.2 was evaluated as a legacy candidate but is not shipped in the beta. It
+reached upstream end of life, and maintaining an EOL image would undermine the beta's
+security and update cadence. Users who must inspect that version can provide their own
+digest-pinned image with `--runtime-image`; it is outside the supported beta profile
+matrix and benchmark gate.
 
 ## Installation and quick start
 

@@ -4,7 +4,7 @@
 
 - [x] Bootstrap the Python/mise project and public schemas.
 - [x] Implement six deterministic Airflow policies and canonical report formats.
-- [x] Add constrained Airflow 2.11.2 and 3.3.0 runtime profiles.
+- [x] Add the constrained, maintained Airflow 3.3.0 runtime profile; exclude the EOL 2.11.2 candidate from beta publication.
 - [x] Wire opt-in BYOK semantic evaluation for four semantic policies.
 - [x] Build a 240-case deterministic benchmark and CI release gates.
 - [x] Configure protected-main review, PyPI trusted publishing, and staged release jobs.
