@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    name: Fast checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run setup
+      - run: mise run check
+      - run: mise run privacy
+
+  benchmark:
+    name: Offline benchmark gate
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run setup
+      - run: mise run benchmark
+      - run: mise run privacy
+
+  runtime:
+    name: Airflow runtime profile (\${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    needs: fast
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ["2.11.2", "3.3.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run setup
+      - run: mise run test:runtime
+        env:
+          CONFORMDAG_RUNTIME_PROFILE: \${{ matrix.profile }}
+
+  semantic:
+    name: Semantic baselines (opt-in)
+    if: \${{ vars.CONFORMDAG_RUN_SEMANTIC_BASELINES == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run setup
+      - run: echo "Provider credentials and endpoint configuration are required for this opt-in job."
