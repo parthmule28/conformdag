@@ -25,6 +25,7 @@ from conformdag.semantic import (
     DEFAULT_PROMPT_TEMPLATE,
     SemanticContext,
     SemanticProviderError,
+    redact_text,
 )
 
 POLICY_INSTRUCTIONS = {
@@ -37,7 +38,10 @@ POLICY_INSTRUCTIONS = {
     "AIR-SEM-002": (
         "Review structural signals and evidence for business logic embedded in orchestration."
     ),
-    "AIR-SEM-003": "Review logging evidence for sensitive values after local redaction.",
+    "AIR-SEM-003": (
+        "Review configured logging calls for sensitive values. Evidence has already been "
+        "redacted locally; never reconstruct or repeat a masked value."
+    ),
     "AIR-SEM-004": (
         "Review usage cues and documentation against the policy-declared abstraction registry."
     ),
@@ -81,8 +85,9 @@ class SemanticProvider(Protocol):
 
 def build_semantic_request(policy: Policy, context: SemanticContext) -> SemanticRequest:
     """Build a strict request with source content delimited as untrusted evidence."""
+    redacted_evidence = redact_text(context.text)
     system_prompt = DEFAULT_PROMPT_TEMPLATE.render(
-        f"{policy.invariant}\n{_policy_instruction(policy, context.text)}"
+        f"{policy.invariant}\n{_policy_instruction(policy, redacted_evidence)}"
     )
     return SemanticRequest(
         policy_id=policy.id,
@@ -92,7 +97,7 @@ def build_semantic_request(policy: Policy, context: SemanticContext) -> Semantic
         prompt_version=DEFAULT_PROMPT_TEMPLATE.version,
         context_hash=context.context_hash,
         system_prompt=system_prompt,
-        evidence=context.text,
+        evidence=redacted_evidence,
     )
 
 

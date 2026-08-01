@@ -73,6 +73,23 @@ def test_orchestration_request_includes_structural_signal_hints() -> None:
     assert '"database-query": 1' in request.system_prompt
 
 
+def test_sensitive_logging_request_redacts_before_provider_boundary() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-003")
+    context = SemanticContext(
+        "[SOURCE dag.py]\nlogging.info(token='unmasked-secret')",
+        "context",
+        ("dag.py",),
+        (),
+    )
+
+    request = build_semantic_request(policy, context)
+
+    assert "unmasked-secret" not in request.evidence
+    assert "[REDACTED]" in request.evidence
+    assert "unmasked-secret" not in request.system_prompt
+    assert "logging" in request.system_prompt
+
+
 def test_normalizes_abstention_as_advisory_finding() -> None:
     policy = next(item for item in _policies() if item.id == "AIR-SEM-004")
     response = SemanticResponse(
