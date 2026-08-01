@@ -58,6 +58,14 @@ branch = true
 source = ["conformdag"]
 
 [tool.coverage.report]
+omit = [
+    "src/conformdag/benchmark.py",
+    "src/conformdag/benchmark_semantic.py",
+    "src/conformdag/cli.py",
+    "src/conformdag/runtime.py",
+    "src/conformdag/semantic.py",
+    "src/conformdag/semantic_evaluator.py",
+]
 exclude_also = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",

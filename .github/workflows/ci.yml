@@ -34,6 +34,33 @@ jobs:
       - run: mise run benchmark
       - run: mise run privacy
 
+  release-validation:
+    name: Release validation
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run setup
+      - run: mise run test:coverage
+      - run: mise run schema
+      - run: mise run build
+      - run: mise run security
+
+  host-macos:
+    name: macOS host CLI and source analysis
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run setup
+      - run: mise run check
+      - run: mise run scan:example
+
   runtime:
     name: Airflow runtime profile (${{ matrix.profile }})
     runs-on: ubuntu-latest
