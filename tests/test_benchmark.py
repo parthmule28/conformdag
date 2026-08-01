@@ -148,3 +148,6 @@ def test_deterministic_benchmark_executes_all_cases_offline() -> None:
     assert result.passed
     assert result.total_cases == 240
     assert result.failed_cases == 0
+    assert result.metrics["aggregate"].precision == 1.0
+    assert result.metrics["aggregate"].recall == 1.0
+    assert all(gate.passed for gate in result.quality_gates)

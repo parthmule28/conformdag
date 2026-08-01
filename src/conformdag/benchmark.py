@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Literal
 
 from pydantic import Field
@@ -99,6 +100,44 @@ class BenchmarkCaseResult:
 
 
 @dataclass(frozen=True)
+class BenchmarkMetrics:
+    """Normalized quality and operational metrics for one benchmark population."""
+
+    applicable_cases: int
+    violations: int
+    valid_or_safe_counterexamples: int
+    true_positives: int
+    true_negatives: int
+    false_positives: int
+    false_negatives: int
+    precision: float | None
+    recall: float | None
+    f1: float | None
+    false_positive_rate: float | None
+    false_negative_rate: float | None
+    abstention_rate: float
+    invalid_output_rate: float
+    repeatability: float | None
+    latency_seconds: float | None
+    memory_bytes: int | None
+    input_tokens: int | None
+    output_tokens: int | None
+    cost: float | None
+    pricing_provenance: str | None
+    cache_reuse_rate: float | None
+    remediation_usefulness: float | None
+
+
+@dataclass(frozen=True)
+class BenchmarkQualityGate:
+    """Per-population deterministic release-gate decision and explanation."""
+
+    population: str
+    passed: bool
+    reasons: list[str]
+
+
+@dataclass(frozen=True)
 class BenchmarkRunResult:
     """Offline benchmark outcome with stable, machine-readable fields."""
 
@@ -109,10 +148,12 @@ class BenchmarkRunResult:
     passed_cases: int
     failed_cases: int
     cases: list[BenchmarkCaseResult]
+    metrics: dict[str, BenchmarkMetrics]
+    quality_gates: list[BenchmarkQualityGate]
 
     @property
     def passed(self) -> bool:
-        return self.failed_cases == 0
+        return self.failed_cases == 0 and all(gate.passed for gate in self.quality_gates)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -124,6 +165,8 @@ class BenchmarkRunResult:
             "failed_cases": self.failed_cases,
             "passed": self.passed,
             "cases": [asdict(case) for case in self.cases],
+            "metrics": {name: asdict(value) for name, value in self.metrics.items()},
+            "quality_gates": [asdict(gate) for gate in self.quality_gates],
         }
 
 
@@ -188,6 +231,83 @@ def benchmark_identity(manifest: BenchmarkManifest) -> str:
     ).hexdigest()
 
 
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return numerator / denominator if denominator else None
+
+
+def _metrics(
+    cases: list[BenchmarkCaseResult],
+    labels: dict[str, str],
+    elapsed_seconds: float,
+) -> BenchmarkMetrics:
+    violations = sum(labels[case.case_id] == "violation" for case in cases)
+    valid = sum(labels[case.case_id] in {"valid", "safe-counterexample"} for case in cases)
+    true_positives = sum(
+        labels[case.case_id] == "violation" and case.actual_status == "FAIL" for case in cases
+    )
+    true_negatives = sum(
+        labels[case.case_id] in {"valid", "safe-counterexample"}
+        and case.actual_status == "PASS"
+        for case in cases
+    )
+    false_positives = sum(
+        labels[case.case_id] in {"valid", "safe-counterexample"}
+        and case.actual_status == "FAIL"
+        for case in cases
+    )
+    false_negatives = sum(
+        labels[case.case_id] == "violation" and case.actual_status != "FAIL" for case in cases
+    )
+    precision = _ratio(true_positives, true_positives + false_positives)
+    recall = _ratio(true_positives, true_positives + false_negatives)
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision is not None and recall is not None and precision + recall
+        else None
+    )
+    count = len(cases)
+    return BenchmarkMetrics(
+        applicable_cases=count,
+        violations=violations,
+        valid_or_safe_counterexamples=valid,
+        true_positives=true_positives,
+        true_negatives=true_negatives,
+        false_positives=false_positives,
+        false_negatives=false_negatives,
+        precision=precision,
+        recall=recall,
+        f1=f1,
+        false_positive_rate=_ratio(false_positives, false_positives + true_negatives),
+        false_negative_rate=_ratio(false_negatives, false_negatives + true_positives),
+        abstention_rate=sum(case.actual_status == "NEEDS_REVIEW" for case in cases) / count,
+        invalid_output_rate=sum(case.actual_status == "ERROR" for case in cases) / count,
+        repeatability=None,
+        latency_seconds=elapsed_seconds,
+        memory_bytes=None,
+        input_tokens=None,
+        output_tokens=None,
+        cost=None,
+        pricing_provenance="not-applicable: deterministic offline baseline",
+        cache_reuse_rate=None,
+        remediation_usefulness=None,
+    )
+
+
+def _quality_gate(population: str, metrics: BenchmarkMetrics) -> BenchmarkQualityGate:
+    reasons: list[str] = []
+    if metrics.applicable_cases < 40:
+        reasons.append("fewer than 40 applicable cases")
+    if metrics.violations < 20:
+        reasons.append("fewer than 20 violation cases")
+    if metrics.valid_or_safe_counterexamples < 20:
+        reasons.append("fewer than 20 valid or safe-counterexample cases")
+    if metrics.precision is None or metrics.precision < 0.95:
+        reasons.append("precision below 0.95")
+    if metrics.recall is None or metrics.recall < 0.90:
+        reasons.append("recall below 0.90")
+    return BenchmarkQualityGate(population, not reasons, reasons)
+
+
 def run_deterministic_benchmark(
     manifest_path: Path,
     policy_pack_path: Path,
@@ -199,6 +319,8 @@ def run_deterministic_benchmark(
     pack: PolicyPack = load_policy_pack(policy_pack_path, repository_root.resolve())
     policies = {policy.id: policy for policy in pack.policies}
     results: list[BenchmarkCaseResult] = []
+    labels = {case.id: case.label for case in manifest.cases}
+    started = perf_counter()
 
     for case in manifest.cases:
         policy = policies.get(case.policy_id)
@@ -260,6 +382,20 @@ def run_deterministic_benchmark(
         )
 
     passed = sum(result.passed for result in results)
+    elapsed = perf_counter() - started
+    by_policy = {
+        policy_id: [case for case in results if case.policy_id == policy_id]
+        for policy_id in sorted({case.policy_id for case in manifest.cases})
+    }
+    metrics = {
+        policy_id: _metrics(cases, labels, elapsed)
+        for policy_id, cases in by_policy.items()
+    }
+    metrics["aggregate"] = _metrics(results, labels, elapsed)
+    quality_gates = [
+        _quality_gate(policy_id, policy_metrics)
+        for policy_id, policy_metrics in metrics.items()
+    ]
     return BenchmarkRunResult(
         dataset_id=manifest.dataset_id,
         dataset_version=manifest.dataset_version,
@@ -268,4 +404,6 @@ def run_deterministic_benchmark(
         passed_cases=passed,
         failed_cases=len(results) - passed,
         cases=results,
+        metrics=metrics,
+        quality_gates=quality_gates,
     )

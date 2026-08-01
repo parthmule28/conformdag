@@ -23,6 +23,14 @@ Verify hashes and execute the deterministic cases offline with:
 mise run benchmark
 ```
 
+The JSON result includes per-policy and aggregate precision, recall, F1,
+false-positive/negative rates, abstention and invalid-output rates, plus
+operational metric fields. Metrics that require a semantic provider or
+provider telemetry are reported as `null` with an explicit provenance value.
+The deterministic release gate requires at least 40 cases per policy, at
+least 20 violations and 20 valid or safe-counterexamples, 95% precision, and
+90% recall.
+
 `synthetic/manifest.yaml` records fixture hashes, policy versions and hashes,
 source attribution, licensing, transformation history, and privacy/secrets review.
 No external organizational data or public source files are redistributed by this
