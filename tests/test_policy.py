@@ -190,6 +190,41 @@ def test_resolve_configured_policy_pack_uses_scan_root_for_project_defaults(tmp_
     assert resolved == pack.resolve()
 
 
+def test_resolve_policy_pack_path_accepts_community_alias() -> None:
+    from conformdag.bundled import community_pack_path
+
+    resolved = resolve_policy_pack_path(Path("community"))
+
+    assert resolved == community_pack_path()
+
+
+def test_resolve_configured_policy_pack_accepts_community_alias_from_cli(
+    tmp_path: Path,
+) -> None:
+    from conformdag.bundled import community_pack_path
+
+    resolved = resolve_configured_policy_pack(
+        Path("community"),
+        scan_root=tmp_path / "foreign-airflow",
+        from_cli=True,
+    )
+
+    assert resolved == community_pack_path()
+
+
+def test_bundled_community_pack_loads_with_pack_local_provenance() -> None:
+    from conformdag.bundled import community_pack_path
+
+    loaded = load_policy_pack(community_pack_path(), Path.cwd())
+
+    assert loaded.id == "conformdag-community"
+    assert [policy.id for policy in loaded.policies] == [
+        "COM-DET-001",
+        "COM-DET-002",
+        "COM-DET-003",
+    ]
+
+
 def test_resolve_source_document_from_pack_tree(tmp_path: Path) -> None:
     pack_dir = tmp_path / "bundled" / "policies"
     pack_dir.mkdir(parents=True)

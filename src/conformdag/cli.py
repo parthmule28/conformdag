@@ -143,7 +143,8 @@ def init(path: Path = Path("."), force: bool = False) -> None:
 def validate_policies(path: Path | None = None) -> None:
     """Validate one policy pack and its local provenance sources."""
     try:
-        pack = select_policy_pack(path, Path.cwd())
+        resolved = resolve_policy_pack_path(path) if path is not None else None
+        pack = select_policy_pack(resolved, Path.cwd())
     except PolicyValidationError as exc:
         _fail(exc)
     typer.echo(f"valid policy pack: {pack.id} {pack.version} ({len(pack.policies)} policies)")
@@ -153,7 +154,8 @@ def validate_policies(path: Path | None = None) -> None:
 def list_policies(path: Path | None = None) -> None:
     """List policies in one validated policy pack."""
     try:
-        pack = select_policy_pack(path, Path.cwd())
+        resolved = resolve_policy_pack_path(path) if path is not None else None
+        pack = select_policy_pack(resolved, Path.cwd())
     except PolicyValidationError as exc:
         _fail(exc)
     table = Table("ID", "Version", "Status", "Severity", "Enforcement")

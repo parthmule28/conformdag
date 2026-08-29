@@ -17,7 +17,7 @@ from conformdag.models import (
     OperatorRule,
     RequiredOwnerConfig,
 )
-from conformdag.policy import load_policy_pack
+from conformdag.policy import load_policy_pack, resolve_policy_pack_path
 
 
 def _model(source: str):
@@ -150,7 +150,7 @@ def test_forbidden_operator_rule_respects_airflow_profile() -> None:
 
 
 def test_evaluate_deterministic_routes_community_policies_by_check_kind() -> None:
-    pack = load_policy_pack(Path("policies/community-pack.yaml"), Path.cwd())
+    pack = load_policy_pack(resolve_policy_pack_path(Path("community")), Path.cwd())
     model = _model(
         "from airflow import DAG\n"
         "from airflow.operators.empty import EmptyOperator\n"

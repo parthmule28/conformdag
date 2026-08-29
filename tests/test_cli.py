@@ -23,6 +23,13 @@ def test_init_writes_quoted_scan_globs(tmp_path: Path) -> None:
     assert "policy_pack: policies/pack.yaml" in config
 
 
+def test_validate_policies_accepts_bundled_community_alias() -> None:
+    result = CliRunner().invoke(app, ["validate-policies", "--path", "community"])
+
+    assert result.exit_code == 0
+    assert "valid policy pack: conformdag-community" in result.stdout
+
+
 def test_terminal_scan_output_is_human_readable() -> None:
     result = CliRunner().invoke(app, ["scan", "--path", ".", "--format", "terminal"])
 

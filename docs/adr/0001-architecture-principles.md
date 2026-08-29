@@ -25,13 +25,13 @@ integrations grow.
 5. **YAGNI for platform features** — No plugin registry, dashboard, or multi-pack
    composition until real usage justifies them.
 6. **Two pack profiles for the beta** — `policies/pack.yaml` demonstrates
-   organizational contracts; `policies/community-pack.yaml` is the default quickstart.
+   organizational contracts; the bundled `community` pack is the default quickstart.
 
 ## Consequences
 
 - New deterministic policies should prefer `enforcement.deterministic_checks` routing
   over hard-coded policy IDs in evaluators.
-- Foreign-repository scans resolve `--policy-pack` from the invoker's working directory
-  and validate standards provenance from the pack tree.
+- Foreign-repository scans resolve `--policy-pack` from the invoker's working directory,
+  built-in aliases such as `community`, or the pack tree for provenance.
 - Documentation should lead with the community pack; the organizational pack remains
   the reference for platform teams.

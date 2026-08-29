@@ -115,3 +115,21 @@ def test_scan_accepts_external_policy_pack_from_working_directory(tmp_path: Path
 
     assert report.complete is True
     assert len(report.files_scanned) == 1
+
+
+def test_scan_accepts_bundled_community_pack_from_any_working_directory(tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign-repo"
+    (foreign / "dags").mkdir(parents=True)
+    (foreign / "dags" / "example.py").write_text(
+        "from airflow import DAG\n"
+        "from airflow.operators.empty import EmptyOperator\n"
+        "with DAG(dag_id='example', default_args={'execution_timeout': 3600}) as dag:\n"
+        "    EmptyOperator(task_id='start')\n",
+        encoding="utf-8",
+    )
+
+    report = scan_repository(foreign, Path("community"))
+
+    assert report.complete is True
+    assert report.run.policy_pack_id == "conformdag-community"
+    assert report.policies_evaluated == ["COM-DET-001", "COM-DET-002", "COM-DET-003"]

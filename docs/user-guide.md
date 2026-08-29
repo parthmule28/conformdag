@@ -41,6 +41,25 @@ mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy reference all
 exceptions, and enforcement details. `explain` emits the complete machine-readable JSON
 contract. `reference` documents outcomes, reports, runtime terms, and exit codes.
 
+### Community quickstart pack
+
+For a first scan of a public or unfamiliar repository, use the built-in community pack.
+It checks DAG safety (timeouts, retries, and module-scope I/O) without
+organization-specific owner or tag rules:
+
+```bash
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag validate-policies --path community
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag list-policies --path community
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+  --path /path/to/airflow-repo/dags \
+  --policy-pack community \
+  --format terminal
+```
+
+The alias `community` (also accepted as `builtin:community`) resolves to the policy pack
+shipped inside the ConformDAG package. Use `policies/pack.yaml` when authoring an
+organizational contract in your own repository.
+
 ## Configuration precedence
 
 Configuration resolves in this order:

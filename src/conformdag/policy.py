@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from ruamel.yaml import YAML
 
+from conformdag.bundled import is_bundled_pack_reference, resolve_bundled_pack_path
 from conformdag.models import LifecycleStatus, Policy, PolicyPack, Suppression
 
 
@@ -37,7 +38,9 @@ def _read_yaml(path: Path) -> Any:
 
 
 def resolve_policy_pack_path(path: Path, *, working_directory: Path | None = None) -> Path:
-    """Resolve a relative policy pack path from the invoker's working directory."""
+    """Resolve a policy pack path from the invoker's working directory or built-in aliases."""
+    if is_bundled_pack_reference(path):
+        return resolve_bundled_pack_path(path)
     if path.is_absolute():
         return path.resolve()
     base = (working_directory or Path.cwd()).resolve()
@@ -52,6 +55,8 @@ def resolve_configured_policy_pack(
     working_directory: Path | None = None,
 ) -> Path:
     """Resolve a policy pack from CLI options or project configuration."""
+    if is_bundled_pack_reference(configured):
+        return resolve_bundled_pack_path(configured)
     if configured.is_absolute():
         return configured.resolve()
     if from_cli:

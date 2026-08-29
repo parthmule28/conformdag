@@ -61,8 +61,12 @@ description = "Scan the checked-in example repository"
 run = "uv run conformdag scan --path examples/sample-repository --policy-pack policies/pack.yaml"
 
 [tasks."scan:community-example"]
-description = "Scan the sample repository with the community policy pack"
-run = "uv run conformdag scan --path examples/sample-repository --policy-pack policies/community-pack.yaml"
+description = "Scan the sample repository with the bundled community policy pack"
+run = "uv run conformdag scan --path examples/sample-repository --policy-pack community"
+
+[tasks."validate:packs"]
+description = "Validate the organizational and bundled community policy packs"
+run = "uv run conformdag validate-policies --path policies/pack.yaml && uv run conformdag validate-policies --path community"
 
 [tasks."scan:semantic-example"]
 description = "Run the opt-in provider-backed example scan"
@@ -86,4 +90,4 @@ run = "docker scout cves $CONFORMDAG_IMAGE"
 
 [tasks.check]
 description = "Run the default local quality gate"
-depends = ["format-check", "lint", "typecheck", "test"]
+depends = ["format-check", "lint", "typecheck", "test", "validate:packs"]
