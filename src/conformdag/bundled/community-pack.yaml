@@ -1,0 +1,52 @@
+schema_version: "1"
+id: conformdag-community
+version: 0.1.0
+policies:
+  - id: COM-DET-001
+    title: Task execution timeout is bounded
+    version: 1.0.0
+    status: ACTIVE
+    severity: high
+    airflow_profiles: []
+    ownership: {owner: community}
+    source:
+      document: standards/community-dag-safety.md
+      section: "Execution safety"
+      version: "1"
+      content_hash: 5be44b393897f6f727ab67ad317f45f6d6c1d696ee9fc48f33321715a7d13118
+    invariant: Every task has an effective execution timeout within approved bounds.
+    enforcement: {type: deterministic, deterministic_checks: [effective-timeout]}
+    configuration: {kind: execution-timeout, min_seconds: 1, max_seconds: 86400, approved_default_seconds: 3600}
+  - id: COM-DET-002
+    title: Task retries are bounded
+    version: 1.0.0
+    status: ACTIVE
+    severity: medium
+    airflow_profiles: []
+    ownership: {owner: community}
+    source:
+      document: standards/community-dag-safety.md
+      section: "Execution safety"
+      version: "1"
+      content_hash: 5be44b393897f6f727ab67ad317f45f6d6c1d696ee9fc48f33321715a7d13118
+    invariant: Retry count and delay remain within policy bounds.
+    enforcement: {type: deterministic, deterministic_checks: [retry-bounds]}
+    configuration: {kind: retry-bounds, min_retries: 0, max_retries: 5, min_delay_seconds: 0, max_delay_seconds: 3600, allow_zero_retries: true}
+  - id: COM-DET-003
+    title: Module scope avoids high confidence I/O
+    version: 1.0.0
+    status: ACTIVE
+    severity: critical
+    airflow_profiles: []
+    ownership: {owner: community}
+    source:
+      document: standards/community-dag-safety.md
+      section: "Execution safety"
+      version: "1"
+      content_hash: 5be44b393897f6f727ab67ad317f45f6d6c1d696ee9fc48f33321715a7d13118
+    invariant: Module-level code does not perform configured high-confidence I/O.
+    enforcement: {type: deterministic, deterministic_checks: [module-scope-io], blocking: true}
+    configuration:
+      kind: top-level-io
+      forbidden_calls: [requests.get, boto3.client, subprocess.run]
+      uncertain_as_review: true

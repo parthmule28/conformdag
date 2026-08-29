@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 
 import pytest
+from pytest import MonkeyPatch
 
 from conformdag.models import (
     EnforcementConfig,
@@ -23,6 +24,9 @@ from conformdag.policy import (
     active_policies,
     load_policy_pack,
     load_suppressions,
+    resolve_configured_policy_pack,
+    resolve_policy_pack_path,
+    resolve_source_document,
     select_policy_pack,
 )
 
@@ -152,3 +156,130 @@ def test_rejects_ambiguous_implicit_pack_selection(tmp_path: Path) -> None:
 
     with pytest.raises(PolicyValidationError, match="exactly one policy pack"):
         select_policy_pack(None, tmp_path)
+
+
+def test_resolve_policy_pack_path_from_working_directory(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    pack = tmp_path / "policies" / "pack.yaml"
+    pack.parent.mkdir(parents=True)
+    pack.write_text(
+        'schema_version: "1"\nid: default\nversion: 1.0.0\npolicies: []\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    resolved = resolve_policy_pack_path(Path("policies/pack.yaml"))
+
+    assert resolved == pack.resolve()
+
+
+def test_resolve_configured_policy_pack_uses_scan_root_for_project_defaults(tmp_path: Path) -> None:
+    scan_root = tmp_path / "airflow-repo"
+    pack = scan_root / "policies" / "pack.yaml"
+    pack.parent.mkdir(parents=True)
+    pack.write_text(
+        'schema_version: "1"\nid: default\nversion: 1.0.0\npolicies: []\n', encoding="utf-8"
+    )
+
+    resolved = resolve_configured_policy_pack(
+        Path("policies/pack.yaml"),
+        scan_root=scan_root,
+        from_cli=False,
+    )
+
+    assert resolved == pack.resolve()
+
+
+def test_resolve_policy_pack_path_accepts_community_alias() -> None:
+    from conformdag.bundled import community_pack_path
+
+    resolved = resolve_policy_pack_path(Path("community"))
+
+    assert resolved == community_pack_path()
+
+
+def test_resolve_configured_policy_pack_accepts_community_alias_from_cli(
+    tmp_path: Path,
+) -> None:
+    from conformdag.bundled import community_pack_path
+
+    resolved = resolve_configured_policy_pack(
+        Path("community"),
+        scan_root=tmp_path / "foreign-airflow",
+        from_cli=True,
+    )
+
+    assert resolved == community_pack_path()
+
+
+def test_bundled_community_pack_loads_with_pack_local_provenance() -> None:
+    from conformdag.bundled import community_pack_path
+
+    loaded = load_policy_pack(community_pack_path(), Path.cwd())
+
+    assert loaded.id == "conformdag-community"
+    assert [policy.id for policy in loaded.policies] == [
+        "COM-DET-001",
+        "COM-DET-002",
+        "COM-DET-003",
+    ]
+
+
+def test_resolve_source_document_from_pack_tree(tmp_path: Path) -> None:
+    pack_dir = tmp_path / "bundled" / "policies"
+    pack_dir.mkdir(parents=True)
+    standards = tmp_path / "bundled" / "standards" / "rules.md"
+    standards.parent.mkdir(parents=True)
+    standards.write_text("# Owner standards\nEvery DAG has an owner.\n", encoding="utf-8")
+    pack_path = pack_dir / "pack.yaml"
+    pack_path.write_text("policies: []\n", encoding="utf-8")
+    scan_root = tmp_path / "foreign-airflow"
+    scan_root.mkdir()
+
+    resolved = resolve_source_document(
+        Path("standards/rules.md"),
+        pack_path=pack_path,
+        repository_root=scan_root,
+    )
+
+    assert resolved == standards.resolve()
+
+
+def test_loads_pack_provenance_without_copying_standards_into_scan_root(tmp_path: Path) -> None:
+    pack_root = tmp_path / "conformdag"
+    standards = pack_root / "standards" / "dag-authoring.md"
+    standards.parent.mkdir(parents=True)
+    standards.write_text("# Owner standards\nEvery DAG has an owner.\n", encoding="utf-8")
+    pack_path = pack_root / "policies" / "pack.yaml"
+    pack_path.parent.mkdir(parents=True)
+    content_hash = hashlib.sha256(standards.read_bytes()).hexdigest()
+    pack = PolicyPack(
+        id="default",
+        version="1.0.0",
+        policies=[
+            Policy(
+                id="AIR-DET-001",
+                title="Required owner",
+                version="1.0.0",
+                status=LifecycleStatus.ACTIVE,
+                severity=Severity.HIGH,
+                airflow_profiles=[],
+                ownership=Ownership(owner="platform"),
+                source=PolicySource(
+                    document=Path("standards/dag-authoring.md"),
+                    section="Owner standards",
+                    content_hash=content_hash,
+                ),
+                invariant="Every DAG has an owner.",
+                enforcement=EnforcementConfig(type=EnforcementType.DETERMINISTIC),
+                configuration=RequiredOwnerConfig(allowed_values=["platform"]),
+            )
+        ],
+    )
+    _write_pack(pack_path, pack)
+    scan_root = tmp_path / "foreign-airflow"
+    scan_root.mkdir()
+
+    loaded = load_policy_pack(pack_path, scan_root)
+
+    assert loaded.policies[0].id == "AIR-DET-001"

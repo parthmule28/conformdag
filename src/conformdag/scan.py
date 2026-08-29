@@ -16,6 +16,8 @@ from conformdag.models import (
     AirflowProfile,
     EnforcementType,
     Finding,
+    PolicyPack,
+    ProjectConfig,
     RunIssue,
     RunMetadata,
     ScanReport,
@@ -23,7 +25,7 @@ from conformdag.models import (
     SemanticResponse,
     SemanticRunMetadata,
 )
-from conformdag.policy import load_suppressions, select_policy_pack
+from conformdag.policy import load_suppressions, resolve_configured_policy_pack, select_policy_pack
 from conformdag.reporting import apply_suppressions, normalize_report
 from conformdag.semantic import SemanticContext, SemanticProviderError, build_context
 from conformdag.semantic_evaluator import build_semantic_request, semantic_finding
@@ -35,6 +37,22 @@ class SemanticProvider(Protocol):
         requests: Sequence[SemanticRequest],
         max_concurrency: int = 4,
     ) -> list[SemanticResponse]: ...
+
+
+def _load_pack_for_scan(
+    repository_root: Path,
+    policy_pack: Path | None,
+) -> tuple[ProjectConfig, PolicyPack]:
+    config = load_project_config(repository_root / "conformdag.yaml")
+    explicit_pack = policy_pack is not None
+    configured_pack = policy_pack or config.scan.policy_pack
+    resolved_pack = resolve_configured_policy_pack(
+        configured_pack,
+        scan_root=repository_root,
+        from_cli=explicit_pack,
+    )
+    pack = select_policy_pack(resolved_pack, repository_root)
+    return config, pack
 
 
 def scan_repository(
@@ -49,11 +67,7 @@ def scan_repository(
 ) -> ScanReport:
     """Run source analysis and any explicitly supplied semantic provider."""
     root = repository_root.resolve()
-    config = load_project_config(root / "conformdag.yaml")
-    configured_pack = policy_pack or config.scan.policy_pack
-    if not configured_pack.is_absolute():
-        configured_pack = root / configured_pack
-    pack = select_policy_pack(configured_pack, root)
+    config, pack = _load_pack_for_scan(root, policy_pack)
     files, discovery_issues = discover_python_files(
         root,
         config.scan.include,
@@ -232,11 +246,7 @@ def preview_model_context(
 ) -> SemanticContext:
     """Build the redacted semantic context preview without contacting a provider."""
     root = repository_root.resolve()
-    config = load_project_config(root / "conformdag.yaml")
-    configured_pack = policy_pack or config.scan.policy_pack
-    if not configured_pack.is_absolute():
-        configured_pack = root / configured_pack
-    pack = select_policy_pack(configured_pack, root)
+    config, pack = _load_pack_for_scan(root, policy_pack)
     files, _ = discover_python_files(
         root,
         config.scan.include,

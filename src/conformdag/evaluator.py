@@ -397,20 +397,39 @@ class ForbiddenOperatorEvaluator:
         return findings
 
 
+CHECK_EVALUATORS: dict[str, DeterministicEvaluator] = {
+    "effective-owner": OwnerEvaluator(),
+    "tags": TagEvaluator(),
+    "effective-timeout": TimeoutEvaluator(),
+    "retry-bounds": RetryEvaluator(),
+    "module-scope-io": TopLevelIOEvaluator(),
+    "operator-allow-list": ForbiddenOperatorEvaluator(),
+}
+
+LEGACY_POLICY_EVALUATORS: dict[str, DeterministicEvaluator] = {
+    "AIR-DET-001": CHECK_EVALUATORS["effective-owner"],
+    "AIR-DET-002": CHECK_EVALUATORS["tags"],
+    "AIR-DET-003": CHECK_EVALUATORS["effective-timeout"],
+    "AIR-DET-004": CHECK_EVALUATORS["retry-bounds"],
+    "AIR-DET-005": CHECK_EVALUATORS["module-scope-io"],
+    "AIR-DET-006": CHECK_EVALUATORS["operator-allow-list"],
+}
+
+
+def _evaluator_for_policy(policy: Policy) -> DeterministicEvaluator | None:
+    for check in policy.enforcement.deterministic_checks:
+        evaluator = CHECK_EVALUATORS.get(check)
+        if evaluator is not None:
+            return evaluator
+    return LEGACY_POLICY_EVALUATORS.get(policy.id)
+
+
 def evaluate_deterministic(
     policies: Iterable[Policy],
     models: Sequence[SourceModel],
     airflow_profile: AirflowProfile | None = None,
 ) -> tuple[list[Finding], list[str], list[str]]:
     """Evaluate supported deterministic policies with stable policy/file ordering."""
-    evaluators: dict[str, DeterministicEvaluator] = {
-        "AIR-DET-001": OwnerEvaluator(),
-        "AIR-DET-002": TagEvaluator(),
-        "AIR-DET-003": TimeoutEvaluator(),
-        "AIR-DET-004": RetryEvaluator(),
-        "AIR-DET-005": TopLevelIOEvaluator(),
-        "AIR-DET-006": ForbiddenOperatorEvaluator(),
-    }
     findings: list[Finding] = []
     evaluated: list[str] = []
     skipped: list[str] = []
@@ -424,7 +443,7 @@ def evaluate_deterministic(
         if not policy_applies(policy, airflow_profile):
             skipped.append(policy.id)
             continue
-        evaluator = evaluators.get(policy.id)
+        evaluator = _evaluator_for_policy(policy)
         if evaluator is None:
             skipped.append(policy.id)
             continue

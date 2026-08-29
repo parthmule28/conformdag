@@ -14,6 +14,22 @@ from conformdag.models import FindingStatus, RuntimeObservation
 from conformdag.runtime import RuntimePhaseError
 
 
+def test_init_writes_quoted_scan_globs(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["init", "--path", str(tmp_path)])
+
+    assert result.exit_code == 0
+    config = (tmp_path / "conformdag.yaml").read_text(encoding="utf-8")
+    assert '"dags/**/*.py"' in config
+    assert "policy_pack: policies/pack.yaml" in config
+
+
+def test_validate_policies_accepts_bundled_community_alias() -> None:
+    result = CliRunner().invoke(app, ["validate-policies", "--path", "community"])
+
+    assert result.exit_code == 0
+    assert "valid policy pack: conformdag-community" in result.stdout
+
+
 def test_terminal_scan_output_is_human_readable() -> None:
     result = CliRunner().invoke(app, ["scan", "--path", ".", "--format", "terminal"])
 

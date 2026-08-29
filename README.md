@@ -58,6 +58,34 @@ mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
 Source analysis is offline and non-executing unless runtime or semantic evaluation is
 explicitly enabled. See the user guide before enabling either networked opt-in.
 
+### Scan a public Airflow repository
+
+The built-in **community** policy pack focuses on DAG safety checks (timeouts, retries,
+and module-scope I/O) without organization-specific owner or tag rules. Pass
+`--policy-pack community` from any directory — the pack ships inside the ConformDAG
+package, so no checkout of this repository is required:
+
+```bash
+git clone --depth 1 https://github.com/apache/airflow.git /tmp/airflow-examples
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+  --path /tmp/airflow-examples/airflow-core/src/airflow/example_dags \
+  --policy-pack community \
+  --format terminal
+```
+
+When developing from this repository, the same alias works with `uv run`:
+
+```bash
+mise exec -- uv run conformdag scan \
+  --path examples/sample-repository \
+  --policy-pack community
+```
+
+The pack definition lives at
+[`src/conformdag/bundled/community-pack.yaml`](src/conformdag/bundled/community-pack.yaml).
+The organizational example pack in `policies/pack.yaml` remains available for
+platform-team policy contracts with provenance and semantic policies.
+
 ## Development
 
 The project uses [mise](https://mise.jdx.dev/) as its tool and task entry point:

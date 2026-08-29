@@ -19,6 +19,7 @@ jobs:
           cache: true
       - run: mise run setup
       - run: mise run check
+      - run: mise run scan:community-example
       - run: mise run privacy
 
   benchmark:
@@ -60,6 +61,7 @@ jobs:
       - run: mise run setup
       - run: mise run check
       - run: mise run scan:example
+      - run: mise run scan:community-example
 
   runtime:
     name: Airflow runtime profile (${{ matrix.profile }})
