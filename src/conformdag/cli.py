@@ -23,7 +23,7 @@ from conformdag.models import (
     PolicyPack,
     RunIssue,
 )
-from conformdag.policy import PolicyValidationError, select_policy_pack
+from conformdag.policy import PolicyValidationError, resolve_policy_pack_path, select_policy_pack
 from conformdag.reference import (
     EXIT_CODE_REFERENCE,
     OUTCOME_REFERENCE,
@@ -108,7 +108,22 @@ def init(path: Path = Path("."), force: bool = False) -> None:
     """Create a safe starter configuration and policy-pack scaffold."""
     root = path.resolve()
     files = {
-        root / "conformdag.yaml": 'config_version: "1"\n',
+        root / "conformdag.yaml": (
+            'config_version: "1"\n'
+            "scan:\n"
+            "  policy_pack: policies/pack.yaml\n"
+            "  include:\n"
+            '    - "dags/**/*.py"\n'
+            "  exclude:\n"
+            '    - "**/.venv/**"\n'
+            '    - "**/.git/**"\n'
+            '    - "**/vendor/**"\n'
+            '    - "**/generated/**"\n'
+            "semantic:\n"
+            "  enabled: false\n"
+            "runtime:\n"
+            "  enabled: false\n"
+        ),
         root / "policies" / "pack.yaml": (
             'schema_version: "1"\nid: default\nversion: 0.1.0\npolicies: []\n'
         ),
@@ -155,7 +170,8 @@ def list_policies(path: Path | None = None) -> None:
 
 def _load_selected_pack(path: Path | None) -> PolicyPack:
     try:
-        return select_policy_pack(path, Path.cwd())
+        resolved = resolve_policy_pack_path(path) if path is not None else None
+        return select_policy_pack(resolved, Path.cwd())
     except PolicyValidationError as exc:
         _fail(exc)
 
@@ -306,9 +322,7 @@ def scan(
             )
         )
     root = path.resolve()
-    selected_pack = (
-        (root / policy_pack) if policy_pack and not policy_pack.is_absolute() else policy_pack
-    )
+    selected_pack = resolve_policy_pack_path(policy_pack) if policy_pack is not None else None
     try:
         config = load_project_config(root / "conformdag.yaml")
         if preview_model_context:
@@ -524,7 +538,7 @@ def benchmark(
     """Verify and run the local deterministic benchmark without provider or network access."""
     root = Path.cwd().resolve()
     manifest_path = path / "manifest.yaml" if path.is_dir() else path
-    selected_pack = policy_pack if policy_pack.is_absolute() else root / policy_pack
+    selected_pack = resolve_policy_pack_path(policy_pack)
     try:
         result = run_deterministic_benchmark(manifest_path, selected_pack, root)
     except (BenchmarkValidationError, ValueError, OSError) as exc:

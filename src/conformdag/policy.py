@@ -36,6 +36,50 @@ def _read_yaml(path: Path) -> Any:
         raise PolicyValidationError([f"invalid YAML in {path}: {exc}"]) from exc
 
 
+def resolve_policy_pack_path(path: Path, *, working_directory: Path | None = None) -> Path:
+    """Resolve a relative policy pack path from the invoker's working directory."""
+    if path.is_absolute():
+        return path.resolve()
+    base = (working_directory or Path.cwd()).resolve()
+    return (base / path).resolve()
+
+
+def resolve_configured_policy_pack(
+    configured: Path,
+    *,
+    scan_root: Path,
+    from_cli: bool,
+    working_directory: Path | None = None,
+) -> Path:
+    """Resolve a policy pack from CLI options or project configuration."""
+    if configured.is_absolute():
+        return configured.resolve()
+    if from_cli:
+        return resolve_policy_pack_path(configured, working_directory=working_directory)
+    return (scan_root / configured).resolve()
+
+
+def resolve_source_document(
+    document: Path,
+    *,
+    pack_path: Path,
+    repository_root: Path,
+) -> Path:
+    """Locate a policy source document relative to the pack or scanned repository."""
+    if document.is_absolute():
+        return document.resolve()
+    pack_path = pack_path.resolve()
+    repository_root = repository_root.resolve()
+    for candidate in (
+        pack_path.parent / document,
+        pack_path.parent.parent / document,
+        repository_root / document,
+    ):
+        if candidate.is_file():
+            return candidate.resolve()
+    return (repository_root / document).resolve()
+
+
 def load_policy_pack(path: Path, repository_root: Path | None = None) -> PolicyPack:
     """Load and validate one policy pack, including local source provenance."""
     raw: Any = _read_yaml(path)
@@ -47,8 +91,9 @@ def load_policy_pack(path: Path, repository_root: Path | None = None) -> PolicyP
     except ValueError as exc:
         raise PolicyValidationError([str(exc)]) from exc
 
-    root = (repository_root or path.parent).resolve()
-    issues = validate_policy_provenance(pack, root)
+    pack_path = path.resolve()
+    root = (repository_root or pack_path.parent).resolve()
+    issues = validate_policy_provenance(pack, pack_path=pack_path, repository_root=root)
     if issues:
         raise PolicyValidationError(issues)
     return pack
@@ -57,7 +102,7 @@ def load_policy_pack(path: Path, repository_root: Path | None = None) -> PolicyP
 def select_policy_pack(path: Path | None, repository_root: Path) -> PolicyPack:
     """Load one explicit pack, or reject implicit composition of multiple packs."""
     if path is not None:
-        return load_policy_pack(path, repository_root)
+        return load_policy_pack(path.resolve(), repository_root)
     candidates = sorted(
         candidate
         for pattern in ("*.yaml", "*.yml")
@@ -73,13 +118,20 @@ def select_policy_pack(path: Path | None, repository_root: Path) -> PolicyPack:
     return load_policy_pack(candidates[0], repository_root)
 
 
-def validate_policy_provenance(pack: PolicyPack, repository_root: Path) -> list[str]:
+def validate_policy_provenance(
+    pack: PolicyPack,
+    *,
+    pack_path: Path,
+    repository_root: Path,
+) -> list[str]:
     """Return all missing, malformed, or changed local source references."""
     issues: list[str] = []
     for policy in pack.policies:
-        source_path = policy.source.document
-        if not source_path.is_absolute():
-            source_path = repository_root / source_path
+        source_path = resolve_source_document(
+            policy.source.document,
+            pack_path=pack_path,
+            repository_root=repository_root,
+        )
         if not source_path.is_file():
             issues.append(f"{policy.id}: source document does not exist: {source_path}")
             continue
