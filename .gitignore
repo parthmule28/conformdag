@@ -17,6 +17,7 @@ benchmark-results/
 
 # Local tools and secrets
 .codex/
+.cursor/
 openspec/
 .env
 .env.*

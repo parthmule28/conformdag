@@ -2,7 +2,7 @@
 python = "3.12"
 uv = "0.12.0"
 node = "26.5.1"
-"npm:@fission-ai/openspec" = "1.7.0"
+"npm:@fission-ai/openspec" = { version = "1.7.0", trust_policy_excludes = ["fastq@1.20.2"] }
 "pipx:ruff" = "0.12.10"
 "npm:pyright" = "1.1.403"
 "pipx:pip-audit" = "2.9.0"
