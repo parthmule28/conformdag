@@ -147,3 +147,21 @@ def test_forbidden_operator_rule_respects_airflow_profile() -> None:
         ].status
         is FindingStatus.FAIL
     )
+
+
+def test_evaluate_deterministic_routes_community_policies_by_check_kind() -> None:
+    pack = load_policy_pack(Path("policies/community-pack.yaml"), Path.cwd())
+    model = _model(
+        "from airflow import DAG\n"
+        "from airflow.operators.empty import EmptyOperator\n"
+        "with DAG(dag_id='example', default_args={'execution_timeout': 3600}) as dag:\n"
+        "    EmptyOperator(task_id='start')\n"
+    )
+
+    findings, evaluated, skipped = evaluate_deterministic(pack.policies, [model])
+
+    assert skipped == []
+    assert evaluated == ["COM-DET-001", "COM-DET-002", "COM-DET-003"]
+    assert any(
+        item.policy_id == "COM-DET-001" and item.status is FindingStatus.PASS for item in findings
+    )

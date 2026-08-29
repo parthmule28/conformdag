@@ -58,11 +58,15 @@ run = "uv run python scripts/export_schemas.py"
 
 [tasks."scan:example"]
 description = "Scan the checked-in example repository"
-run = "uv run conformdag scan --path examples/sample-repository --policy-pack ../../policies/pack.yaml"
+run = "uv run conformdag scan --path examples/sample-repository --policy-pack policies/pack.yaml"
+
+[tasks."scan:community-example"]
+description = "Scan the sample repository with the community policy pack"
+run = "uv run conformdag scan --path examples/sample-repository --policy-pack policies/community-pack.yaml"
 
 [tasks."scan:semantic-example"]
 description = "Run the opt-in provider-backed example scan"
-run = "uv run conformdag scan --path examples/sample-repository --policy-pack ../../policies/pack.yaml --semantic --semantic-base-url $CONFORMDAG_SEMANTIC_BASE_URL --semantic-model $CONFORMDAG_SEMANTIC_MODEL --semantic-structured-output"
+run = "uv run conformdag scan --path examples/sample-repository --policy-pack policies/pack.yaml --semantic --semantic-base-url $CONFORMDAG_SEMANTIC_BASE_URL --semantic-model $CONFORMDAG_SEMANTIC_MODEL --semantic-structured-output"
 
 [tasks.benchmark]
 description = "Run the public benchmark"
