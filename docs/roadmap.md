@@ -9,7 +9,8 @@
 - [x] Build a 240-case deterministic benchmark and CI release gates.
 - [x] Configure protected-main review, PyPI trusted publishing, and staged release jobs.
 - [x] Record provider-backed integration measurements and semantic accuracy limitations.
-- [ ] Publish `0.1.0b1` after all release evidence is reviewed.
+- [x] Publish `0.1.0b1` after all release evidence is reviewed. Published 2026-08-01 to
+  PyPI and GHCR from tag `v0.1.0-beta.1`; see the [release checklist](release.md).
 
 ## Planned follow-up
 

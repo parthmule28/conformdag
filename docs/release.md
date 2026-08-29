@@ -40,8 +40,10 @@ accuracy baseline. Leave it disabled when those credentials and costs are not ap
 
 ## Release evidence
 
-- [ ] Run the updated real Docker smoke job for the maintained 3.3.0 profile after this
-  release-scope change.
+- [x] Run the updated real Docker smoke job for the maintained 3.3.0 profile after this
+  release-scope change. The tag workflow's `Validate Airflow 3.3.0 image` job
+  (pre-publication image build, smoke, and Trivy scan) succeeded in release run
+  [#5](https://github.com/parthmule28/conformdag/actions/runs/30715005648) on 2026-08-01.
 - [x] Run a secret-injected OpenRouter scan with the configured exact model and retain
   only ignored normalized reports. On 2026-08-01, prompt v3 evaluated all four semantic
   policies over the one-DAG public sample with `deepseek/deepseek-v4-flash`; OpenRouter
@@ -57,17 +59,27 @@ accuracy baseline. Leave it disabled when those credentials and costs are not ap
   scan. Local SHA-256 values were `a79335ef...ab9c381` for the wheel and
   `2d1b2fc...df06613` for the source distribution; the tag workflow independently
   regenerates and publishes its full checksums.
-- [ ] Merge the reviewed release-preparation pull request, then create and push
-  `v0.1.0-beta.1` from that exact `main` commit.
-- [ ] Confirm the tag workflow's attestations, image SBOMs, and high/critical image scan
-  results before approving the final PyPI deployment. The Trivy gate ignores only findings
+- [x] Merge the reviewed release-preparation pull request, then create and push
+  `v0.1.0-beta.1` from that exact `main` commit. The reviewed remediation PRs #5-#9 were
+  merged first, and the tag points at `f030065`, the exact resulting `main` commit.
+- [x] Confirm the tag workflow's attestations, image SBOMs, and high/critical image scan
+  results before approving the final PyPI deployment. All attestation and image jobs in
+  release run [#5](https://github.com/parthmule28/conformdag/actions/runs/30715005648)
+  succeeded, the published GHCR index carries an `attestation-manifest` entry, and the
+  pre-publication Trivy gate passed with the documented allowlist. PyPI trusted publishing
+  completed at 2026-08-01T20:38Z (wheel `0.1.0b1` SHA-256 `4967f7b7...746f821`, sdist
+  SHA-256 `4ff90635...c2556b8ee08`). The Trivy gate ignores only findings
   with no upstream fixed version; fixed high/critical findings remain blocking except for
   the three documented Jackson CVEs in Ray's shaded `ray_dist.jar`, which are temporarily
   allowlisted because the required Airflow Google provider has no published Ray build with
   the patched Jackson dependency.
-- [ ] After publication, confirm the GHCR 3.3.0 runtime package is public and can be
+- [x] After publication, confirm the GHCR 3.3.0 runtime package is public and can be
   pulled anonymously; the supported `scan --runtime` profile depends on anonymous digest
-  resolution.
+  resolution. Confirmed 2026-08-29 by fetching an anonymous pull token and the
+  `v0.1.0-beta.1` manifest from `ghcr.io/parthmule28/conformdag/airflow-3.3.0` with no
+  credentials (HTTP 200); the OCI index digest is
+  `sha256:b78c44154bc0112c2be67746ba70eef66a0f3c9b34b8ad43b398837f74f72481` for
+  `linux/amd64`.
 
 Airflow 2.11.2 was removed from the beta before publication. It was initially built and
 tested as a legacy compatibility candidate, but its upstream end-of-life status means
