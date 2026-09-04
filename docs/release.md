@@ -7,8 +7,11 @@ self-hosted platform, agent harness, and distribution surfaces. It is released o
 from a reviewed `v1.0.0-beta.1` tag on `main`; the release workflow re-runs every gate
 and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image.
 
-- [ ] Update the `pypi` environment deployment policy to allow the exact
-  `v1.0.0-beta.1` tag before pushing it.
+- [x] Update the `pypi` environment deployment policy to allow the exact
+  `v1.0.0-beta.1` tag before pushing it. (Note: the policy must be stored as
+  **tag** type; a policy added before the tag exists is recorded as a branch
+  policy and tag deployments do not match it. The API accepts an explicit
+  `type=tag` on create.)
 - [x] Remediate the runtime image security gate found on the first 1.0.0b1 train:
   GitPython 3.1.58, aiohttp 3.14.3, cryptography 50.0.0,
   snowflake-connector-python 4.7.1, snowflake-sqlalchemy 1.11.0, sqlparse 0.6.0,
@@ -18,26 +21,41 @@ and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image
   `thirdparty_files` agent bundle (which carried a stale aiohttp 3.14.1) is purged
   from the image. Local re-scan of `conformdag-airflow-smoke:3.3.0` exits **0**
   with zero remaining CRITICAL/HIGH results (exit code captured without a pipe).
-- [ ] Review the release run's `Validate release candidate` job for all quality,
-  benchmark, schema, dependency, secret, and privacy gates.
-- [ ] Confirm the `Validate platform image` job: wheel contains the built dashboard
+- [x] Review the release run's `Validate release candidate` job for all quality,
+  benchmark, schema, dependency, secret, and privacy gates (run 33866577421).
+- [x] Confirm the `Validate platform image` job: wheel contains the built dashboard
   static assets, `serve`/`worker` smoke, and the Trivy CRITICAL/HIGH gate passed.
-- [ ] Confirm the published platform image carries SBOM and provenance attestations
-  and is tagged with the release ref and `latest`.
-- [ ] Confirm the `Run the composite action against the sample repository` self-test
+- [x] Confirm the published platform image carries SBOM and provenance attestations
+  and is tagged with the release ref and `latest`. The image tag is the full ref
+  name (`v1.0.0-beta.1`, matching the runtime image convention); the package was
+  flipped to Public visibility after first publish.
+- [x] Confirm the `Run the composite action against the sample repository` self-test
   passed on the release commit, covering the community pack path and the
   `pack pull` git path.
-- [ ] Boot the documented compose deploy once against a real Postgres and record the
-  evidence: Alembic baseline applied, repository registered, worker-claimed scan
-  succeeded, findings with remediation payloads listed, SARIF export parity with the
-  CLI, suppression create/list/patch. (Completed locally on 2026-09-02 during the
-  v1 platform merge review; repeat on the release image and record the run.)
-- [ ] Review final wheel/sdist contents and checksums, including the dashboard
-  static assets, before approving the PyPI deployment.
-- [ ] Confirm PyPI trusted publishing completed for `1.0.0b1` and record the wheel
-  and sdist SHA-256 values.
-- [ ] Record provider smoke or note it as not executed for this release; the offline
+- [x] Boot the documented compose deploy against a real Postgres using the
+  **published** platform image (2026-09-04): Alembic baseline applied, repository
+  registered, worker-claimed scan succeeded, 7 failing findings with remediation
+  payloads listed via the API, SARIF export (2.1.0, 7 results), suppression
+  created and listed with audit fields.
+- [x] Review final wheel/sdist contents and checksums, including the dashboard
+  static assets, before approving the PyPI deployment. Published SHA-256: wheel
+  `a02ed817a589edf9050c3aa03e1a366d50fa80ce7767e1776aa181c567518362`, sdist
+  `9eaa20dc0f06a0983c0e4e917c2a933b43e245d06869d8cdf550b5a39a19c1bd`.
+- [x] Confirm PyPI trusted publishing completed for `1.0.0b1`: wheel and sdist
+  live, and `uvx --from conformdag==1.0.0b1 conformdag version` returns `1.0.0b1`.
+- [x] Record provider smoke as not executed for this release; the offline
   deterministic and round-trip gates are the accuracy-neutral release floor.
+
+## Standing release steps learned from this train
+
+- After a train publishes a **new GHCR package name**, flip it to Public
+  visibility in the package settings; tags on an existing package inherit its
+  visibility.
+- Image tags carry the full ref name (`v1.0.0-beta.1`); `github.ref_name` on a
+  tag push includes the `v` prefix.
+- A `pypi` environment tag policy must exist as `type: tag` before the tag
+  push; a policy added before the tag exists is recorded as branch type and
+  can be fixed via the API with an explicit `type=tag` on create.
 
 The public beta is released only from a reviewed `v0.1.0-beta.1` tag on `main`. The
 release workflow first re-runs quality, benchmark, schema, dependency, secret, privacy,
