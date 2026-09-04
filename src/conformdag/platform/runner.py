@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from conformdag.analysis import ParseCache
 from conformdag.models import ScanReport
 from conformdag.platform.db import (
     FindingRow,
@@ -21,6 +23,14 @@ from conformdag.reporting import normalize_report
 from conformdag.scan import scan_repository
 
 PERSISTENT_FAILURES = (ValueError, OSError, RuntimeError)
+
+
+def worker_parse_cache() -> ParseCache | None:
+    """Resolve the worker-side parse cache directory, when enabled or defaulted."""
+    configured = os.environ.get("CONFORMDAG_WORKER_PARSE_CACHE_DIR")
+    if configured is None:
+        return None
+    return ParseCache(Path(configured))
 
 
 def _ingest(session: Session, scan: ScanRow, report: ScanReport) -> None:
@@ -70,7 +80,9 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             return 2
         pack = repository.policy_pack
         try:
-            report = scan_repository(Path(repository.path), Path(pack) if pack else None)
+            report = scan_repository(
+                Path(repository.path), Path(pack) if pack else None, parse_cache=worker_parse_cache()
+            )
         except PERSISTENT_FAILURES as exc:
             scan.status = "failed"
             scan.error = str(exc)

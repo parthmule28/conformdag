@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from conformdag.platform.db import (
     ScanRow,
     claim_queued_scan,
-    prune_scan,
+    prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
     utcnow,
@@ -97,11 +97,9 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
 
 
 def _apply_retention(session: Session, repository_id: str, settings: WorkerSettings) -> None:
-    targets = retention_target_scan_ids(session, repository_id, settings.retention_keep)
-    for scan_id in targets:
-        prune_scan(session, scan_id)
-    if targets:
-        session.commit()
+    for scan_id in retention_target_scan_ids(session, repository_id, settings.retention_keep):
+        prune_scan_artifact(session, scan_id)
+    session.commit()
 
 
 def run_worker(session_factory: sessionmaker[Session], dsn: str, settings: WorkerSettings) -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from conformdag import __version__
-from conformdag.analysis import SourceModel, analyze_source, discover_python_files
+from conformdag.analysis import ParseCache, SourceModel, analyze_source, discover_python_files
 from conformdag.config import load_project_config
 from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic
 from conformdag.models import (
@@ -64,6 +64,7 @@ def scan_repository(
     semantic_model: str | None = None,
     semantic_native_structured_output: bool | None = None,
     airflow_profile: AirflowProfile | None = None,
+    parse_cache: ParseCache | None = None,
 ) -> ScanReport:
     """Run source analysis and any explicitly supplied semantic provider."""
     root = repository_root.resolve()
@@ -87,7 +88,7 @@ def scan_repository(
     ]
     models: list[SourceModel] = []
     for source in files:
-        model, parse_issue = analyze_source(source)
+        model, parse_issue = analyze_source(source, parse_cache)
         if parse_issue:
             issues.append(
                 RunIssue(

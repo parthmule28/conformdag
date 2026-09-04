@@ -1,6 +1,7 @@
 """Platform tier tests: workspace model, HTTP API contract, and worker durability."""
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from shutil import copyfile
@@ -10,6 +11,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from conformdag.models import RunMetadata, ScanReport
@@ -20,6 +22,8 @@ from conformdag.platform.db import (
     ScanRow,
     claim_queued_scan,
     create_session_factory,
+    prune_scan_artifact,
+    retention_target_scan_ids,
     stale_running_cutoff,
 )
 from conformdag.platform.worker import WorkerSettings, run_worker_once
@@ -550,3 +554,106 @@ def test_dashboard_index_is_served(client: TestClient) -> None:
     response = _get(client, "/")
     assert response.status_code == 200
     assert "ConformDAG Platform" in response.text
+
+
+def test_retention_clears_artifacts_and_keeps_findings(platform_env: str) -> None:
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        for index in range(4):
+            session.add(
+                ScanRow(
+                    id=f"scan{index}",
+                    repository_id="repo1",
+                    status="succeeded",
+                    report_json={"report_version": "2"},
+                )
+            )
+        session.commit()
+
+        targets = retention_target_scan_ids(session, "repo1", keep=2)
+        for scan_id in targets:
+            prune_scan_artifact(session, scan_id)
+        session.commit()
+
+        scans = {scan.id: scan for scan in session.scalars(select(ScanRow)).all()}
+        assert targets == ["scan0", "scan1"]
+        assert scans["scan0"].report_json is None
+        assert scans["scan1"].report_json is None
+        assert scans["scan2"].report_json is not None
+        assert scans["scan3"].report_json is not None
+        assert len(scans) == 4
+
+
+def testworker_parse_cache_env_controls_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.analysis import ParseCache
+
+    monkeypatch.delenv("CONFORMDAG_WORKER_PARSE_CACHE_DIR", raising=False)
+    assert runner_module.worker_parse_cache() is None
+
+    monkeypatch.setenv("CONFORMDAG_WORKER_PARSE_CACHE_DIR", str(tmp_path / "pc"))
+    cache = runner_module.worker_parse_cache()
+    assert isinstance(cache, ParseCache)
+    assert cache.directory == tmp_path / "pc"
+
+
+def test_parse_cache_round_trip_is_faithful(
+    build_repository: Callable[[Path], Path], platform_env: str, tmp_path: Path
+) -> None:
+    _ = platform_env
+    from conformdag.analysis import ParseCache, SourceFile, analyze_source
+    from conformdag.scan import scan_repository
+
+    build_repository(tmp_path)
+    cache_dir = tmp_path / "parse-cache"
+    cache = ParseCache(cache_dir)
+    source = SourceFile(
+        path=tmp_path / "dags" / "sample.py",
+        relative_path="dags/sample.py",
+        content="from airflow import DAG\n\ndag = DAG(dag_id='x')\n",
+        content_hash="a" * 64,
+    )
+
+    fresh, fresh_issue = analyze_source(source)
+    cached, cached_issue = analyze_source(source, cache)
+    hit, hit_issue = analyze_source(source, cache)
+    assert fresh is not None and cached is not None and hit is not None
+    assert fresh_issue is None and cached_issue is None and hit_issue is None
+    assert hit == cached, "cache hit must equal the freshly parsed model"
+    assert hit.dags == fresh.dags
+    assert hit.source is source
+    assert len(list(cache_dir.glob("*.pkl"))) == 1
+
+    scanned_cached = scan_repository(_scan_repo(tmp_path), parse_cache=cache)
+    scanned_plain = scan_repository(_scan_repo(tmp_path), parse_cache=None)
+    assert scanned_cached.result_fingerprint == scanned_plain.result_fingerprint
+    _ = ScanReport
+
+
+def _scan_repo(tmp_path: Path) -> Path:
+    from shutil import copyfile
+
+    root = tmp_path / "scan-repo"
+    if not (root / "policies").is_dir():
+        (root / "policies").mkdir(parents=True)
+        (root / "standards").mkdir(parents=True)
+        (root / "dags").mkdir(parents=True)
+        copyfile("policies/pack.yaml", root / "policies" / "pack.yaml")
+        copyfile("standards/dag-authoring.md", root / "standards" / "dag-authoring.md")
+        (root / "conformdag.yaml").write_text(
+            'config_version: "1"\nscan:\n  policy_pack: policies/pack.yaml\n',
+            encoding="utf-8",
+        )
+        (root / "dags" / "dag.py").write_text(
+            "from datetime import timedelta\n"
+            "from airflow import DAG\n"
+            "from airflow.providers.standard.operators.empty import EmptyOperator\n"
+            "dag = DAG(dag_id='clean', owner='platform', tags=['domain:data', 'owner'])\n"
+            "task = EmptyOperator(\n"
+            "    task_id='t', retries=2,\n"
+            "    execution_timeout=timedelta(seconds=300), retry_delay=timedelta(seconds=60)\n"
+            ")\n",
+            encoding="utf-8",
+        )
+    return root

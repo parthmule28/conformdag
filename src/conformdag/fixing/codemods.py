@@ -135,8 +135,10 @@ def _find_task_call(tree: ast.Module, payload: RemediationPayload) -> ast.Call |
     return _nearest(candidates, payload.target.line)
 
 
-def _fix_dag_kwarg(source: str, payload: RemediationPayload, name: str, text: str) -> list[EditSpan] | None:
-    call = _find_dag_call(ast.parse(source), payload)
+def _fix_dag_kwarg(
+    source: str, payload: RemediationPayload, name: str, text: str, tree: ast.Module | None = None
+) -> list[EditSpan] | None:
+    call = _find_dag_call(tree or ast.parse(source), payload)
     if call is None:
         return None
     if payload.action is RemediationAction.SET_KWARG:
@@ -145,8 +147,10 @@ def _fix_dag_kwarg(source: str, payload: RemediationPayload, name: str, text: st
     return [_kwarg_addition_span(call, f"{name}={text}")]
 
 
-def _fix_task_kwarg(source: str, payload: RemediationPayload, name: str, text: str) -> list[EditSpan] | None:
-    call = _find_task_call(ast.parse(source), payload)
+def _fix_task_kwarg(
+    source: str, payload: RemediationPayload, name: str, text: str, tree: ast.Module | None = None
+) -> list[EditSpan] | None:
+    call = _find_task_call(tree or ast.parse(source), payload)
     if call is None:
         return None
     if payload.action is RemediationAction.SET_KWARG:
@@ -155,19 +159,19 @@ def _fix_task_kwarg(source: str, payload: RemediationPayload, name: str, text: s
     return [_kwarg_addition_span(call, f"{name}={text}")]
 
 
-def fix_owner(source: str, payload: RemediationPayload) -> list[EditSpan] | None:
+def fix_owner(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
     if payload.value is None:
         return None
-    return _fix_dag_kwarg(source, payload, "owner", f'"{payload.value}"')
+    return _fix_dag_kwarg(source, payload, "owner", f'"{payload.value}"', tree)
 
 
-def fix_tags(source: str, payload: RemediationPayload) -> list[EditSpan] | None:
+def fix_tags(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
     if payload.value is None:
         return None
     additions = _string_list(payload.value)
     if additions is None:
         return None
-    call = _find_dag_call(ast.parse(source), payload)
+    call = _find_dag_call(tree or ast.parse(source), payload)
     if call is None:
         return None
     rendered = ", ".join(repr(item) for item in additions)
@@ -182,21 +186,23 @@ def fix_tags(source: str, payload: RemediationPayload) -> list[EditSpan] | None:
     return [_insert_span(keyword.value.lineno, keyword.value.col_offset + 1, rendered)]
 
 
-def fix_execution_timeout(source: str, payload: RemediationPayload) -> list[EditSpan] | None:
+def fix_execution_timeout(
+    source: str, payload: RemediationPayload, tree: ast.Module | None = None
+) -> list[EditSpan] | None:
     if payload.value is None:
         return None
     text = f"timedelta(seconds={payload.value})"
-    return _fix_task_kwarg(source, payload, "execution_timeout", text)
+    return _fix_task_kwarg(source, payload, "execution_timeout", text, tree)
 
 
-def fix_retry_bounds(source: str, payload: RemediationPayload) -> list[EditSpan] | None:
+def fix_retry_bounds(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
     if payload.value is None or payload.kwarg is None:
         return None
     if payload.kwarg == "retries":
-        return _fix_task_kwarg(source, payload, "retries", payload.value)
+        return _fix_task_kwarg(source, payload, "retries", payload.value, tree)
     if payload.kwarg == "retry_delay":
         text = f"timedelta(seconds={payload.value})"
-        return _fix_task_kwarg(source, payload, "retry_delay", text)
+        return _fix_task_kwarg(source, payload, "retry_delay", text, tree)
     return None
 
 
@@ -243,11 +249,13 @@ def timedelta_import_span(source: str) -> EditSpan:
     return _insert_span(skip, 0, "from datetime import timedelta\n")
 
 
-def fix_move_statement(source: str, payload: RemediationPayload) -> list[EditSpan] | None:
+def fix_move_statement(
+    source: str, payload: RemediationPayload, tree: ast.Module | None = None
+) -> list[EditSpan] | None:
     """Build the proposed-only structural move spans for one module-scope statement."""
     if payload.target is None:
         return None
-    tree = ast.parse(source)
+    tree = tree or ast.parse(source)
     statement = next(
         (node for node in tree.body if node.lineno <= payload.target.line <= (node.end_lineno or node.lineno)),
         None,
