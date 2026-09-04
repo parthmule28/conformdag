@@ -24,8 +24,6 @@ from conformdag.platform.db import (
 )
 from conformdag.platform.worker import WorkerSettings, run_worker_once
 
-pytest.importorskip("fastapi", reason="platform extra is not installed")
-
 
 def _as_httpx(client: TestClient) -> httpx.Client:
     """View the TestClient through its typed httpx.Client base."""

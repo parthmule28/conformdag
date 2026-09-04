@@ -10,7 +10,7 @@ node = "26.5.1"
 
 [tasks.setup]
 description = "Create the locked development environment"
-run = "uv sync --all-groups"
+run = "uv sync --all-groups --all-extras"
 
 [tasks.lint]
 description = "Run Ruff lint checks"
