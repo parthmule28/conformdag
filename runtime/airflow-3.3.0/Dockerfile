@@ -20,6 +20,7 @@ RUN apt-get update \
         snowflake-sqlalchemy==1.11.0 \
         sqlparse==0.6.0 \
         tornado==6.5.8 \
+    && rm -rf /home/airflow/.local/lib/python3.12/site-packages/ray/_private/runtime_env/agent/thirdparty_files \
     && rm -f /home/airflow/.local/bin/uv /home/airflow/.local/bin/uvx \
     && rm -f /tmp/conformdag-base-constraints.txt /opt/conformdag/constraints.txt
 COPY runtime/entrypoint.py /usr/local/bin/conformdag-runtime
