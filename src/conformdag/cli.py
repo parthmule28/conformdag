@@ -41,8 +41,10 @@ from conformdag.semantic import CachedSemanticProvider, OpenAICompatibleProvider
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 policy_app = typer.Typer(add_completion=False, no_args_is_help=True)
 agent_app = typer.Typer(add_completion=False, no_args_is_help=True)
+pack_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(policy_app, name="policy")
 app.add_typer(agent_app, name="agent")
+app.add_typer(pack_app, name="pack")
 console = Console()
 RUNTIME_OPTION = typer.Option(
     None,
@@ -93,6 +95,8 @@ BENCHMARK_MARKDOWN_OPTION = typer.Option(
 AGENT_REPORTS_ARGUMENT = typer.Argument(help="Canonical report JSON paths to aggregate.")
 AGENT_PACK_ID_OPTION = typer.Option("org-pack", "--pack-id", help="Pack label for the proposal.")
 AGENT_FORMAT_OPTION = typer.Option("markdown", "--format", help="Proposal format: markdown or json.")
+PACK_NAME_OPTION = typer.Option(None, "--name", help="Local cache name for the pulled pack.")
+PACK_CACHE_ROOT_OPTION = typer.Option(None, "--cache-root", help="Cache root; defaults to .conformdag/packs.")
 
 
 def _fail(error: Exception) -> NoReturn:
@@ -564,6 +568,23 @@ def fix(
 def version() -> None:
     """Show the installed ConformDAG version."""
     typer.echo(__version__)
+
+
+@pack_app.command("pull")
+def pack_pull(
+    source: str = typer.Argument(help="Git URL of a repository containing a policy pack."),
+    name: str | None = PACK_NAME_OPTION,
+    cache_root: Path | None = PACK_CACHE_ROOT_OPTION,
+) -> None:
+    """Pull and validate a policy pack from git; record the resolved ref."""
+    from conformdag.packpull import PackPullError, pull_pack
+
+    try:
+        pulled = pull_pack(source, cache_root=cache_root, name=name)
+    except (PackPullError, PolicyValidationError, OSError) as exc:
+        _fail(exc)
+    typer.echo(f"pulled {pulled.name} at {pulled.resolved_ref} -> {pulled.path}")
+    typer.echo("re-pull to update; committing and tagging the pack stays a git operation")
 
 
 @agent_app.command("run")
