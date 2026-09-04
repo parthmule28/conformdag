@@ -6,7 +6,7 @@ Run the pinned public beta without installing it globally:
 
 ```bash
 mise use python@3.12 uv@0.12.0
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag version
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag version
 ```
 
 Contributors working from a checkout use the locked development environment:
@@ -20,7 +20,7 @@ mise exec -- uv run conformdag version
 Initialize ConformDAG metadata in an Airflow repository:
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag init
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag init
 ```
 
 This creates `conformdag.yaml`, a policy-pack scaffold, authoring standards, and an
@@ -29,12 +29,12 @@ empty suppression file. Review and populate the policy pack before scanning.
 ## Policy-pack review
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag validate-policies --path policies/pack.yaml
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag list-policies --path policies/pack.yaml
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy show AIR-DET-001 --path policies/pack.yaml
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy review AIR-DET-001 --path policies/pack.yaml
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy explain AIR-DET-001 --path policies/pack.yaml
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag policy reference all
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag validate-policies --path policies/pack.yaml
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag list-policies --path policies/pack.yaml
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag policy show AIR-DET-001 --path policies/pack.yaml
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag policy review AIR-DET-001 --path policies/pack.yaml
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag policy explain AIR-DET-001 --path policies/pack.yaml
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag policy reference all
 ```
 
 `show` is a concise human summary. `review` adds provenance, configuration,
@@ -48,9 +48,9 @@ It checks DAG safety (timeouts, retries, and module-scope I/O) without
 organization-specific owner or tag rules:
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag validate-policies --path community
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag list-policies --path community
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag validate-policies --path community
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag list-policies --path community
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan \
   --path /path/to/airflow-repo/dags \
   --policy-pack community \
   --format terminal
@@ -77,16 +77,16 @@ arguments, or cache files.
 The default scan never imports repository Python and never contacts a provider:
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan \
   --path . --policy-pack policies/pack.yaml
 ```
 
 JSON is the canonical machine-readable output. Other projections are:
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --format terminal
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --format sarif --output report.sarif
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --format html --output report.html
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan --path . --format terminal
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan --path . --format sarif --output report.sarif
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan --path . --format html --output report.html
 ```
 
 Use `--no-evidence` when a rendered artifact must exclude source excerpts. Generated
@@ -109,8 +109,8 @@ suppression does not change the policy contract or hide unrelated future finding
 re-scanning an isolated patched copy, and writes nothing unless `--apply` is passed:
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag fix --path .
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag fix --path . --apply
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag fix --path .
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag fix --path . --apply
 ```
 
 Dry run prints a unified diff identical to what `--apply` would write. Generation is
@@ -155,7 +155,7 @@ the checkout:
 
 ```bash
 infisical run --env=dev --path=/ -- \
-  mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+  mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan \
   --path . \
   --semantic \
   --semantic-base-url https://openrouter.ai/api/v1 \
@@ -181,7 +181,7 @@ manifest. Supported profiles use no network, a read-only repository and root fil
 a non-root user, dropped capabilities, `no-new-privileges`, and bounded resources:
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan --path . --runtime 3.3.0
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan --path . --runtime 3.3.0
 ```
 
 The profile image is pulled and resolved to an immutable digest before execution. Airflow
@@ -205,7 +205,7 @@ mise run privacy
 Save deterministic benchmark evidence with:
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag benchmark benchmarks/synthetic \
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag benchmark benchmarks/synthetic \
   --policy-pack policies/pack.yaml \
   --output .conformdag/benchmark-report.json \
   --technical-report .conformdag/benchmark-report.md
