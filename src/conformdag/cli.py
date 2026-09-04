@@ -16,6 +16,7 @@ from conformdag.benchmark import (
     run_deterministic_benchmark,
 )
 from conformdag.config import load_project_config, semantic_api_key
+from conformdag.fixing import run_fix
 from conformdag.models import (
     AirflowProfile,
     FindingStatus,
@@ -124,9 +125,7 @@ def init(path: Path = Path("."), force: bool = False) -> None:
             "runtime:\n"
             "  enabled: false\n"
         ),
-        root / "policies" / "pack.yaml": (
-            'schema_version: "1"\nid: default\nversion: 0.1.0\npolicies: []\n'
-        ),
+        root / "policies" / "pack.yaml": ('schema_version: "1"\nid: default\nversion: 0.1.0\npolicies: []\n'),
         root / "standards" / "dag-authoring.md": "# DAG Authoring Standards\n",
         root / ".conformdag" / "suppressions.yaml": "suppressions: []\n",
     }
@@ -263,19 +262,14 @@ def _reference_entries(topic: str) -> dict[str, tuple[ReferenceEntry, ...]]:
 
 def _reference_payload(topic: str) -> dict[str, list[dict[str, str]]]:
     return {
-        name: [
-            {"key": entry.key, "meaning": entry.meaning, "behavior": entry.behavior}
-            for entry in entries
-        ]
+        name: [{"key": entry.key, "meaning": entry.meaning, "behavior": entry.behavior} for entry in entries]
         for name, entries in _reference_entries(topic).items()
     }
 
 
 @policy_app.command("reference")
 def policy_reference(
-    topic: str = typer.Argument(
-        "all", help="Reference topic: all, outcomes, exit-codes, runtime, or reports."
-    ),
+    topic: str = typer.Argument("all", help="Reference topic: all, outcomes, exit-codes, runtime, or reports."),
     format: str = "terminal",
 ) -> None:
     """Explain policy outcomes, exit codes, runtime, and report contracts."""
@@ -318,11 +312,7 @@ def scan(
     if preview_model_context and (
         runtime is not None or runtime_image is not None or semantic is True or output is not None
     ):
-        _fail(
-            ValueError(
-                "--preview-model-context cannot be combined with runtime, semantic, or output"
-            )
-        )
+        _fail(ValueError("--preview-model-context cannot be combined with runtime, semantic, or output"))
     root = path.resolve()
     selected_pack = resolve_policy_pack_path(policy_pack) if policy_pack is not None else None
     try:
@@ -373,18 +363,13 @@ def scan(
         if semantic_enabled:
             selected_base_url = semantic_base_url or config.semantic.base_url
             if not selected_base_url:
-                raise ValueError(
-                    "semantic evaluation requires semantic.base_url or --semantic-base-url"
-                )
+                raise ValueError("semantic evaluation requires semantic.base_url or --semantic-base-url")
             selected_base_url = _validate_semantic_base_url(selected_base_url)
             if not selected_semantic_model:
                 raise ValueError("semantic evaluation requires semantic.model or --semantic-model")
             api_key = semantic_api_key(config)
             if not api_key:
-                raise ValueError(
-                    f"semantic evaluation requires environment variable "
-                    f"{config.semantic.api_key_env}"
-                )
+                raise ValueError(f"semantic evaluation requires environment variable {config.semantic.api_key_env}")
             direct_provider = OpenAICompatibleProvider(
                 selected_base_url,
                 selected_semantic_model,
@@ -412,9 +397,7 @@ def scan(
             semantic_provider=provider,
             semantic_provider_name=provider_name,
             semantic_model=selected_semantic_model if semantic_enabled else None,
-            semantic_native_structured_output=(
-                native_structured_output if semantic_enabled else None
-            ),
+            semantic_native_structured_output=(native_structured_output if semantic_enabled else None),
             airflow_profile=runtime_config.airflow_version if runtime_config.enabled else None,
         )
     except (PolicyValidationError, RuntimePhaseError, ValueError) as exc:
@@ -457,9 +440,7 @@ def scan(
                                         if runtime_config.airflow_version is not None
                                         else None
                                     ),
-                                    "supported_profile": (
-                                        runtime_config.airflow_version is not None
-                                    ),
+                                    "supported_profile": (runtime_config.airflow_version is not None),
                                     "network_enabled": runtime_config.network_enabled,
                                     "timeout_seconds": runtime_config.timeout_seconds,
                                 },
@@ -489,8 +470,7 @@ def scan(
         output_report = report.model_copy(
             update={
                 "findings": [
-                    finding.model_copy(update={"evidence": None, "audit_evidence": []})
-                    for finding in report.findings
+                    finding.model_copy(update={"evidence": None, "audit_evidence": []}) for finding in report.findings
                 ]
             }
         )
@@ -521,6 +501,57 @@ def scan(
     if has_blocking_failures(report):
         raise typer.Exit(code=1)
     if any(observation.status is FindingStatus.FAIL for observation in report.runtime_observations):
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def fix(
+    path: Path = Path("."),
+    policy_pack: Path | None = None,
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write verified patches to sources; without it nothing is written.",
+    ),
+    max_iterations: int = typer.Option(
+        3,
+        "--max-iterations",
+        min=1,
+        help="Bound on the patch-and-rescan verification loop.",
+    ),
+) -> None:
+    """Propose deterministic fixes; print unified diffs and verify by re-scan."""
+    root = path.resolve()
+    selected_pack = resolve_policy_pack_path(policy_pack) if policy_pack is not None else None
+    try:
+        outcome = run_fix(root, selected_pack, apply=apply, max_iterations=max_iterations)
+    except (PolicyValidationError, ValueError, OSError) as exc:
+        _fail(exc)
+    for patch in outcome.patches:
+        typer.echo(patch.diff, nl=False)
+    for move in outcome.proposed_moves:
+        typer.echo(f"PROPOSED ONLY (never applied) {move.policy_id} {move.path}")
+        typer.echo(move.diff, nl=False)
+    for item in outcome.not_fixable:
+        typer.echo(
+            f"not fixable: {item.policy_id} {item.path} [{item.fix_kind}] {item.reason}",
+            err=True,
+        )
+    for item in outcome.residuals:
+        typer.echo(
+            f"residual: {item.policy_id} {item.path} [{item.fix_kind}] unresolved after {item.iterations} iteration(s)",
+            err=True,
+        )
+    if apply and outcome.applied_files:
+        typer.echo("applied: " + ", ".join(outcome.applied_files), err=True)
+    typer.echo(
+        f"fix {'applied' if apply else 'dry-run'}: {len(outcome.patches)} verified patch(es), "
+        f"{len(outcome.proposed_moves)} proposed-only, "
+        f"{len(outcome.not_fixable)} not fixable, "
+        f"{len(outcome.residuals)} residual",
+        err=True,
+    )
+    if apply and outcome.residuals:
         raise typer.Exit(code=1)
 
 

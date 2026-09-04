@@ -25,6 +25,13 @@ directory so they cannot be uploaded to PyPI as packages.
 
 ## Required pull-request checks
 
+- [x] `conformdag fix --path . --policy-pack policies/pack.yaml` dry-run writes nothing and
+  exits `0` (user guide: Deterministic fixes).
+- [x] Round-trip gate: the benchmark's autofix violation population (inject violations,
+  run the fix engine, assert a clean re-scan) passes via
+  `tests/test_roundtrip.py::test_roundtrip_gate_fixes_every_autofix_violation_case` over
+  the 240-case synthetic corpus; a regression fails the build.
+
 - [x] Fast checks.
 - [x] Offline benchmark gate.
 - [x] Release validation.
