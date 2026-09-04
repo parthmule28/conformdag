@@ -1,0 +1,87 @@
+name: ConformDAG Scan
+description: Scan DAGs against organizational policies; upload SARIF; fail on blocking findings.
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: Repository path to scan.
+    required: false
+    default: .
+  policy-pack:
+    description: Pack path, community alias, or a git URL pulled first.
+    required: false
+    default: community
+  version:
+    description: ConformDAG CLI version to run; defaults to the release version.
+    required: false
+    default: "1.0.0"
+  upload-sarif:
+    description: Upload the SARIF report via codeql-action.
+    required: false
+    default: "true"
+  fail-on-blocking:
+    description: Fail the job when blocking findings exist.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v6
+
+    - name: Pull pack from git when requested
+      id: prepare-pack
+      if: >-
+        ${{ startsWith(inputs['policy-pack'], 'http')
+            || contains(inputs['policy-pack'], 'git@') }}
+      shell: bash
+      env:
+        CLI_FROM: ${{ inputs.version == 'local' && '.' || format('conformdag=={0}', inputs.version) }}
+      run: |
+        PACK_INPUT="${{ inputs['policy-pack'] }}"
+        PACK_NAME="$(basename "$PACK_INPUT" .git)"
+        uvx --from "$CLI_FROM" conformdag pack pull "$PACK_INPUT" --name "$PACK_NAME"
+        PACK_FILE=".conformdag/packs/$PACK_NAME/pack.yaml"
+        [ -f "$PACK_FILE" ] || PACK_FILE=".conformdag/packs/$PACK_NAME/policies/pack.yaml"
+        echo "pack=$PACK_FILE" >> "$GITHUB_OUTPUT"
+
+    - name: Run scan
+      id: scan
+      shell: bash
+      env:
+        SELECTED_PACK: ${{ steps.prepare-pack.outputs.pack || inputs['policy-pack'] }}
+        CLI_FROM: ${{ inputs.version == 'local' && '.' || format('conformdag=={0}', inputs.version) }}
+      run: |
+        mkdir -p .conformdag
+        set +e
+        uvx --from "$CLI_FROM" conformdag scan \
+          --path "${{ inputs.path }}" \
+          --policy-pack "$SELECTED_PACK" \
+          --format sarif \
+          --output .conformdag/report.sarif
+        SCAN_EXIT=$?
+        set -e
+        echo "exit_code=$SCAN_EXIT" >> "$GITHUB_OUTPUT"
+        if [ "$SCAN_EXIT" -gt 1 ]; then
+          echo "ConformDAG scan failed with exit code $SCAN_EXIT" >&2
+          exit "$SCAN_EXIT"
+        fi
+        exit 0
+
+    - name: Upload SARIF
+      if: ${{ inputs['upload-sarif'] == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: .conformdag/report.sarif
+
+    - name: Fail on blocking findings
+      if: >-
+        ${{ inputs['fail-on-blocking'] == 'true'
+            && steps.scan.outputs.exit_code == '1' }}
+      shell: bash
+      run: |
+        echo "Blocking policy findings found; see the code scanning results." >&2
+        exit 1

@@ -86,9 +86,7 @@ class BenchmarkManifest(ConformModel):
     policy_versions: dict[str, str] = Field(default_factory=dict)
     policy_contract_hashes: dict[str, str] = Field(default_factory=dict)
     enforcement_hashes: dict[str, str] = Field(default_factory=dict)
-    source_admissions: list[BenchmarkSourceAdmission] = Field(
-        default_factory=_empty_source_admissions
-    )
+    source_admissions: list[BenchmarkSourceAdmission] = Field(default_factory=_empty_source_admissions)
     cases: list[BenchmarkCase] = Field(min_length=1)
 
 
@@ -230,9 +228,7 @@ def render_benchmark_report(result: BenchmarkRunResult) -> str:
         ]
     )
     for baseline in result.baselines:
-        lines.append(
-            f"| {baseline.name} | {baseline.mode} | {baseline.status} | {baseline.reason or ''} |"
-        )
+        lines.append(f"| {baseline.name} | {baseline.mode} | {baseline.status} | {baseline.reason or ''} |")
     lines.append("")
     return "\n".join(lines)
 
@@ -276,10 +272,7 @@ def load_benchmark_manifest(path: Path, repository_root: Path | None = None) -> 
             continue
         actual_hash = hashlib.sha256(fixture.read_bytes()).hexdigest()
         if actual_hash.lower() != case.fixture_sha256.lower():
-            issues.append(
-                f"{case.id}: fixture hash mismatch "
-                f"(expected {case.fixture_sha256}, got {actual_hash})"
-            )
+            issues.append(f"{case.id}: fixture hash mismatch (expected {case.fixture_sha256}, got {actual_hash})")
     if issues:
         raise BenchmarkValidationError(issues)
     return manifest
@@ -293,9 +286,7 @@ def benchmark_manifest_payload(manifest: BenchmarkManifest) -> dict[str, Any]:
 def benchmark_identity(manifest: BenchmarkManifest) -> str:
     """Return a stable identity that changes with policy or schema inputs."""
     payload = benchmark_manifest_payload(manifest)
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _ratio(numerator: int, denominator: int) -> float | None:
@@ -309,20 +300,14 @@ def _metrics(
 ) -> BenchmarkMetrics:
     violations = sum(labels[case.case_id] == "violation" for case in cases)
     valid = sum(labels[case.case_id] in {"valid", "safe-counterexample"} for case in cases)
-    true_positives = sum(
-        labels[case.case_id] == "violation" and case.actual_status == "FAIL" for case in cases
-    )
+    true_positives = sum(labels[case.case_id] == "violation" and case.actual_status == "FAIL" for case in cases)
     true_negatives = sum(
-        labels[case.case_id] in {"valid", "safe-counterexample"} and case.actual_status == "PASS"
-        for case in cases
+        labels[case.case_id] in {"valid", "safe-counterexample"} and case.actual_status == "PASS" for case in cases
     )
     false_positives = sum(
-        labels[case.case_id] in {"valid", "safe-counterexample"} and case.actual_status == "FAIL"
-        for case in cases
+        labels[case.case_id] in {"valid", "safe-counterexample"} and case.actual_status == "FAIL" for case in cases
     )
-    false_negatives = sum(
-        labels[case.case_id] == "violation" and case.actual_status != "FAIL" for case in cases
-    )
+    false_negatives = sum(labels[case.case_id] == "violation" and case.actual_status != "FAIL" for case in cases)
     precision = _ratio(true_positives, true_positives + false_positives)
     recall = _ratio(true_positives, true_positives + false_negatives)
     f1 = (
@@ -452,13 +437,9 @@ def run_deterministic_benchmark(
         policy_id: [case for case in results if case.policy_id == policy_id]
         for policy_id in sorted({case.policy_id for case in manifest.cases})
     }
-    metrics = {
-        policy_id: _metrics(cases, labels, elapsed) for policy_id, cases in by_policy.items()
-    }
+    metrics = {policy_id: _metrics(cases, labels, elapsed) for policy_id, cases in by_policy.items()}
     metrics["aggregate"] = _metrics(results, labels, elapsed)
-    quality_gates = [
-        _quality_gate(policy_id, policy_metrics) for policy_id, policy_metrics in metrics.items()
-    ]
+    quality_gates = [_quality_gate(policy_id, policy_metrics) for policy_id, policy_metrics in metrics.items()]
     baselines = [
         BenchmarkBaseline(
             name="deterministic",

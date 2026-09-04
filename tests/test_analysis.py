@@ -59,9 +59,7 @@ def test_parse_errors_are_reported(tmp_path: Path) -> None:
 def test_resolves_owner_from_supported_default_args_inheritance(tmp_path: Path) -> None:
     source_path = tmp_path / "inherited.py"
     source_path.write_text(
-        "from airflow import DAG\n"
-        "default_args = {'owner': 'platform'}\n"
-        "dag = DAG(default_args=default_args)\n",
+        "from airflow import DAG\ndefault_args = {'owner': 'platform'}\ndag = DAG(default_args=default_args)\n",
         encoding="utf-8",
     )
     files, _ = discover_python_files(tmp_path, ["*.py"])

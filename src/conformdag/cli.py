@@ -16,6 +16,7 @@ from conformdag.benchmark import (
     run_deterministic_benchmark,
 )
 from conformdag.config import load_project_config, semantic_api_key
+from conformdag.fixing import run_fix
 from conformdag.models import (
     AirflowProfile,
     FindingStatus,
@@ -39,7 +40,11 @@ from conformdag.semantic import CachedSemanticProvider, OpenAICompatibleProvider
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 policy_app = typer.Typer(add_completion=False, no_args_is_help=True)
+agent_app = typer.Typer(add_completion=False, no_args_is_help=True)
+pack_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(policy_app, name="policy")
+app.add_typer(agent_app, name="agent")
+app.add_typer(pack_app, name="pack")
 console = Console()
 RUNTIME_OPTION = typer.Option(
     None,
@@ -87,6 +92,11 @@ BENCHMARK_OUTPUT_OPTION = typer.Option(None, "--output", help="Write the JSON re
 BENCHMARK_MARKDOWN_OPTION = typer.Option(
     None, "--technical-report", help="Write the human-readable Markdown report to this path."
 )
+AGENT_REPORTS_ARGUMENT = typer.Argument(help="Canonical report JSON paths to aggregate.")
+AGENT_PACK_ID_OPTION = typer.Option("org-pack", "--pack-id", help="Pack label for the proposal.")
+AGENT_FORMAT_OPTION = typer.Option("markdown", "--format", help="Proposal format: markdown or json.")
+PACK_NAME_OPTION = typer.Option(None, "--name", help="Local cache name for the pulled pack.")
+PACK_CACHE_ROOT_OPTION = typer.Option(None, "--cache-root", help="Cache root; defaults to .conformdag/packs.")
 
 
 def _fail(error: Exception) -> NoReturn:
@@ -124,9 +134,7 @@ def init(path: Path = Path("."), force: bool = False) -> None:
             "runtime:\n"
             "  enabled: false\n"
         ),
-        root / "policies" / "pack.yaml": (
-            'schema_version: "1"\nid: default\nversion: 0.1.0\npolicies: []\n'
-        ),
+        root / "policies" / "pack.yaml": ('schema_version: "1"\nid: default\nversion: 0.1.0\npolicies: []\n'),
         root / "standards" / "dag-authoring.md": "# DAG Authoring Standards\n",
         root / ".conformdag" / "suppressions.yaml": "suppressions: []\n",
     }
@@ -263,19 +271,14 @@ def _reference_entries(topic: str) -> dict[str, tuple[ReferenceEntry, ...]]:
 
 def _reference_payload(topic: str) -> dict[str, list[dict[str, str]]]:
     return {
-        name: [
-            {"key": entry.key, "meaning": entry.meaning, "behavior": entry.behavior}
-            for entry in entries
-        ]
+        name: [{"key": entry.key, "meaning": entry.meaning, "behavior": entry.behavior} for entry in entries]
         for name, entries in _reference_entries(topic).items()
     }
 
 
 @policy_app.command("reference")
 def policy_reference(
-    topic: str = typer.Argument(
-        "all", help="Reference topic: all, outcomes, exit-codes, runtime, or reports."
-    ),
+    topic: str = typer.Argument("all", help="Reference topic: all, outcomes, exit-codes, runtime, or reports."),
     format: str = "terminal",
 ) -> None:
     """Explain policy outcomes, exit codes, runtime, and report contracts."""
@@ -318,11 +321,7 @@ def scan(
     if preview_model_context and (
         runtime is not None or runtime_image is not None or semantic is True or output is not None
     ):
-        _fail(
-            ValueError(
-                "--preview-model-context cannot be combined with runtime, semantic, or output"
-            )
-        )
+        _fail(ValueError("--preview-model-context cannot be combined with runtime, semantic, or output"))
     root = path.resolve()
     selected_pack = resolve_policy_pack_path(policy_pack) if policy_pack is not None else None
     try:
@@ -373,18 +372,13 @@ def scan(
         if semantic_enabled:
             selected_base_url = semantic_base_url or config.semantic.base_url
             if not selected_base_url:
-                raise ValueError(
-                    "semantic evaluation requires semantic.base_url or --semantic-base-url"
-                )
+                raise ValueError("semantic evaluation requires semantic.base_url or --semantic-base-url")
             selected_base_url = _validate_semantic_base_url(selected_base_url)
             if not selected_semantic_model:
                 raise ValueError("semantic evaluation requires semantic.model or --semantic-model")
             api_key = semantic_api_key(config)
             if not api_key:
-                raise ValueError(
-                    f"semantic evaluation requires environment variable "
-                    f"{config.semantic.api_key_env}"
-                )
+                raise ValueError(f"semantic evaluation requires environment variable {config.semantic.api_key_env}")
             direct_provider = OpenAICompatibleProvider(
                 selected_base_url,
                 selected_semantic_model,
@@ -412,9 +406,7 @@ def scan(
             semantic_provider=provider,
             semantic_provider_name=provider_name,
             semantic_model=selected_semantic_model if semantic_enabled else None,
-            semantic_native_structured_output=(
-                native_structured_output if semantic_enabled else None
-            ),
+            semantic_native_structured_output=(native_structured_output if semantic_enabled else None),
             airflow_profile=runtime_config.airflow_version if runtime_config.enabled else None,
         )
     except (PolicyValidationError, RuntimePhaseError, ValueError) as exc:
@@ -457,9 +449,7 @@ def scan(
                                         if runtime_config.airflow_version is not None
                                         else None
                                     ),
-                                    "supported_profile": (
-                                        runtime_config.airflow_version is not None
-                                    ),
+                                    "supported_profile": (runtime_config.airflow_version is not None),
                                     "network_enabled": runtime_config.network_enabled,
                                     "timeout_seconds": runtime_config.timeout_seconds,
                                 },
@@ -489,8 +479,7 @@ def scan(
         output_report = report.model_copy(
             update={
                 "findings": [
-                    finding.model_copy(update={"evidence": None, "audit_evidence": []})
-                    for finding in report.findings
+                    finding.model_copy(update={"evidence": None, "audit_evidence": []}) for finding in report.findings
                 ]
             }
         )
@@ -525,9 +514,189 @@ def scan(
 
 
 @app.command()
+def fix(
+    path: Path = Path("."),
+    policy_pack: Path | None = None,
+    apply: bool = typer.Option(
+        False,
+        "--apply",
+        help="Write verified patches to sources; without it nothing is written.",
+    ),
+    max_iterations: int = typer.Option(
+        3,
+        "--max-iterations",
+        min=1,
+        help="Bound on the patch-and-rescan verification loop.",
+    ),
+) -> None:
+    """Propose deterministic fixes; print unified diffs and verify by re-scan."""
+    root = path.resolve()
+    selected_pack = resolve_policy_pack_path(policy_pack) if policy_pack is not None else None
+    try:
+        outcome = run_fix(root, selected_pack, apply=apply, max_iterations=max_iterations)
+    except (PolicyValidationError, ValueError, OSError) as exc:
+        _fail(exc)
+    for patch in outcome.patches:
+        typer.echo(patch.diff, nl=False)
+    for move in outcome.proposed_moves:
+        typer.echo(f"PROPOSED ONLY (never applied) {move.policy_id} {move.path}")
+        typer.echo(move.diff, nl=False)
+    for item in outcome.not_fixable:
+        typer.echo(
+            f"not fixable: {item.policy_id} {item.path} [{item.fix_kind}] {item.reason}",
+            err=True,
+        )
+    for item in outcome.residuals:
+        typer.echo(
+            f"residual: {item.policy_id} {item.path} [{item.fix_kind}] unresolved after {item.iterations} iteration(s)",
+            err=True,
+        )
+    if apply and outcome.applied_files:
+        typer.echo("applied: " + ", ".join(outcome.applied_files), err=True)
+    typer.echo(
+        f"fix {'applied' if apply else 'dry-run'}: {len(outcome.patches)} verified patch(es), "
+        f"{len(outcome.proposed_moves)} proposed-only, "
+        f"{len(outcome.not_fixable)} not fixable, "
+        f"{len(outcome.residuals)} residual",
+        err=True,
+    )
+    if apply and outcome.residuals:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def version() -> None:
     """Show the installed ConformDAG version."""
     typer.echo(__version__)
+
+
+@pack_app.command("pull")
+def pack_pull(
+    source: str = typer.Argument(help="Git URL of a repository containing a policy pack."),
+    name: str | None = PACK_NAME_OPTION,
+    cache_root: Path | None = PACK_CACHE_ROOT_OPTION,
+) -> None:
+    """Pull and validate a policy pack from git; record the resolved ref."""
+    from conformdag.packpull import PackPullError, pull_pack
+
+    try:
+        pulled = pull_pack(source, cache_root=cache_root, name=name)
+    except (PackPullError, PolicyValidationError, OSError) as exc:
+        _fail(exc)
+    typer.echo(f"pulled {pulled.name} at {pulled.resolved_ref} -> {pulled.path}")
+    typer.echo("re-pull to update; committing and tagging the pack stays a git operation")
+
+
+@agent_app.command("run")
+def agent_run(
+    path: Path = Path("."),
+    policy_pack: Path | None = None,
+    open_pr: bool = typer.Option(False, "--open-pr", help="Push a fix branch and open a PR under the agent identity."),
+    no_verifier: bool = typer.Option(
+        False, "--no-verifier", help="Skip the LLM semantic verifier (deterministic gates only)."
+    ),
+) -> None:
+    """Fix findings deterministically, verify semantically, and optionally open a PR."""
+    from conformdag.agent import AgentSettings, PrClient, Verifier, VerifierRequest, run_agent_pipeline
+
+    try:
+        settings = AgentSettings.from_environment(require_verifier=not no_verifier, require_github=open_pr)
+        root = path.resolve()
+        selected_pack = resolve_policy_pack_path(policy_pack) if policy_pack is not None else None
+        verifier = None
+        if not no_verifier:
+            verifier = Verifier(
+                settings.base_url,
+                settings.api_key,
+                VerifierRequest(model=settings.model),
+                cache_path=root / ".conformdag" / "agent-verdict-cache.json",
+            )
+        pull_requests = None
+        if open_pr:
+            pull_requests = PrClient(
+                token=settings.github_token,
+                repo=settings.github_repo,
+                base=settings.base_branch,
+            )
+        outcome = run_agent_pipeline(root, selected_pack, verifier=verifier, pull_requests=pull_requests)
+    except (PolicyValidationError, ValueError, OSError, RuntimeError) as exc:
+        _fail(exc)
+    for line in outcome.fixed_findings:
+        typer.echo(f"fixed: {line}", err=True)
+    for line in outcome.manual_findings:
+        typer.echo(f"manual: {line}", err=True)
+    if outcome.verdict is not None:
+        typer.echo(
+            f"verifier: {outcome.verdict.verdict} ({outcome.verdict.reason_code})",
+            err=True,
+        )
+    if outcome.pull_request_url:
+        typer.echo(f"pull request: {outcome.pull_request_url}", err=True)
+    elif outcome.blocked:
+        typer.echo("pull request blocked by verifier verdict", err=True)
+    if not outcome.changed:
+        typer.echo("agent run: nothing to fix", err=True)
+
+
+@agent_app.command("policy-review")
+def agent_policy_review(
+    reports: list[Path] = AGENT_REPORTS_ARGUMENT,
+    pack_id: str = AGENT_PACK_ID_OPTION,
+    output: Path | None = None,
+    format: str = AGENT_FORMAT_OPTION,
+) -> None:
+    """Aggregate reports on disk and draft a policy-pack change proposal."""
+    from conformdag.agent import aggregate_reports, draft_proposal, load_reports, proposal_json
+
+    if format not in {"markdown", "json"}:
+        _fail(ValueError("format must be markdown or json"))
+    try:
+        loaded = load_reports(list(reports))
+    except (OSError, ValueError) as exc:
+        _fail(exc)
+    aggregate = aggregate_reports(loaded)
+    rendered = proposal_json(aggregate) if format == "json" else draft_proposal(aggregate, pack_id)
+    if output is not None:
+        output.write_text(rendered, encoding="utf-8")
+    else:
+        typer.echo(rendered, nl=False)
+
+
+def _platform_session_factory():
+    from conformdag.platform.app import load_settings
+    from conformdag.platform.db import create_session_factory
+
+    settings = load_settings()
+    return settings, create_session_factory(settings.dsn)
+
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address for the dashboard API."),
+    port: int = typer.Option(8642, "--port", help="Bind port for the dashboard API."),
+) -> None:
+    """Serve the platform dashboard API on /api/v1."""
+    try:
+        import uvicorn
+
+        from conformdag.platform.app import create_app
+    except ImportError as exc:  # pragma: no cover - guarded by the platform extra
+        _fail(ValueError(f"platform extra is not installed: {exc}"))
+    settings, session_factory = _platform_session_factory()
+    platform_app = create_app(session_factory, settings)
+    uvicorn.run(platform_app, host=host, port=port, log_level="info")
+
+
+@app.command("worker")
+def worker_command() -> None:
+    """Run the durable platform worker that executes queued scans."""
+    try:
+        from conformdag.platform.worker import WorkerSettings, run_worker
+    except ImportError as exc:  # pragma: no cover - guarded by the platform extra
+        _fail(ValueError(f"platform extra is not installed: {exc}"))
+    settings, session_factory = _platform_session_factory()
+    typer.echo("platform worker started", err=True)
+    run_worker(session_factory, settings.dsn, WorkerSettings.from_environment())
 
 
 @app.command("benchmark")

@@ -19,9 +19,7 @@ from conformdag.reporting import (
 def _finding():
     pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
     policy = next(item for item in pack.policies if item.id == "AIR-DET-001")
-    source = SourceFile(
-        Path("dag.py"), "dag.py", "from airflow import DAG\nDAG(owner='bad')\n", "hash"
-    )
+    source = SourceFile(Path("dag.py"), "dag.py", "from airflow import DAG\nDAG(owner='bad')\n", "hash")
     model, issue = analyze_source(source)
     assert issue is None
     assert model is not None
@@ -109,9 +107,7 @@ def test_sarif_and_html_render_from_the_same_canonical_finding() -> None:
 
 
 def test_explicitly_blocking_semantic_failure_blocks() -> None:
-    finding = _finding().model_copy(
-        update={"enforcement": EnforcementType.SEMANTIC, "blocking": True}
-    )
+    finding = _finding().model_copy(update={"enforcement": EnforcementType.SEMANTIC, "blocking": True})
     report = ScanReport(
         complete=True,
         result_fingerprint="result",

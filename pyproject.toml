@@ -27,6 +27,15 @@ dependencies = [
     "typer>=0.16,<1",
 ]
 
+[project.optional-dependencies]
+platform = [
+    "alembic>=1.16,<2",
+    "fastapi>=0.128,<1",
+    "psycopg[binary]>=3.2,<4",
+    "sqlalchemy>=2.0,<3",
+    "uvicorn>=0.40,<1",
+]
+
 [project.urls]
 Homepage = "https://github.com/parthmule28/conformdag"
 Documentation = "https://github.com/parthmule28/conformdag/tree/main/docs"
@@ -49,9 +58,11 @@ conformdag = "conformdag.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/conformdag"]
+artifacts = ["src/conformdag/platform/static/**"]
 
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/LICENSE", "/README.md", "/pyproject.toml"]
+artifacts = ["src/conformdag/platform/static/**"]
 
 [tool.pytest.ini_options]
 addopts = ["--strict-markers", "--strict-config"]
@@ -79,17 +90,17 @@ exclude_also = [
 ]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py312"
 src = ["src", "tests"]
 extend-exclude = ["benchmarks/synthetic"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "S"]
-ignore = ["S105", "S603", "S607"]
+select = ["E", "W", "F", "I", "B", "C4", "UP", "S", "SIM"]
+ignore = ["E501", "S105", "S603", "S607"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101"]
+"tests/**/*.py" = ["S101", "S106"]
 
 [tool.ruff.format]
 quote-style = "double"

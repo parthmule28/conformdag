@@ -1,0 +1,44 @@
+services:
+  api:
+    image: ghcr.io/parthmule28/conformdag:latest
+    command: ["serve", "--host", "0.0.0.0", "--port", "8642"]
+    environment:
+      CONFORMDAG_PLATFORM_DSN: postgresql+psycopg://conformdag:conformdag@postgres:5432/conformdag
+      CONFORMDAG_PLATFORM_TOKEN: ${CONFORMDAG_PLATFORM_TOKEN:?set CONFORMDAG_PLATFORM_TOKEN}
+    ports:
+      - "127.0.0.1:8642:8642"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/parthmule28/conformdag:latest
+    command: ["worker"]
+    environment:
+      CONFORMDAG_PLATFORM_DSN: postgresql+psycopg://conformdag:conformdag@postgres:5432/conformdag
+      CONFORMDAG_PLATFORM_TOKEN: ${CONFORMDAG_PLATFORM_TOKEN:-}
+    volumes:
+      - ${CONFORMDAG_WORKSPACE_DIR:?set CONFORMDAG_WORKSPACE_DIR}:/workspace:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: conformdag
+      POSTGRES_PASSWORD: conformdag
+      POSTGRES_DB: conformdag
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conformdag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

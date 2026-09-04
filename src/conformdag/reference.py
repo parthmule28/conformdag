@@ -13,9 +13,7 @@ class ReferenceEntry:
 
 
 OUTCOME_REFERENCE = (
-    ReferenceEntry(
-        "PASS", "The selected policy was evaluated and no violation was found.", "Non-blocking."
-    ),
+    ReferenceEntry("PASS", "The selected policy was evaluated and no violation was found.", "Non-blocking."),
     ReferenceEntry(
         "FAIL",
         "The selected policy was evaluated and a violation was found.",
@@ -50,9 +48,7 @@ EXIT_CODE_REFERENCE = (
         "Complete run with an unsuppressed blocking policy failure.",
         "Conformance failure.",
     ),
-    ReferenceEntry(
-        "2", "Invalid command, configuration, or policy input.", "Usage/configuration error."
-    ),
+    ReferenceEntry("2", "Invalid command, configuration, or policy input.", "Usage/configuration error."),
     ReferenceEntry(
         "3",
         "Required evaluation phase failed or the report is incomplete.",
@@ -84,18 +80,12 @@ RUNTIME_REFERENCE = (
 )
 
 REPORT_REFERENCE = (
-    ReferenceEntry(
-        "terminal", "Human triage summary.", "Printed to the terminal; diagnostics remain separate."
-    ),
-    ReferenceEntry(
-        "json", "Canonical machine-readable report.", "Suitable for agents and automation."
-    ),
+    ReferenceEntry("terminal", "Human triage summary.", "Printed to the terminal; diagnostics remain separate."),
+    ReferenceEntry("json", "Canonical machine-readable report.", "Suitable for agents and automation."),
     ReferenceEntry(
         "sarif",
         "SARIF 2.1.0 code-scanning report.",
         "Maps canonical findings to code-scanning consumers.",
     ),
-    ReferenceEntry(
-        "html", "Self-contained offline report.", "Requires an explicit output path and no network."
-    ),
+    ReferenceEntry("html", "Self-contained offline report.", "Requires an explicit output path and no network."),
 )

@@ -91,9 +91,7 @@ def test_scan_merges_opt_in_semantic_findings_and_audit_metadata(tmp_path: Path)
         semantic_model="deepseek/deepseek-v4-flash",
     )
 
-    semantic_findings = [
-        finding for finding in report.findings if finding.enforcement.value == "semantic"
-    ]
+    semantic_findings = [finding for finding in report.findings if finding.enforcement.value == "semantic"]
     assert len(semantic_findings) == 4
     assert report.run.semantic_provider == "openrouter.ai"
     assert report.run.semantic_model == "deepseek/deepseek-v4-flash"
@@ -106,8 +104,7 @@ def test_scan_accepts_external_policy_pack_from_working_directory(tmp_path: Path
     foreign = tmp_path / "foreign-repo"
     (foreign / "dags").mkdir(parents=True)
     (foreign / "dags" / "example.py").write_text(
-        "from airflow import DAG\n"
-        "dag = DAG(owner='platform', tags=['domain:data', 'owner:platform'])\n",
+        "from airflow import DAG\ndag = DAG(owner='platform', tags=['domain:data', 'owner:platform'])\n",
         encoding="utf-8",
     )
 

@@ -140,9 +140,90 @@ jobs:
           sbom: true
           provenance: mode=max
 
+  platform-image-validation:
+    name: Validate platform image
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - name: Build the wheel with the dashboard SPA
+        run: |
+          mise run setup
+          mise run ui-build
+          mise run build
+      - name: Build the platform image
+        run: docker build -f deploy/Dockerfile -t conformdag-platform-smoke:local .
+      - name: Smoke the platform image
+        run: |
+          docker run --rm conformdag-platform-smoke:local version
+          docker run --rm conformdag-platform-smoke:local serve --help > /dev/null
+          docker run --rm conformdag-platform-smoke:local worker --help > /dev/null
+          docker run --rm --entrypoint python conformdag-platform-smoke:local -c \
+            "import conformdag.platform.app, conformdag.platform.worker, pathlib, conformdag.platform as p; assert (pathlib.Path(p.__file__).parent / 'static' / 'index.html').is_file(), 'dashboard static assets missing'"
+      - name: Scan image before publication
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: conformdag-platform-smoke:local
+          format: sarif
+          output: trivy-platform.sarif
+          severity: CRITICAL,HIGH
+          limit-severities-for-sarif: true
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "1"
+      - name: Upload vulnerability results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-vulnerability-results
+          path: trivy-platform.sarif
+          if-no-files-found: warn
+
+  platform-image:
+    name: Publish platform image
+    needs: [package, platform-image-validation]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - name: Build the wheel with the dashboard static assets
+        run: |
+          mise run setup
+          mise run ui-build
+          mise run build
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+      - name: Publish image with SBOM and provenance
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+          sbom: true
+          provenance: mode=max
+
   publish-python:
     name: Publish Python distributions
-    needs: [package-attestation, runtime-images]
+    needs: [package-attestation, runtime-images, platform-image]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

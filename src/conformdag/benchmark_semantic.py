@@ -86,9 +86,7 @@ def run_semantic_baseline(
             raise BenchmarkBaselineError("provider returned an unexpected response count")
         for (index, _), response in zip(misses, evaluated, strict=True):
             if response.served_model != model:
-                raise BenchmarkBaselineError(
-                    f"provider served model {response.served_model!r}, requested {model!r}"
-                )
+                raise BenchmarkBaselineError(f"provider served model {response.served_model!r}, requested {model!r}")
             responses[index] = response
             if cache is not None:
                 cache.put(keys[index], response)
@@ -97,9 +95,7 @@ def run_semantic_baseline(
     if len(normalized) != len(requests):
         raise BenchmarkBaselineError("benchmark produced an incomplete response set")
     served_models = tuple(sorted({response.served_model or model for response in normalized}))
-    prompt_hashes = tuple(
-        hashlib.sha256(request.system_prompt.encode("utf-8")).hexdigest() for request in requests
-    )
+    prompt_hashes = tuple(hashlib.sha256(request.system_prompt.encode("utf-8")).hexdigest() for request in requests)
     return SemanticBaselineResult(
         mode=mode,
         requested_model=model,

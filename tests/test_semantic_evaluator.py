@@ -26,9 +26,7 @@ def _policies() -> list[Policy]:
 
 
 def _context() -> SemanticContext:
-    return SemanticContext(
-        "[SOURCE dag.py]\nlogging.info(token='[REDACTED]')", "context", ("dag.py",), ()
-    )
+    return SemanticContext("[SOURCE dag.py]\nlogging.info(token='[REDACTED]')", "context", ("dag.py",), ())
 
 
 def test_builds_policy_specific_untrusted_request() -> None:

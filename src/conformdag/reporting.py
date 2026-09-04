@@ -27,10 +27,7 @@ def apply_suppressions(
             issues.append(
                 RunIssue(
                     code="SUPPRESSION_DUPLICATE",
-                    message=(
-                        f"duplicate suppression for "
-                        f"{suppression.policy_id}:{suppression.fingerprint}"
-                    ),
+                    message=(f"duplicate suppression for {suppression.policy_id}:{suppression.fingerprint}"),
                     phase="suppression",
                 )
             )
@@ -38,16 +35,14 @@ def apply_suppressions(
         candidate_indexes = [
             position
             for position, finding in enumerate(result)
-            if finding.policy_id == suppression.policy_id
-            and finding.fingerprint == suppression.fingerprint
+            if finding.policy_id == suppression.policy_id and finding.fingerprint == suppression.fingerprint
         ]
         if not candidate_indexes:
             issues.append(
                 RunIssue(
                     code="SUPPRESSION_UNMATCHED",
                     message=(
-                        f"suppression does not match a finding: "
-                        f"{suppression.policy_id}:{suppression.fingerprint}"
+                        f"suppression does not match a finding: {suppression.policy_id}:{suppression.fingerprint}"
                     ),
                     phase="suppression",
                 )
@@ -58,17 +53,14 @@ def apply_suppressions(
                 RunIssue(
                     code="SUPPRESSION_EXPIRED",
                     message=(
-                        f"expired suppression reopened finding: "
-                        f"{suppression.policy_id}:{suppression.fingerprint}"
+                        f"expired suppression reopened finding: {suppression.policy_id}:{suppression.fingerprint}"
                     ),
                     phase="suppression",
                 )
             )
             continue
         for position in candidate_indexes:
-            result[position] = result[position].model_copy(
-                update={"suppressed": True, "suppression": suppression}
-            )
+            result[position] = result[position].model_copy(update={"suppressed": True, "suppression": suppression})
     return result, issues
 
 
@@ -99,9 +91,7 @@ def normalize_report(report: ScanReport) -> ScanReport:
         "policies_evaluated": sorted(report.policies_evaluated),
         "policies_skipped": sorted(report.policies_skipped),
         "findings": [finding.model_dump(mode="json") for finding in findings],
-        "runtime_observations": [
-            observation.model_dump(mode="json") for observation in runtime_observations
-        ],
+        "runtime_observations": [observation.model_dump(mode="json") for observation in runtime_observations],
         "issues": [issue.model_dump(mode="json") for issue in issues],
         "input_hashes": dict(sorted(report.run.input_hashes.items())),
         "policy_pack_id": report.run.policy_pack_id,
@@ -112,9 +102,7 @@ def normalize_report(report: ScanReport) -> ScanReport:
         "semantic_model": report.run.semantic_model,
         "prompt_hashes": dict(sorted(report.run.prompt_hashes.items())),
     }
-    fingerprint = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return report.model_copy(
         update={
             "files_scanned": files,

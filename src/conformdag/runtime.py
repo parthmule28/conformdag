@@ -163,9 +163,7 @@ def build_runtime_manifest(
     if config.image and "@sha256:" not in config.image:
         raise RuntimePhaseError("custom runtime image must include an immutable sha256 digest")
     if config.network_enabled and config.airflow_version is not None:
-        raise RuntimePhaseError(
-            "network-enabled runtime execution is not supported for Airflow profiles"
-        )
+        raise RuntimePhaseError("network-enabled runtime execution is not supported for Airflow profiles")
     profile = runtime_profile(config.airflow_version) if config.airflow_version else None
     image = config.image or (profile.image if profile else None)
     return RuntimeManifest(
@@ -186,9 +184,7 @@ def normalize_runtime_observations(
     observations: list[RuntimeObservation],
 ) -> list[RuntimeObservation]:
     """Return stable observation order and reject invalid non-outcome statuses."""
-    return sorted(
-        observations, key=lambda item: (item.policy_id, item.status.value, item.message or "")
-    )
+    return sorted(observations, key=lambda item: (item.policy_id, item.status.value, item.message or ""))
 
 
 def execute_runtime(

@@ -103,6 +103,34 @@ policy ID. It requires a reason and expiry. Expired suppressions reopen findings
 duplicate or unmatched records are reported so stale exceptions remain auditable. A
 suppression does not change the policy contract or hide unrelated future findings.
 
+## Deterministic fixes
+
+`conformdag fix` proposes source patches for deterministic findings, verifies them by
+re-scanning an isolated patched copy, and writes nothing unless `--apply` is passed:
+
+```bash
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag fix --path .
+mise exec -- uvx --from conformdag==0.1.0b1 conformdag fix --path . --apply
+```
+
+Dry run prints a unified diff identical to what `--apply` would write. Generation is
+deterministic: identical inputs produce byte-identical diffs. Every finding carries a
+machine-readable remediation payload (action, target anchor, concrete configured value),
+so agents and other tools can act on the report JSON without re-reading the repository.
+
+The fixability matrix is explicit per check kind:
+
+- `required-owner`, `required-tags`, `execution-timeout`, `retry-bounds` are mechanical
+  autofix; patches are applied only after a clean re-scan of the patched copy.
+- `top-level-io` produces a proposed-only structural move diff that is never applied,
+  including under `--apply`.
+- `forbidden-operators`, `idempotence`, and other judgment-call kinds are reported as
+  not fixable with remediation guidance.
+
+`--apply` writes only verified patches. A fixable finding that still fails after the
+bounded verification loop is reported as a residual, blocks the apply exit code, and
+leaves that file untouched.
+
 ## Semantic review
 
 Semantic evaluation is BYOK, opt-in, and networked. Configure non-secret settings in

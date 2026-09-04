@@ -246,6 +246,31 @@ class FindingLocation(ConformModel):
     end_line: PositiveInt | None = None
 
 
+class RemediationAction(StrEnum):
+    ADD_KWARG = "add-kwarg"
+    SET_KWARG = "set-kwarg"
+    ADD_OWNER = "add-owner"
+    ADD_TAGS = "add-tags"
+    MOVE_STATEMENT = "move-statement"
+    MANUAL = "manual"
+
+
+class RemediationTarget(ConformModel):
+    line: PositiveInt
+    column: NonNegativeInt = 0
+    enclosing: str | None = None
+    node: Literal["dag-call", "task-call", "statement"] = "statement"
+
+
+class RemediationPayload(ConformModel):
+    fix_kind: str
+    action: RemediationAction
+    kwarg: str | None = None
+    target: RemediationTarget | None = None
+    value: str | None = None
+    hint: str | None = None
+
+
 class Suppression(ConformModel):
     fingerprint: str
     policy_id: str
@@ -274,6 +299,7 @@ class Finding(ConformModel):
     explanation: str | None = None
     remediation: str | None = None
     confidence: Confidence | None = None
+    fix: RemediationPayload | None = None
     audit_evidence: list[SemanticAuditEvidence] = Field(default_factory=_empty_audit_evidence)
     fingerprint: str
     blocking: bool = False
@@ -329,16 +355,14 @@ class RunMetadata(ConformModel):
 
 
 class ScanReport(ConformModel):
-    report_version: Literal["1"] = "1"
+    report_version: Literal["1", "2"] = "2"
     complete: bool
     result_fingerprint: str
     files_scanned: list[Path] = Field(default_factory=_empty_paths)
     policies_evaluated: list[str] = Field(default_factory=list)
     policies_skipped: list[str] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=_empty_findings)
-    runtime_observations: list[RuntimeObservation] = Field(
-        default_factory=_empty_runtime_observations
-    )
+    runtime_observations: list[RuntimeObservation] = Field(default_factory=_empty_runtime_observations)
     issues: list[RunIssue] = Field(default_factory=_empty_issues)
     run: RunMetadata
 
@@ -391,9 +415,7 @@ class ProjectScanConfig(ConformModel):
     policy_pack: Path = Path("policies/pack.yaml")
     suppressions: Path = Path(".conformdag/suppressions.yaml")
     include: list[str] = Field(default_factory=lambda: ["dags/**/*.py"])
-    exclude: list[str] = Field(
-        default_factory=lambda: ["**/.venv/**", "**/.git/**", "**/vendor/**", "**/generated/**"]
-    )
+    exclude: list[str] = Field(default_factory=lambda: ["**/.venv/**", "**/.git/**", "**/vendor/**", "**/generated/**"])
     follow_internal_symlinks: bool = False
 
 

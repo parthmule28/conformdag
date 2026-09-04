@@ -4,6 +4,10 @@
 
 Accepted (2026-08-29)
 
+Principle 5 is **superseded in part** by [ADR 0002](0002-v1-product-thesis.md):
+ConformDAG 1.0.0 includes a self-hosted dashboard. Plugin registry and
+multi-pack composition remain deferred.
+
 ## Context
 
 ConformDAG is a local policy linter for Airflow DAG repositories. The beta CLI is

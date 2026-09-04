@@ -97,9 +97,7 @@ def redact_text(text: str, patterns: Iterable[str] = DEFAULT_SECRET_PATTERNS) ->
     for pattern in patterns:
         compiled = re.compile(pattern)
         if "\\2" in pattern:
-            result = compiled.sub(
-                lambda match: f"{match.group(1)}={match.group(2)}[REDACTED]", result
-            )
+            result = compiled.sub(lambda match: f"{match.group(1)}={match.group(2)}[REDACTED]", result)
         else:
             result = compiled.sub("[REDACTED]", result)
     return result
@@ -125,9 +123,7 @@ def build_context(
         else:
             omitted.append(path)
     if runtime_observations:
-        runtime = "[RUNTIME]\n" + "\n".join(
-            redact_text(item, secret_patterns) for item in runtime_observations
-        )
+        runtime = "[RUNTIME]\n" + "\n".join(redact_text(item, secret_patterns) for item in runtime_observations)
         if sum(len(item) + 1 for item in sections) + len(runtime) <= budget:
             sections.append(runtime)
         else:
@@ -170,9 +166,7 @@ class OpenAICompatibleProvider:
                 {"role": "system", "content": request.system_prompt},
                 {
                     "role": "user",
-                    "content": "<untrusted-evidence>\n"
-                    + request.evidence
-                    + "\n</untrusted-evidence>",
+                    "content": "<untrusted-evidence>\n" + request.evidence + "\n</untrusted-evidence>",
                 },
             ],
             "temperature": request.temperature,
@@ -212,14 +206,10 @@ class OpenAICompatibleProvider:
                 result = SemanticResponse.model_validate(json.loads(content))
                 served_model = body.get("model")
                 if served_model is not None and served_model != self.model:
-                    raise SemanticProviderError(
-                        f"provider served model {served_model!r}, requested {self.model!r}"
-                    )
+                    raise SemanticProviderError(f"provider served model {served_model!r}, requested {self.model!r}")
                 raw_usage = body.get("usage", {})
                 usage = {
-                    str(key): int(value)
-                    for key, value in raw_usage.items()
-                    if isinstance(value, int) and value >= 0
+                    str(key): int(value) for key, value in raw_usage.items() if isinstance(value, int) and value >= 0
                 }
                 return result.model_copy(
                     update={
@@ -273,9 +263,7 @@ def semantic_cache_key(
         "enforcement_hash": request.enforcement_hash,
         "prompt_version": request.prompt_version,
         "response_schema_hash": hashlib.sha256(
-            json.dumps(
-                SemanticResponse.model_json_schema(), sort_keys=True, separators=(",", ":")
-            ).encode("utf-8")
+            json.dumps(SemanticResponse.model_json_schema(), sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
         "context_hash": request.context_hash,
         "model": model,
@@ -296,11 +284,7 @@ class SemanticCache:
         try:
             payload: Any = json.loads(self.path.read_text(encoding="utf-8"))
             value = payload.get(key)
-            return (
-                SemanticResponse.model_validate(value).model_copy(update={"cache_hit": True})
-                if value
-                else None
-            )
+            return SemanticResponse.model_validate(value).model_copy(update={"cache_hit": True}) if value else None
         except (OSError, TypeError, ValueError):
             return None
 
@@ -317,21 +301,16 @@ class SemanticCache:
             update={
                 "evidence": redact_text(response.evidence),
                 "explanation": redact_text(response.explanation),
-                "remediation": (
-                    redact_text(response.remediation) if response.remediation is not None else None
-                ),
+                "remediation": (redact_text(response.remediation) if response.remediation is not None else None),
                 "audit_evidence": [
-                    item.model_copy(update={"excerpt": redact_text(item.excerpt)})
-                    for item in response.audit_evidence
+                    item.model_copy(update={"excerpt": redact_text(item.excerpt)}) for item in response.audit_evidence
                 ],
             }
         )
         payload[key] = sanitized.model_dump(mode="json")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
-                json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-            )
+            self.path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except OSError as exc:
             raise SemanticProviderError(f"semantic cache write failed: {exc}") from exc
 
@@ -368,9 +347,7 @@ class CachedSemanticProvider:
                 responses[index] = cached
 
         if misses:
-            fresh = self.provider.evaluate_many(
-                [request for _, request in misses], max_concurrency=max_concurrency
-            )
+            fresh = self.provider.evaluate_many([request for _, request in misses], max_concurrency=max_concurrency)
             if len(fresh) != len(misses):
                 raise SemanticProviderError("provider returned an unexpected response count")
             for (index, _), response in zip(misses, fresh, strict=True):

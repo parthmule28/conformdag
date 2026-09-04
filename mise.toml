@@ -10,7 +10,7 @@ node = "26.5.1"
 
 [tasks.setup]
 description = "Create the locked development environment"
-run = "uv sync --all-groups"
+run = "uv sync --all-groups --all-extras"
 
 [tasks.lint]
 description = "Run Ruff lint checks"
@@ -47,6 +47,14 @@ run = "uv run python scripts/runtime_smoke.py"
 [tasks.build]
 description = "Build wheel and source distribution"
 run = "uv build"
+
+[tasks."ui-build"]
+description = "Build the platform dashboard SPA into the package static directory"
+run = "cd frontend && npm install --no-fund --no-audit && npm run build"
+
+[tasks."ui-check"]
+description = "Typecheck the platform dashboard frontend"
+run = "cd frontend && npm run build"
 
 [tasks.schema]
 description = "Verify checked-in JSON Schemas"

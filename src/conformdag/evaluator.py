@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast
 
 from conformdag.analysis import CallRecord, DagRecord, SourceModel, TaskRecord
 from conformdag.models import (
@@ -21,6 +22,9 @@ from conformdag.models import (
     ForbiddenOperatorsConfig,
     OperatorRule,
     Policy,
+    RemediationAction,
+    RemediationPayload,
+    RemediationTarget,
     RequiredOwnerConfig,
     RequiredTagsConfig,
     RetryBoundsConfig,
@@ -30,6 +34,14 @@ from conformdag.models import (
 
 class EvaluationPhaseError(RuntimeError):
     """Raised when a deterministic evaluator cannot complete its phase."""
+
+
+def fix_target(
+    line: int,
+    enclosing: str | None,
+    node: Literal["dag-call", "task-call", "statement"],
+) -> RemediationTarget:
+    return RemediationTarget(line=line, enclosing=enclosing, node=node)
 
 
 @dataclass(frozen=True)
@@ -51,19 +63,13 @@ class DeterministicEvaluator(Protocol):
 
 def policy_applies(policy: Policy, airflow_profile: AirflowProfile | None) -> bool:
     """Return whether a policy applies to the selected or source-only profile."""
-    return (
-        airflow_profile is None
-        or not policy.airflow_profiles
-        or airflow_profile in policy.airflow_profiles
-    )
+    return airflow_profile is None or not policy.airflow_profiles or airflow_profile in policy.airflow_profiles
 
 
 def redact_evidence(text: str, max_chars: int = 240) -> str:
     """Bound evidence and mask common credential assignments before reporting."""
     bounded = text[:max_chars]
-    pattern = re.compile(
-        r"(?i)(password|passwd|token|secret|api[_-]?key)\s*=\s*(['\"]?)([^\s,'\"]+)\2"
-    )
+    pattern = re.compile(r"(?i)(password|passwd|token|secret|api[_-]?key)\s*=\s*(['\"]?)([^\s,'\"]+)\2")
     return pattern.sub(r"\1=\2[REDACTED]\2", bounded)
 
 
@@ -83,11 +89,7 @@ class OwnerEvaluator:
     def evaluate(self, context: EvaluationContext) -> list[Finding]:
         if not isinstance(context.policy.configuration, RequiredOwnerConfig):
             raise EvaluationPhaseError("AIR-DET-001 requires a required-owner configuration")
-        findings = [
-            self._finding(context.policy, model, dag)
-            for model in context.models
-            for dag in model.dags
-        ]
+        findings = [self._finding(context.policy, model, dag) for model in context.models for dag in model.dags]
         return sorted(
             findings,
             key=lambda finding: (
@@ -101,9 +103,7 @@ class OwnerEvaluator:
     @staticmethod
     def _finding(policy: Policy, model: SourceModel, dag: DagRecord) -> Finding:
         configuration = cast(RequiredOwnerConfig, policy.configuration)
-        allowed = bool(dag.owner) and (
-            not configuration.allowed_values or dag.owner in configuration.allowed_values
-        )
+        allowed = bool(dag.owner) and (not configuration.allowed_values or dag.owner in configuration.allowed_values)
         if configuration.allowed_pattern and dag.owner:
             allowed = allowed and bool(re.fullmatch(configuration.allowed_pattern, dag.owner))
         status = FindingStatus.PASS if allowed else FindingStatus.FAIL
@@ -114,6 +114,34 @@ class OwnerEvaluator:
             else f"{owner_text} is absent or not approved by policy"
         )
         anchor = f"dag:{dag.variable_name or dag.line}:owner:{dag.owner or 'missing'}"
+        payload: RemediationPayload | None = None
+        if status is FindingStatus.FAIL:
+            enclosing = dag.variable_name or f"dag@{dag.line}"
+            if configuration.allowed_values:
+                value = sorted(configuration.allowed_values)[0]
+                action = RemediationAction.SET_KWARG if dag.owner else RemediationAction.ADD_OWNER
+                payload = RemediationPayload(
+                    fix_kind="required-owner",
+                    action=action,
+                    kwarg="owner",
+                    target=fix_target(dag.line, enclosing, "dag-call"),
+                    value=value,
+                    hint=f'sets owner="{value}" on the DAG call',
+                )
+            elif configuration.allowed_pattern:
+                payload = RemediationPayload(
+                    fix_kind="required-owner",
+                    action=RemediationAction.MANUAL,
+                    target=fix_target(dag.line, enclosing, "dag-call"),
+                    hint="policy constrains owner by pattern; choose a compliant owner value",
+                )
+            else:
+                payload = RemediationPayload(
+                    fix_kind="required-owner",
+                    action=RemediationAction.MANUAL,
+                    target=fix_target(dag.line, enclosing, "dag-call"),
+                    hint="policy declares no allowed values; configure allowed_values or allowed_pattern",
+                )
         return Finding(
             policy_id=policy.id,
             policy_version=policy.version,
@@ -132,6 +160,7 @@ class OwnerEvaluator:
             ),
             explanation=explanation,
             remediation=policy.safe_path,
+            fix=payload,
             fingerprint=structural_fingerprint(policy, model.source.relative_path, anchor, status),
         )
 
@@ -144,6 +173,7 @@ def _finding(
     evidence: str,
     anchor: str,
     remediation: str | None = None,
+    fix_payload: RemediationPayload | None = None,
 ) -> Finding:
     return Finding(
         policy_id=policy.id,
@@ -151,12 +181,11 @@ def _finding(
         status=status,
         severity=policy.severity,
         enforcement=EnforcementType.DETERMINISTIC,
-        location=FindingLocation(
-            file=Path(model.source.relative_path), start_line=line, end_line=line
-        ),
+        location=FindingLocation(file=Path(model.source.relative_path), start_line=line, end_line=line),
         evidence=FindingEvidence(text=redact_evidence(evidence), start_line=line, end_line=line),
         explanation=evidence,
         remediation=remediation or policy.safe_path,
+        fix=fix_payload,
         fingerprint=structural_fingerprint(policy, model.source.relative_path, anchor, status),
     )
 
@@ -170,9 +199,7 @@ class TagEvaluator:
         for model in context.models:
             for dag in model.dags:
                 tags = {
-                    key: value
-                    for tag in dag.tags
-                    for key, value in [tag.split(":", 1) if ":" in tag else (tag, None)]
+                    key: value for tag in dag.tags for key, value in [tag.split(":", 1) if ":" in tag else (tag, None)]
                 }
                 missing = [key for key in configuration.required_keys if key not in tags]
                 invalid = [
@@ -186,6 +213,31 @@ class TagEvaluator:
                     if status is FindingStatus.PASS
                     else f"missing tags={missing!r}; invalid tags={invalid!r}"
                 )
+                payload: RemediationPayload | None = None
+                if status is FindingStatus.FAIL:
+                    enclosing = dag.variable_name or f"dag@{dag.line}"
+                    if invalid:
+                        payload = RemediationPayload(
+                            fix_kind="required-tags",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(dag.line, enclosing, "dag-call"),
+                            hint="tags carry disallowed values; choose compliant values from policy",
+                        )
+                    elif missing:
+                        additions = [
+                            f"{key}:{sorted(configuration.allowed_values[key])[0]}"
+                            if configuration.allowed_values.get(key)
+                            else key
+                            for key in missing
+                        ]
+                        payload = RemediationPayload(
+                            fix_kind="required-tags",
+                            action=RemediationAction.ADD_TAGS,
+                            kwarg="tags",
+                            target=fix_target(dag.line, enclosing, "dag-call"),
+                            value=json.dumps(additions),
+                            hint=f"adds compliant tags {additions!r} to the DAG tags list",
+                        )
                 findings.append(
                     _finding(
                         context.policy,
@@ -194,6 +246,7 @@ class TagEvaluator:
                         status,
                         detail,
                         f"dag:{dag.variable_name or dag.line}:tags:{','.join(sorted(dag.tags))}",
+                        fix_payload=payload,
                     )
                 )
         return findings
@@ -230,10 +283,27 @@ class TimeoutEvaluator:
                     and (configuration.max_seconds is None or seconds <= configuration.max_seconds)
                 )
                 status = FindingStatus.PASS if valid else FindingStatus.FAIL
-                detail = (
-                    f"task {task.task_id or task.qualified_name} "
-                    f"effective timeout={value!r} seconds"
-                )
+                detail = f"task {task.task_id or task.qualified_name} effective timeout={value!r} seconds"
+                payload: RemediationPayload | None = None
+                if status is FindingStatus.FAIL:
+                    target_seconds = self._target_seconds(configuration, seconds)
+                    if target_seconds is None:
+                        payload = RemediationPayload(
+                            fix_kind="execution-timeout",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(task.line, task.task_id or task.qualified_name, "task-call"),
+                            hint="policy sets no approved default or bounds; configure approved_default_seconds",
+                        )
+                    else:
+                        present = "execution_timeout" in task.values
+                        payload = RemediationPayload(
+                            fix_kind="execution-timeout",
+                            action=RemediationAction.SET_KWARG if present else RemediationAction.ADD_KWARG,
+                            kwarg="execution_timeout",
+                            target=fix_target(task.line, task.task_id or task.qualified_name, "task-call"),
+                            value=str(int(target_seconds)),
+                            hint=f"sets execution_timeout=timedelta(seconds={int(target_seconds)}) on the task",
+                        )
                 findings.append(
                     _finding(
                         context.policy,
@@ -242,9 +312,26 @@ class TimeoutEvaluator:
                         status,
                         detail,
                         f"task:{task.task_id or task.line}:timeout:{value!r}",
+                        fix_payload=payload,
                     )
                 )
         return findings
+
+    @staticmethod
+    def _target_seconds(configuration: ExecutionTimeoutConfig, seconds: float | None) -> int | None:
+        if seconds is None:
+            if configuration.approved_default_seconds is not None:
+                return configuration.approved_default_seconds
+            if configuration.max_seconds is not None:
+                return configuration.max_seconds
+            if configuration.min_seconds is not None:
+                return configuration.min_seconds
+            return None
+        if configuration.min_seconds is not None and seconds < configuration.min_seconds:
+            return configuration.min_seconds
+        if configuration.max_seconds is not None and seconds > configuration.max_seconds:
+            return configuration.max_seconds
+        return None
 
 
 class RetryEvaluator:
@@ -265,16 +352,16 @@ class RetryEvaluator:
                     and (configuration.allow_zero_retries or retries > 0)
                     and isinstance(delay, (int, float))
                     and delay >= configuration.min_delay_seconds
-                    and (
-                        configuration.max_delay_seconds is None
-                        or delay <= configuration.max_delay_seconds
-                    )
+                    and (configuration.max_delay_seconds is None or delay <= configuration.max_delay_seconds)
                 )
                 status = FindingStatus.PASS if valid else FindingStatus.FAIL
                 detail = (
                     f"task {task.task_id or task.qualified_name} effective retries={retries!r} "
                     f"retry_delay={delay!r} seconds"
                 )
+                payload: RemediationPayload | None = None
+                if status is FindingStatus.FAIL:
+                    payload = self._payload(configuration, task, retries, delay)
                 findings.append(
                     _finding(
                         context.policy,
@@ -283,9 +370,67 @@ class RetryEvaluator:
                         status,
                         detail,
                         f"task:{task.task_id or task.line}:retry:{retries!r}:{delay!r}",
+                        fix_payload=payload,
                     )
                 )
         return findings
+
+    @staticmethod
+    def _payload(
+        configuration: RetryBoundsConfig,
+        task: TaskRecord,
+        retries: object,
+        delay: object,
+    ) -> RemediationPayload:
+        enclosing = task.task_id or task.qualified_name
+        if not isinstance(retries, (int, float)) or not isinstance(delay, (int, float)):
+            return RemediationPayload(
+                fix_kind="retry-bounds",
+                action=RemediationAction.MANUAL,
+                target=fix_target(task.line, enclosing, "task-call"),
+                hint="retries or retry_delay is not a numeric literal; set them manually",
+            )
+        new_retries = int(retries)
+        if new_retries < configuration.min_retries:
+            new_retries = configuration.min_retries
+        elif new_retries > configuration.max_retries:
+            new_retries = configuration.max_retries
+        elif new_retries == 0 and not configuration.allow_zero_retries:
+            new_retries = max(configuration.min_retries, 1)
+        new_delay: int | None = None
+        if delay < configuration.min_delay_seconds:
+            new_delay = configuration.min_delay_seconds
+        elif configuration.max_delay_seconds is not None and delay > configuration.max_delay_seconds:
+            new_delay = configuration.max_delay_seconds
+        retries_changed = new_retries != int(retries)
+        if retries_changed:
+            hint = f"sets retries={new_retries} on the task"
+            if new_delay is not None:
+                hint += f" and retry_delay=timedelta(seconds={new_delay})"
+            return RemediationPayload(
+                fix_kind="retry-bounds",
+                action=(RemediationAction.SET_KWARG if "retries" in task.values else RemediationAction.ADD_KWARG),
+                kwarg="retries",
+                target=fix_target(task.line, enclosing, "task-call"),
+                value=str(new_retries),
+                hint=hint,
+            )
+        if new_delay is not None:
+            present = "retry_delay" in task.values
+            return RemediationPayload(
+                fix_kind="retry-bounds",
+                action=RemediationAction.SET_KWARG if present else RemediationAction.ADD_KWARG,
+                kwarg="retry_delay",
+                target=fix_target(task.line, enclosing, "task-call"),
+                value=str(new_delay),
+                hint=f"sets retry_delay=timedelta(seconds={new_delay}) on the task",
+            )
+        return RemediationPayload(
+            fix_kind="retry-bounds",
+            action=RemediationAction.MANUAL,
+            target=fix_target(task.line, enclosing, "task-call"),
+            hint="retry values could not be clamped into policy bounds automatically",
+        )
 
 
 class TopLevelIOEvaluator:
@@ -305,18 +450,19 @@ class TopLevelIOEvaluator:
                             model,
                             call.line,
                             FindingStatus.NEEDS_REVIEW,
-                            "module-scope dynamic call could not be classified with "
-                            "high confidence",
+                            "module-scope dynamic call could not be classified with high confidence",
                             f"dynamic-call:{call.line}:{call.column}",
+                            fix_payload=RemediationPayload(
+                                fix_kind="top-level-io",
+                                action=RemediationAction.MANUAL,
+                                target=fix_target(call.line, None, "statement"),
+                                hint="dynamic module-scope call needs human review",
+                            ),
                         )
                     )
                     continue
                 matched = next(
-                    (
-                        pattern
-                        for pattern in configuration.forbidden_calls
-                        if call.qualified_name == pattern
-                    ),
+                    (pattern for pattern in configuration.forbidden_calls if call.qualified_name == pattern),
                     None,
                 )
                 if matched:
@@ -326,9 +472,15 @@ class TopLevelIOEvaluator:
                             model,
                             call.line,
                             FindingStatus.FAIL,
-                            f"module-scope call {call.qualified_name} matches forbidden "
-                            f"I/O pattern {matched}",
+                            f"module-scope call {call.qualified_name} matches forbidden I/O pattern {matched}",
                             f"call:{call.qualified_name}:{call.line}",
+                            fix_payload=RemediationPayload(
+                                fix_kind="top-level-io",
+                                action=RemediationAction.MOVE_STATEMENT,
+                                target=fix_target(call.line, call.qualified_name, "statement"),
+                                hint="proposed-only structural move of the module-scope "
+                                "statement into a task callable; never auto-applied",
+                            ),
                         )
                     )
         return findings
@@ -364,9 +516,7 @@ class ForbiddenOperatorEvaluator:
                     ):
                         continue
                     profile_version = (
-                        _version_tuple(context.airflow_profile.value)
-                        if context.airflow_profile is not None
-                        else None
+                        _version_tuple(context.airflow_profile.value) if context.airflow_profile is not None else None
                     )
                     if (
                         profile_version is not None
@@ -392,6 +542,13 @@ class ForbiddenOperatorEvaluator:
                         f"forbidden operator {resolved}; replacement guidance: {replacement}",
                         f"operator:{resolved}:{call.line}",
                         replacement,
+                        fix_payload=RemediationPayload(
+                            fix_kind="forbidden-operators",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(call.line, resolved, "statement"),
+                            value=replacement,
+                            hint="not auto-fixable; apply the replacement guidance",
+                        ),
                     )
                 )
         return findings

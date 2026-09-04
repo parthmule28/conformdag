@@ -81,6 +81,17 @@
           "title": "Fingerprint",
           "type": "string"
         },
+        "fix": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemediationPayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "location": {
           "$ref": "#/$defs/FindingLocation"
         },
@@ -247,6 +258,126 @@
       ],
       "title": "FindingStatus",
       "type": "string"
+    },
+    "RemediationAction": {
+      "enum": [
+        "add-kwarg",
+        "set-kwarg",
+        "add-owner",
+        "add-tags",
+        "move-statement",
+        "manual"
+      ],
+      "title": "RemediationAction",
+      "type": "string"
+    },
+    "RemediationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/RemediationAction"
+        },
+        "fix_kind": {
+          "title": "Fix Kind",
+          "type": "string"
+        },
+        "hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hint"
+        },
+        "kwarg": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kwarg"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemediationTarget"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "fix_kind",
+        "action"
+      ],
+      "title": "RemediationPayload",
+      "type": "object"
+    },
+    "RemediationTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Column",
+          "type": "integer"
+        },
+        "enclosing": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enclosing"
+        },
+        "line": {
+          "exclusiveMinimum": 0,
+          "title": "Line",
+          "type": "integer"
+        },
+        "node": {
+          "default": "statement",
+          "enum": [
+            "dag-call",
+            "task-call",
+            "statement"
+          ],
+          "title": "Node",
+          "type": "string"
+        }
+      },
+      "required": [
+        "line"
+      ],
+      "title": "RemediationTarget",
+      "type": "object"
     },
     "RunIssue": {
       "additionalProperties": false,
@@ -685,8 +816,11 @@
       "type": "array"
     },
     "report_version": {
-      "const": "1",
-      "default": "1",
+      "default": "2",
+      "enum": [
+        "1",
+        "2"
+      ],
       "title": "Report Version",
       "type": "string"
     },
