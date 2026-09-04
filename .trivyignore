@@ -5,3 +5,9 @@
 CVE-2026-54512
 CVE-2026-54513
 GHSA-r7wm-3cxj-wff9
+
+# The shaded ray_dist.jar also bundles httpcore5 5.0.2 (CVE-2026-54399, HIGH,
+# fixed in 5.4.3). No Ray release consumable by Airflow 3.3.0 constraints ships
+# the fixed jar, and the ConformDAG runtime never exercises the embedded jar.
+# Remove this entry when Ray publishes a patched build.
+CVE-2026-54399

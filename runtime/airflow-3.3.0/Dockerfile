@@ -11,9 +11,15 @@ RUN apt-get update \
         apache-airflow==3.3.0 \
         apache-airflow-providers-google==22.2.2 \
         google-cloud-aiplatform==1.155.0 \
-        GitPython==3.1.55 \
+        GitPython==3.1.58 \
         litellm==1.84.1 \
         pyasn1==0.6.4 \
+        aiohttp==3.14.3 \
+        cryptography==50.0.0 \
+        snowflake-connector-python==4.7.1 \
+        snowflake-sqlalchemy==1.11.0 \
+        sqlparse==0.6.0 \
+        tornado==6.5.8 \
     && rm -f /home/airflow/.local/bin/uv /home/airflow/.local/bin/uvx \
     && rm -f /tmp/conformdag-base-constraints.txt /opt/conformdag/constraints.txt
 COPY runtime/entrypoint.py /usr/local/bin/conformdag-runtime
