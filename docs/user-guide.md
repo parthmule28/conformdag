@@ -216,6 +216,53 @@ The checked-in benchmark verifies fixture hashes, provenance, and labels before 
 `null`/provenance values for measurements unavailable without a semantic corpus or
 provider telemetry.
 
+## Agentic fix loop
+
+`conformdag agent run` turns findings into human-merged pull requests. The agent
+is a tool user of the deterministic engine, never a second evaluation path:
+triage and patch generation are pure rules, the deterministic re-scan proves
+policy compliance, and an LLM performs only one bounded role — a semantic
+sanity review of the diff against a strict verdict schema (`approve`, `reject`,
+or `escalate`; reject and escalate block the pull request).
+
+Configure through namespaced environment variables:
+
+| Variable | Meaning |
+|---|---|
+| `CONFORMDAG_AGENT_BASE_URL` | OpenAI-compatible chat endpoint for the verifier |
+| `CONFORMDAG_AGENT_MODEL` | Exact verifier model ID |
+| `CONFORMDAG_AGENT_API_KEY_ENV` | Name of the env var holding the API key (default `CONFORMDAG_MODEL_API_KEY`) |
+| `CONFORMDAG_GITHUB_TOKEN` | GitHub App installation token used to open PRs |
+| `CONFORMDAG_GITHUB_REPO` | `owner/name` slug for PR creation |
+| `CONFORMDAG_AGENT_BASE_BRANCH` | PR base branch (default `main`) |
+
+The agent identity is a GitHub App installation token with least-privilege
+permissions: `contents: write` (branch push) and `pull_requests: write` only.
+There is no merge, approve, or force-push capability in the harness by
+construction.
+
+```bash
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag agent run --path .
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag agent run --path . --open-pr
+```
+
+Safety properties: every mechanical patch comes from the deterministic codemod
+registry; no PR is opened unless its re-scan is clean and the verifier approves;
+diff content is credential-redacted and delimited as untrusted evidence before a
+model call; verdicts are cached by diff hash and report fingerprints.
+
+`conformdag agent policy-review` aggregates scan reports on disk into a
+governance proposal (fail rates, suppression rates, stale suppressions) for the
+next pack version — committing and tagging the pack remains a human git
+operation.
+
+## Governance platform
+
+The self-hosted team server (dashboard API, durable scan worker, Postgres) is
+deployed with Docker Compose. See the [platform deploy
+guide](platform-deploy.md) for the documented deploy, workspace registration,
+the stable `/api/v1` contract, and the single-admin authentication posture.
+
 ## Current limitations
 
 - The default scanner intentionally supports a bounded subset of Python/Airflow syntax;
@@ -223,5 +270,6 @@ provider telemetry.
 - Runtime mode requires Docker and does not replace review of untrusted code.
 - Semantic findings depend on the configured provider and remain advisory unless their
   policy contract declares blocking behavior.
-- Interactive policy authoring, signed policy distribution, central synchronization,
-  multi-user roles, and dashboards are follow-up capabilities.
+- The dashboard SPA covers repo status, scan triggering, history, findings,
+  suppression management, and exports; multi-user RBAC, MCP for IDE agents, SSO
+  pack download, and signed policy distribution are follow-up capabilities.
