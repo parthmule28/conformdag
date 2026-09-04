@@ -561,6 +561,43 @@ def version() -> None:
     typer.echo(__version__)
 
 
+def _platform_session_factory():
+    from conformdag.platform.app import load_settings
+    from conformdag.platform.db import create_session_factory
+
+    settings = load_settings()
+    return settings, create_session_factory(settings.dsn)
+
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address for the dashboard API."),
+    port: int = typer.Option(8642, "--port", help="Bind port for the dashboard API."),
+) -> None:
+    """Serve the platform dashboard API on /api/v1."""
+    try:
+        import uvicorn
+
+        from conformdag.platform.app import create_app
+    except ImportError as exc:  # pragma: no cover - guarded by the platform extra
+        _fail(ValueError(f"platform extra is not installed: {exc}"))
+    settings, session_factory = _platform_session_factory()
+    platform_app = create_app(session_factory, settings)
+    uvicorn.run(platform_app, host=host, port=port, log_level="info")
+
+
+@app.command("worker")
+def worker_command() -> None:
+    """Run the durable platform worker that executes queued scans."""
+    try:
+        from conformdag.platform.worker import WorkerSettings, run_worker
+    except ImportError as exc:  # pragma: no cover - guarded by the platform extra
+        _fail(ValueError(f"platform extra is not installed: {exc}"))
+    settings, session_factory = _platform_session_factory()
+    typer.echo("platform worker started", err=True)
+    run_worker(session_factory, settings.dsn, WorkerSettings.from_environment())
+
+
 @app.command("benchmark")
 def benchmark(
     path: Path = BENCHMARK_PATH_ARGUMENT,
