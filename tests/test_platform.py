@@ -536,3 +536,19 @@ def test_worker_reports_runner_failure_outcome(platform_env: str, tmp_path: Path
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "failed"
         assert scan.error is not None and "cannot read" in scan.error
+
+
+def test_unknown_api_paths_return_json_404(client: TestClient) -> None:
+    response = _get(client, "/api/v1/does-not-exist")
+    assert response.status_code == 404
+    assert response.json()["detail"].startswith("unknown API path")
+
+
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "src/conformdag/platform/static/index.html").is_file(),
+    reason="dashboard static assets are not built",
+)
+def test_dashboard_index_is_served(client: TestClient) -> None:
+    response = _get(client, "/")
+    assert response.status_code == 200
+    assert "ConformDAG Platform" in response.text

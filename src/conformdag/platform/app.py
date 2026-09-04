@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -26,6 +27,7 @@ from conformdag.platform.workspace import load_workspace
 from conformdag.reporting import render_html, render_sarif
 
 API_PREFIX = "/api/v1"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class PlatformSettings(BaseModel):
@@ -321,7 +323,15 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     app.get(API_PREFIX + "/suppressions")(list_suppressions)
     app.post(API_PREFIX + "/suppressions", dependencies=[Depends(require_admin)])(create_suppression)
     app.patch(API_PREFIX + "/suppressions/{suppression_id}", dependencies=[Depends(require_admin)])(update_suppression)
+    app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "DELETE"])(_api_fallback)
+    if STATIC_DIR.is_dir():
+        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
+
+
+def _api_fallback(rest: str) -> dict[str, str]:
+    """Return a JSON 404 for unknown API paths instead of the dashboard SPA."""
+    raise HTTPException(status_code=404, detail=f"unknown API path: /api/{rest}")
 
 
 def _load_report(session_factory: sessionmaker[Session], scan_id: str) -> ScanReport:

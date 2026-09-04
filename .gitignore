@@ -32,3 +32,7 @@ build/
 .DS_Store
 .idea/
 .vscode/
+
+# Platform dashboard build artifacts
+frontend/node_modules/
+src/conformdag/platform/static/

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import (
     JSON,
@@ -117,10 +118,27 @@ class PlatformError(RuntimeError):
     """Raised when the platform persistence layer cannot be used."""
 
 
+def run_migrations(url: str) -> None:
+    """Bring the platform schema to the latest migration revision."""
+    from alembic import command
+    from alembic.config import Config
+
+    ini_path = Path(__file__).resolve().parent / "alembic.ini"
+    alembic_config = Config(ini_path)
+    alembic_config.set_main_option("script_location", str(ini_path.parent / "migrations"))
+    alembic_config.set_main_option("sqlalchemy.url", url)
+    command.upgrade(alembic_config, "head")
+
+
 def create_session_factory(url: str) -> sessionmaker[Session]:
-    """Create a session factory bound to the platform database URL."""
+    """Create a session factory bound to the platform database URL.
+
+    The platform schema is created exclusively through Alembic migrations; the
+    session factory applies pending migrations at startup so every deployment
+    and test run reaches the same schema revision.
+    """
+    run_migrations(url)
     engine = create_engine(url, future=True)
-    Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, future=True, expire_on_commit=False)
 
 

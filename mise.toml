@@ -48,6 +48,14 @@ run = "uv run python scripts/runtime_smoke.py"
 description = "Build wheel and source distribution"
 run = "uv build"
 
+[tasks."ui-build"]
+description = "Build the platform dashboard SPA into the package static directory"
+run = "cd frontend && npm install --no-fund --no-audit && npm run build"
+
+[tasks."ui-check"]
+description = "Typecheck the platform dashboard frontend"
+run = "cd frontend && npm run build"
+
 [tasks.schema]
 description = "Verify checked-in JSON Schemas"
 run = "uv run python scripts/export_schemas.py --check"
