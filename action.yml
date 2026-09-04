@@ -38,10 +38,12 @@ runs:
         ${{ startsWith(inputs['policy-pack'], 'http')
             || contains(inputs['policy-pack'], 'git@') }}
       shell: bash
+      env:
+        CLI_FROM: ${{ inputs.version == 'local' && '.' || format('conformdag=={0}', inputs.version) }}
       run: |
         PACK_INPUT="${{ inputs['policy-pack'] }}"
         PACK_NAME="$(basename "$PACK_INPUT" .git)"
-        uvx --from "conformdag==${{ inputs.version }}" conformdag pack pull "$PACK_INPUT" --name "$PACK_NAME"
+        uvx --from "$CLI_FROM" conformdag pack pull "$PACK_INPUT" --name "$PACK_NAME"
         PACK_FILE=".conformdag/packs/$PACK_NAME/pack.yaml"
         [ -f "$PACK_FILE" ] || PACK_FILE=".conformdag/packs/$PACK_NAME/policies/pack.yaml"
         echo "pack=$PACK_FILE" >> "$GITHUB_OUTPUT"
@@ -51,10 +53,11 @@ runs:
       shell: bash
       env:
         SELECTED_PACK: ${{ steps.prepare-pack.outputs.pack || inputs['policy-pack'] }}
+        CLI_FROM: ${{ inputs.version == 'local' && '.' || format('conformdag=={0}', inputs.version) }}
       run: |
         mkdir -p .conformdag
         set +e
-        uvx --from "conformdag==${{ inputs.version }}" conformdag scan \
+        uvx --from "$CLI_FROM" conformdag scan \
           --path "${{ inputs.path }}" \
           --policy-pack "$SELECTED_PACK" \
           --format sarif \
