@@ -16,7 +16,7 @@ inputs:
   version:
     description: ConformDAG CLI version to run; defaults to the release version.
     required: false
-    default: "1.0.0"
+    default: "1.0.0b1"
   upload-sarif:
     description: Upload the SARIF report via codeql-action.
     required: false

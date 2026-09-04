@@ -10,7 +10,7 @@ terminal output, SARIF, or self-contained HTML.
 
 ## Public beta
 
-ConformDAG `0.1.0b1` includes:
+ConformDAG `1.0.0b1` includes:
 
 - six deterministic Airflow policy evaluators with versioned policy contracts;
 - policy provenance validation and human/machine-readable policy inspection;
@@ -40,17 +40,17 @@ beta without installing it globally:
 
 ```bash
 mise use python@3.12 uv@0.12.0
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag version
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag version
 ```
 
 In an Airflow repository, create the non-destructive starter files and review the empty
 policy scaffold before adding organizational rules:
 
 ```bash
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag init
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag validate-policies \
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag init
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag validate-policies \
   --path policies/pack.yaml
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan \
   --path . \
   --policy-pack policies/pack.yaml
 ```
@@ -67,7 +67,7 @@ package, so no checkout of this repository is required:
 
 ```bash
 git clone --depth 1 https://github.com/apache/airflow.git /tmp/airflow-examples
-mise exec -- uvx --from conformdag==0.1.0b1 conformdag scan \
+mise exec -- uvx --from conformdag==1.0.0b1 conformdag scan \
   --path /tmp/airflow-examples/airflow-core/src/airflow/example_dags \
   --policy-pack community \
   --format terminal

@@ -1,5 +1,35 @@
 # Beta release checklist
 
+## 1.0.0b1 release checklist
+
+The 1.0.0b1 soak release ships the v1 agentic platform (ADR 0003): fix engine,
+self-hosted platform, agent harness, and distribution surfaces. It is released only
+from a reviewed `v1.0.0-beta.1` tag on `main`; the release workflow re-runs every gate
+and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image.
+
+- [ ] Update the `pypi` environment deployment policy to allow the exact
+  `v1.0.0-beta.1` tag before pushing it.
+- [ ] Review the release run's `Validate release candidate` job for all quality,
+  benchmark, schema, dependency, secret, and privacy gates.
+- [ ] Confirm the `Validate platform image` job: wheel contains the built dashboard
+  static assets, `serve`/`worker` smoke, and the Trivy CRITICAL/HIGH gate passed.
+- [ ] Confirm the published platform image carries SBOM and provenance attestations
+  and is tagged with the release ref and `latest`.
+- [ ] Confirm the `Run the composite action against the sample repository` self-test
+  passed on the release commit, covering the community pack path and the
+  `pack pull` git path.
+- [ ] Boot the documented compose deploy once against a real Postgres and record the
+  evidence: Alembic baseline applied, repository registered, worker-claimed scan
+  succeeded, findings with remediation payloads listed, SARIF export parity with the
+  CLI, suppression create/list/patch. (Completed locally on 2026-09-02 during the
+  v1 platform merge review; repeat on the release image and record the run.)
+- [ ] Review final wheel/sdist contents and checksums, including the dashboard
+  static assets, before approving the PyPI deployment.
+- [ ] Confirm PyPI trusted publishing completed for `1.0.0b1` and record the wheel
+  and sdist SHA-256 values.
+- [ ] Record provider smoke or note it as not executed for this release; the offline
+  deterministic and round-trip gates are the accuracy-neutral release floor.
+
 The public beta is released only from a reviewed `v0.1.0-beta.1` tag on `main`. The
 release workflow first re-runs quality, benchmark, schema, dependency, secret, privacy,
 and image-vulnerability gates. Only then does it publish the GHCR runtime image;

@@ -37,7 +37,8 @@ capability changes land and the release gates pass.
   App token (never merges), policy-review local mode. Implemented.
 - [x] Phase 4 — distribution (`distribution-and-ci`): `pack pull`
   (git-native), composite GitHub Action with SARIF and blocking semantics. Implemented.
-- [ ] Publish `1.0.0`.
+- [ ] Publish `1.0.0b1` (soak) from tag `v1.0.0-beta.1`, then `1.0.0` after the
+  soak window.
 
 ## After 1.0.0
 
