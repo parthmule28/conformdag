@@ -9,6 +9,13 @@ and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image
 
 - [ ] Update the `pypi` environment deployment policy to allow the exact
   `v1.0.0-beta.1` tag before pushing it.
+- [x] Remediate the runtime image security gate found on the first 1.0.0b1 train:
+  GitPython 3.1.58, aiohttp 3.14.3, cryptography 50.0.0,
+  snowflake-connector-python 4.7.1, snowflake-sqlalchemy 1.11.0, sqlparse 0.6.0,
+  and tornado 6.5.8 installed above the Airflow constraints; the Ray-bundled
+  httpcore5 jar (CVE-2026-54399, HIGH, no fixed build available to Airflow 3.3.0)
+  is allowlisted in `.trivyignore` with justification. Local re-scan of
+  `conformdag-airflow-smoke:3.3.0` exits 0 under the CRITICAL/HIGH gate.
 - [ ] Review the release run's `Validate release candidate` job for all quality,
   benchmark, schema, dependency, secret, and privacy gates.
 - [ ] Confirm the `Validate platform image` job: wheel contains the built dashboard
