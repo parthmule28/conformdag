@@ -200,15 +200,25 @@ def count_scans(session: Session, repository_id: str) -> int:
 def retention_target_scan_ids(session: Session, repository_id: str, keep: int) -> list[str]:
     """Return scan ids beyond the newest ``keep`` for one repository."""
     newest = (
-        select(ScanRow.id).where(ScanRow.repository_id == repository_id).order_by(ScanRow.created_at.desc()).limit(keep)
+        select(ScanRow.id)
+        .where(ScanRow.repository_id == repository_id)
+        .order_by(ScanRow.created_at.desc())
+        .limit(keep)
+        .subquery()
     )
-    keep_ids = list(session.scalars(newest))
-    older = select(ScanRow.id).where(ScanRow.repository_id == repository_id).order_by(ScanRow.created_at.desc())
-    return [scan_id for scan_id in session.scalars(older) if scan_id not in keep_ids]
+    older = select(ScanRow.id).where(
+        ScanRow.repository_id == repository_id,
+        ScanRow.id.not_in(select(newest)),
+    )
+    return list(session.scalars(older))
 
 
-def prune_scan(session: Session, scan_id: str) -> None:
-    """Delete one scan row; normalized findings live on via aggregates."""
+def prune_scan_artifact(session: Session, scan_id: str) -> None:
+    """Clear the report artifact of one scan, keeping the row and its findings.
+
+    Retention bounds artifact storage while normalized findings survive for
+    trends, per design decision: findings forever, artifacts bounded.
+    """
     scan = session.get(ScanRow, scan_id)
     if scan is not None:
-        session.delete(scan)
+        scan.report_json = None

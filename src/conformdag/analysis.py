@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import pickle
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -302,15 +303,63 @@ def _literal_value(node: ast.AST) -> object:
     return None
 
 
-def analyze_source(source: SourceFile) -> tuple[SourceModel | None, ParseIssue | None]:
+def analyze_source(source: SourceFile, cache: ParseCache | None = None) -> tuple[SourceModel | None, ParseIssue | None]:
     """Parse one file only; importing or executing repository code never occurs."""
+    if cache is not None:
+        cached = cache.get(source.content_hash)
+        if cached is not None:
+            cached.source = source
+            return cached, None
     try:
         tree = ast.parse(source.content, filename=source.relative_path)
     except SyntaxError as exc:
         return None, ParseIssue(source.relative_path, exc.msg, exc.lineno)
     visitor = _ModelVisitor(source)
     visitor.visit(tree)
-    return visitor.model, None
+    model = visitor.model
+    if cache is not None:
+        cache.put(source.content_hash, model)
+    return model, None
+
+
+class ParseCache:
+    """Disk-backed parse cache keyed by file content hash.
+
+    Entries store pickled SourceModel objects in a trusted local directory and
+    are validated by their content-hash key, so a cache hit is exactly the model
+    a fresh parse of the same bytes would produce. Repeated scans of unchanged
+    trees skip reparsing entirely.
+    """
+
+    def __init__(self, directory: Path, max_entries: int = 50_000) -> None:
+        self.directory = directory
+        self.max_entries = max_entries
+        self._puts_since_prune = 0
+
+    def get(self, content_hash: str) -> SourceModel | None:
+        entry = self.directory / f"{content_hash}.pkl"
+        try:
+            model = pickle.loads(entry.read_bytes())  # noqa: S301 - trusted local cache
+        except (OSError, pickle.UnpicklingError):
+            return None
+        return model if isinstance(model, SourceModel) else None
+
+    def put(self, content_hash: str, model: SourceModel) -> None:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        entry = self.directory / f"{content_hash}.pkl"
+        try:
+            entry.write_bytes(pickle.dumps(model))
+        except OSError:
+            return
+        self._puts_since_prune += 1
+        if self._puts_since_prune >= 500:
+            self._puts_since_prune = 0
+            self._prune()
+
+    def _prune(self) -> None:
+        entries = sorted(self.directory.glob("*.pkl"), key=lambda entry: entry.stat().st_mtime, reverse=True)
+        for stale in entries[self.max_entries :]:
+            stale.unlink(missing_ok=True)
 
 
 def iter_module_scope_calls(model: SourceModel) -> Iterator[CallRecord]:
