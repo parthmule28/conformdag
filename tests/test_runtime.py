@@ -117,10 +117,7 @@ def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path)
 
 def test_runtime_import_failure_is_returned_as_structured_error(tmp_path: Path) -> None:
     runner = DockerRunner()
-    output = (
-        '{"observations": [{"policy_id": "AIR-DET-001", "status": "ERROR", '
-        '"message": "import failed"}]}'
-    )
+    output = '{"observations": [{"policy_id": "AIR-DET-001", "status": "ERROR", "message": "import failed"}]}'
     manifest = build_runtime_manifest(
         tmp_path,
         ProjectRuntimeConfig(enabled=True, image="airflow-custom@sha256:" + "c" * 64),
@@ -208,9 +205,7 @@ def test_runtime_daemon_failure_is_reported() -> None:
     with (
         patch(
             "conformdag.runtime.subprocess.run",
-            return_value=SimpleNamespace(
-                stdout="", stderr="Cannot connect to Docker", returncode=1
-            ),
+            return_value=SimpleNamespace(stdout="", stderr="Cannot connect to Docker", returncode=1),
         ),
         pytest.raises(RuntimePhaseError, match="Cannot connect to Docker"),
     ):

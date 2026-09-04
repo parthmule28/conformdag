@@ -54,8 +54,7 @@ def _fixture(policy_id: str, index: int, violation: bool) -> tuple[str, str | No
         ), "retry-bounds-exceeded-v1" if violation else None
     if policy_id == "AIR-DET-005":
         return _dag(name) + (
-            "import requests\n"
-            + ('requests.get("https://example.invalid")\n' if violation else "value = 1\n")
+            "import requests\n" + ('requests.get("https://example.invalid")\n' if violation else "value = 1\n")
         ), "module-scope-network-call-v1" if violation else None
     if policy_id == "AIR-DET-006":
         operator = "PythonOperator" if violation else "EmptyOperator"
@@ -72,9 +71,7 @@ def main() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     cases: list[dict[str, object]] = []
     public_raw = YAML(typ="safe").load(PUBLIC_SOURCES.read_text(encoding="utf-8"))
-    public_sources = [
-        BenchmarkSourceAdmission.model_validate(item) for item in public_raw["sources"]
-    ]
+    public_sources = [BenchmarkSourceAdmission.model_validate(item) for item in public_raw["sources"]]
     synthetic_source = BenchmarkSourceAdmission(
         source_id="conformdag-synthetic-generator",
         kind="synthetic",
@@ -123,9 +120,7 @@ def main() -> None:
         dataset_version="2026.08.1",
         license={"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"},
         policy_versions={policy.id: policy.version for policy in deterministic},
-        policy_contract_hashes={
-            policy.id: policy_contract_hash(policy) for policy in deterministic
-        },
+        policy_contract_hashes={policy.id: policy_contract_hash(policy) for policy in deterministic},
         enforcement_hashes={policy.id: policy_enforcement_hash(policy) for policy in deterministic},
         source_admissions=[*public_sources, synthetic_source],
         cases=cases,

@@ -108,9 +108,7 @@ def scan_repository(
             airflow_profile or config.runtime.airflow_version,
         )
     except EvaluationPhaseError as exc:
-        issues.append(
-            RunIssue(code="EVALUATOR_ERROR", message=str(exc), phase="evaluation", fatal=True)
-        )
+        issues.append(RunIssue(code="EVALUATOR_ERROR", message=str(exc), phase="evaluation", fatal=True))
         evaluated = []
         skipped = [policy.id for policy in pack.policies]
 
@@ -158,9 +156,7 @@ def scan_repository(
             )
             if len(responses) != len(requests):
                 raise SemanticProviderError("provider returned an unexpected response count")
-            for policy, request, response in zip(
-                semantic_policies, requests, responses, strict=True
-            ):
+            for policy, request, response in zip(semantic_policies, requests, responses, strict=True):
                 findings.append(semantic_finding(policy, response, context))
                 prompt_hash = hashlib.sha256(request.system_prompt.encode("utf-8")).hexdigest()
                 prompt_hashes[policy.id] = prompt_hash
@@ -241,9 +237,7 @@ def scan_repository(
     return normalize_report(report)
 
 
-def preview_model_context(
-    repository_root: Path, policy_pack: Path | None = None
-) -> SemanticContext:
+def preview_model_context(repository_root: Path, policy_pack: Path | None = None) -> SemanticContext:
     """Build the redacted semantic context preview without contacting a provider."""
     root = repository_root.resolve()
     config, pack = _load_pack_for_scan(root, policy_pack)
@@ -256,8 +250,7 @@ def preview_model_context(
     policy_text = "\n\n".join(
         f"{policy.id}: {policy.invariant}\nRemediation: {policy.safe_path or 'none'}"
         for policy in pack.policies
-        if policy.enforcement.type.value in {"semantic", "hybrid"}
-        and policy.status.value == "ACTIVE"
+        if policy.enforcement.type.value in {"semantic", "hybrid"} and policy.status.value == "ACTIVE"
     )
     return build_context(
         policy_text,

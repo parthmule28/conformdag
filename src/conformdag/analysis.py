@@ -119,9 +119,7 @@ def discover_python_files(
             if not candidate.is_file():
                 continue
             if candidate.is_symlink() and not follow_internal_symlinks:
-                issues.append(
-                    ParseIssue(candidate.relative_to(root).as_posix(), "symlink excluded")
-                )
+                issues.append(ParseIssue(candidate.relative_to(root).as_posix(), "symlink excluded"))
                 continue
             relative = candidate.relative_to(root).as_posix()
             if _matches(relative, excluded):
@@ -168,9 +166,7 @@ class _ModelVisitor(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         module = "." * node.level + (node.module or "")
         for item in node.names:
-            self.model.imports.append(
-                ImportRecord(f"{module}.{item.name}", item.asname, node.lineno)
-            )
+            self.model.imports.append(ImportRecord(f"{module}.{item.name}", item.asname, node.lineno))
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -240,9 +236,7 @@ class _ModelVisitor(ast.NodeVisitor):
             if keyword.arg == "tags":
                 resolved_tags = self._resolve_value(keyword.value)
                 if isinstance(resolved_tags, list):
-                    tags = tuple(
-                        item for item in cast(list[object], resolved_tags) if isinstance(item, str)
-                    )
+                    tags = tuple(item for item in cast(list[object], resolved_tags) if isinstance(item, str))
         return DagRecord(node.lineno, owner, owner_source, tags, defaults=defaults)
 
     def _task_record(self, node: ast.Call, qualified_name: str) -> TaskRecord:
@@ -280,9 +274,7 @@ class _ModelVisitor(ast.NodeVisitor):
 
 
 def _literal_value(node: ast.AST) -> object:
-    if isinstance(node, ast.Constant) and isinstance(
-        node.value, (str, int, float, bool, type(None))
-    ):
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float, bool, type(None))):
         return node.value
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return [_literal_value(item) for item in node.elts]
@@ -293,9 +285,7 @@ def _literal_value(node: ast.AST) -> object:
                 result[key.value] = _literal_value(value)
         return result
     if isinstance(node, ast.Call) and _qualified_name(node.func) == "timedelta":
-        units = {
-            keyword.arg: _literal_value(keyword.value) for keyword in node.keywords if keyword.arg
-        }
+        units = {keyword.arg: _literal_value(keyword.value) for keyword in node.keywords if keyword.arg}
         total = 0.0
         for unit, multiplier in (
             ("weeks", 604800),

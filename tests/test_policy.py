@@ -31,9 +31,7 @@ from conformdag.policy import (
 )
 
 
-def _policy(
-    source: Path, policy_id: str = "AIR-DET-001", status: LifecycleStatus = LifecycleStatus.ACTIVE
-) -> Policy:
+def _policy(source: Path, policy_id: str = "AIR-DET-001", status: LifecycleStatus = LifecycleStatus.ACTIVE) -> Policy:
     content_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     return Policy(
         id=policy_id,
@@ -158,14 +156,10 @@ def test_rejects_ambiguous_implicit_pack_selection(tmp_path: Path) -> None:
         select_policy_pack(None, tmp_path)
 
 
-def test_resolve_policy_pack_path_from_working_directory(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
+def test_resolve_policy_pack_path_from_working_directory(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     pack = tmp_path / "policies" / "pack.yaml"
     pack.parent.mkdir(parents=True)
-    pack.write_text(
-        'schema_version: "1"\nid: default\nversion: 1.0.0\npolicies: []\n', encoding="utf-8"
-    )
+    pack.write_text('schema_version: "1"\nid: default\nversion: 1.0.0\npolicies: []\n', encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     resolved = resolve_policy_pack_path(Path("policies/pack.yaml"))
@@ -177,9 +171,7 @@ def test_resolve_configured_policy_pack_uses_scan_root_for_project_defaults(tmp_
     scan_root = tmp_path / "airflow-repo"
     pack = scan_root / "policies" / "pack.yaml"
     pack.parent.mkdir(parents=True)
-    pack.write_text(
-        'schema_version: "1"\nid: default\nversion: 1.0.0\npolicies: []\n', encoding="utf-8"
-    )
+    pack.write_text('schema_version: "1"\nid: default\nversion: 1.0.0\npolicies: []\n', encoding="utf-8")
 
     resolved = resolve_configured_policy_pack(
         Path("policies/pack.yaml"),

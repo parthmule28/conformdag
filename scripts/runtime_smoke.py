@@ -58,9 +58,7 @@ def main() -> int:
             )
             observations = runner.run_manifest(manifest, image, timeout_seconds=90)
 
-        if not observations or any(
-            observation.status is FindingStatus.ERROR for observation in observations
-        ):
+        if not observations or any(observation.status is FindingStatus.ERROR for observation in observations):
             raise RuntimePhaseError("runtime smoke test did not return a successful observation")
     except RuntimePhaseError as exc:
         print(f"runtime smoke test failed: {exc}", file=sys.stderr)

@@ -19,9 +19,7 @@ def _arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _observation(
-    policy_id: str, status: str, message: str | None, **payload: Any
-) -> dict[str, Any]:
+def _observation(policy_id: str, status: str, message: str | None, **payload: Any) -> dict[str, Any]:
     return {
         "schema_version": "1",
         "status": status,
@@ -49,9 +47,7 @@ def _stage_sources(repository_root: Path, manifest: dict[str, Any], target: Path
         shutil.copyfile(repository_root / relative, destination)
 
 
-def normalize_import_errors(
-    import_errors: dict[str, object], dag_folder: Path, staging_root: Path
-) -> dict[str, str]:
+def normalize_import_errors(import_errors: dict[str, object], dag_folder: Path, staging_root: Path) -> dict[str, str]:
     """Remove random container staging paths from report-visible diagnostics."""
     normalized: dict[str, str] = {}
     for raw_path, error in import_errors.items():
@@ -95,13 +91,7 @@ def main() -> None:
                 "safe_mode": False,
             }
             supported_options = inspect.signature(DagBag).parameters
-            dagbag = DagBag(
-                **{
-                    name: value
-                    for name, value in dagbag_options.items()
-                    if name in supported_options
-                }
-            )
+            dagbag = DagBag(**{name: value for name, value in dagbag_options.items() if name in supported_options})
             import_errors = normalize_import_errors(
                 dagbag.import_errors,
                 dag_folder,

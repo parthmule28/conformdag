@@ -109,9 +109,7 @@ def select_policy_pack(path: Path | None, repository_root: Path) -> PolicyPack:
     if path is not None:
         return load_policy_pack(path.resolve(), repository_root)
     candidates = sorted(
-        candidate
-        for pattern in ("*.yaml", "*.yml")
-        for candidate in (repository_root / "policies").glob(pattern)
+        candidate for pattern in ("*.yaml", "*.yml") for candidate in (repository_root / "policies").glob(pattern)
     )
     if len(candidates) != 1:
         raise PolicyValidationError(
@@ -143,10 +141,7 @@ def validate_policy_provenance(
 
         source_text = source_path.read_text(encoding="utf-8")
         if policy.source.section not in source_text:
-            issues.append(
-                f"{policy.id}: source section {policy.source.section!r} was not found "
-                f"in {source_path}"
-            )
+            issues.append(f"{policy.id}: source section {policy.source.section!r} was not found in {source_path}")
 
         actual_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
         if actual_hash.lower() != policy.source.content_hash.lower():

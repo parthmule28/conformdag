@@ -67,9 +67,7 @@ def test_provider_validates_structured_output_and_sends_untrusted_boundary() -> 
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    provider = OpenAICompatibleProvider(
-        "https://model.example/v1", "test-model", "secret-key", client=client
-    )
+    provider = OpenAICompatibleProvider("https://model.example/v1", "test-model", "secret-key", client=client)
 
     result = provider.evaluate(_request("password='do-not-send'"))
 
@@ -177,9 +175,7 @@ def test_generic_reviewer_baseline_is_pinned_and_context_bound() -> None:
 
 
 def test_native_structured_output_is_opt_in_and_schema_constrained() -> None:
-    provider = OpenAICompatibleProvider(
-        "https://model.example/v1", "test-model", "key", native_structured_output=True
-    )
+    provider = OpenAICompatibleProvider("https://model.example/v1", "test-model", "key", native_structured_output=True)
     response = httpx.Response(
         200,
         json={
@@ -363,9 +359,7 @@ def test_provider_exhaustion_and_invalid_output_are_explicit_errors() -> None:
         "test-model",
         "secret-key",
         max_retries=1,
-        client=httpx.Client(
-            transport=httpx.MockTransport(lambda request: httpx.Response(503, request=request))
-        ),
+        client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(503, request=request))),
     )
 
     with pytest.raises(SemanticProviderError, match="HTTP 503"):

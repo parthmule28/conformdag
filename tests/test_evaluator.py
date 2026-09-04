@@ -110,9 +110,7 @@ def test_deterministic_policy_suite_evaluates_tags_defaults_io_and_operators() -
 def test_uncertain_dynamic_module_call_is_review_not_blocking() -> None:
     pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
     policy = next(item for item in pack.policies if item.id == "AIR-DET-005")
-    findings = evaluate_deterministic(
-        [policy], [_model("factory = get_factory()\nresult = factory()()\n")]
-    )[0]
+    findings = evaluate_deterministic([policy], [_model("factory = get_factory()\nresult = factory()()\n")])[0]
 
     assert findings
     assert all(item.status is FindingStatus.NEEDS_REVIEW for item in findings)
@@ -133,18 +131,13 @@ def test_forbidden_operator_rule_respects_airflow_profile() -> None:
             )
         }
     )
-    model = _model(
-        "from airflow.operators.python import PythonOperator\n"
-        "task = PythonOperator(task_id='task')\n"
-    )
+    model = _model("from airflow.operators.python import PythonOperator\ntask = PythonOperator(task_id='task')\n")
 
     from conformdag.evaluator import EvaluationContext, ForbiddenOperatorEvaluator
 
     evaluator = ForbiddenOperatorEvaluator()
     assert (
-        evaluator.evaluate(EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_3_3_0))[
-            0
-        ].status
+        evaluator.evaluate(EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_3_3_0))[0].status
         is FindingStatus.FAIL
     )
 
@@ -162,6 +155,4 @@ def test_evaluate_deterministic_routes_community_policies_by_check_kind() -> Non
 
     assert skipped == []
     assert evaluated == ["COM-DET-001", "COM-DET-002", "COM-DET-003"]
-    assert any(
-        item.policy_id == "COM-DET-001" and item.status is FindingStatus.PASS for item in findings
-    )
+    assert any(item.policy_id == "COM-DET-001" and item.status is FindingStatus.PASS for item in findings)

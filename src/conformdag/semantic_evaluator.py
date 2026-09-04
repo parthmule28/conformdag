@@ -36,9 +36,7 @@ POLICY_INSTRUCTIONS = {
         "and retry/deduplication controls; otherwise return NEEDS_REVIEW and name the missing "
         "evidence."
     ),
-    "AIR-SEM-002": (
-        "Review structural signals and evidence for business logic embedded in orchestration."
-    ),
+    "AIR-SEM-002": ("Review structural signals and evidence for business logic embedded in orchestration."),
     "AIR-SEM-003": (
         "Review configured logging calls for sensitive values. Evidence has already been "
         "redacted locally; never reconstruct or repeat a masked value."
@@ -58,9 +56,7 @@ def _policy_instruction(policy: Policy, context_text: str) -> str:
     if policy.id == "AIR-SEM-002":
         raw_configuration = policy.configuration.model_dump(mode="json")
         patterns = [str(item) for item in raw_configuration.get("signal_patterns", [])]
-        source_lines = sum(
-            1 for line in context_text.splitlines() if not line.startswith("[SOURCE ")
-        )
+        source_lines = sum(1 for line in context_text.splitlines() if not line.startswith("[SOURCE "))
         signal_counts = {
             pattern: (
                 len(re.findall(r"\bfor\s+", context_text))
@@ -118,12 +114,9 @@ def semantic_finding(
         explanation = f"{explanation} Idempotence cannot be decided without bounded evidence."
     audit_evidence = _normalize_audit_evidence(response, context)
     evidence = redact_evidence(
-        "\n".join(f"[{item.criterion}] {item.excerpt}" for item in audit_evidence)
-        or response.evidence
+        "\n".join(f"[{item.criterion}] {item.excerpt}" for item in audit_evidence) or response.evidence
     )
-    fingerprint_value = (
-        f"{policy.id}:{policy.version}:{context.context_hash}:{status.value}:{evidence}"
-    )
+    fingerprint_value = f"{policy.id}:{policy.version}:{context.context_hash}:{status.value}:{evidence}"
     fingerprint = hashlib.sha256(fingerprint_value.encode("utf-8")).hexdigest()
     return Finding(
         policy_id=policy.id,
@@ -142,9 +135,7 @@ def semantic_finding(
     )
 
 
-def _normalize_audit_evidence(
-    response: SemanticResponse, context: SemanticContext
-) -> list[SemanticAuditEvidence]:
+def _normalize_audit_evidence(response: SemanticResponse, context: SemanticContext) -> list[SemanticAuditEvidence]:
     supplied = response.audit_evidence or [
         SemanticAuditEvidence(
             criterion="provider-summary",

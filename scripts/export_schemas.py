@@ -26,8 +26,7 @@ def _rendered_schemas() -> dict[str, str]:
         "suppression": Suppression,
     }
     return {
-        name: json.dumps(model.model_json_schema(), indent=2, sort_keys=True) + "\n"
-        for name, model in models.items()
+        name: json.dumps(model.model_json_schema(), indent=2, sort_keys=True) + "\n" for name, model in models.items()
     }
 
 

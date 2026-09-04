@@ -83,9 +83,7 @@ def test_rejects_case_with_unknown_source_admission(tmp_path: Path) -> None:
     digest = hashlib.sha256(fixture.read_bytes()).hexdigest()
     manifest_path = tmp_path / "manifest.yaml"
     manifest_path.write_text(
-        _manifest(digest).replace(
-            "    source_id: conformdag-test-source\n", "    source_id: unknown\n"
-        ),
+        _manifest(digest).replace("    source_id: conformdag-test-source\n", "    source_id: unknown\n"),
         encoding="utf-8",
     )
 
@@ -103,12 +101,9 @@ def test_synthetic_release_has_balanced_cases_and_admission_metadata() -> None:
 
     assert set(by_policy) == {f"AIR-DET-00{index}" for index in range(1, 7)}
     assert all(len(cases) == 40 for cases in by_policy.values())
+    assert all(sum(case.label == "violation" for case in cases) == 20 for cases in by_policy.values())
     assert all(
-        sum(case.label == "violation" for case in cases) == 20 for cases in by_policy.values()
-    )
-    assert all(
-        sum(case.label in {"valid", "safe-counterexample"} for case in cases) == 20
-        for cases in by_policy.values()
+        sum(case.label in {"valid", "safe-counterexample"} for case in cases) == 20 for cases in by_policy.values()
     )
     assert len(manifest.source_admissions) == 6
     assert {source.kind for source in manifest.source_admissions} == {"public", "synthetic"}
@@ -119,9 +114,7 @@ def test_synthetic_release_has_balanced_cases_and_admission_metadata() -> None:
         source.source_id for source in manifest.source_admissions if source.kind == "public"
     }
     assert {case.source_id for case in manifest.cases} == {"conformdag-synthetic-generator"}
-    assert all(
-        case.mutation_recipe is not None for case in manifest.cases if case.label == "violation"
-    )
+    assert all(case.mutation_recipe is not None for case in manifest.cases if case.label == "violation")
     assert all(case.mutation_recipe is None for case in manifest.cases if case.label != "violation")
 
 
