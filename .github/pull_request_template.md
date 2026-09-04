@@ -12,7 +12,7 @@
 
 - [ ] Policy/schema/cache/benchmark versioning impact considered
 - [ ] No credentials, private DAGs, raw provider I/O, or generated cache files included
-- [ ] OpenSpec tasks updated locally when applicable
+- [ ] OpenSpec artifacts included when this PR implements an OpenSpec change
 
 ## Review notes
 

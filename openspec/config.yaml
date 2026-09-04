@@ -1,0 +1,12 @@
+schema: spec-driven
+
+context: |
+  ConformDAG is a local-first Apache Airflow policy CLI (Python 3.12, Pydantic,
+  Typer, mise, uv). Conventional Commits. Policy-as-data, checks-as-code.
+  scan.py is the single scan orchestration path. Deterministic evaluators are
+  the verifier; semantic evaluation is opt-in BYOK. Dashboard (`conformdag serve`)
+  and agent pack/fix are 1.0.0 MUST capabilities per ADR 0002 and spec
+  org-governance-1-0; implement them via dedicated OpenSpec changes, not ad-hoc
+  CLI-only shortcuts. MCP is not a 1.0.0 blocker.
+
+  Tracked OpenSpec lives in openspec/. .cursor/ stays gitignored.
