@@ -58,9 +58,11 @@ conformdag = "conformdag.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/conformdag"]
+artifacts = ["src/conformdag/platform/static/**"]
 
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/LICENSE", "/README.md", "/pyproject.toml"]
+artifacts = ["src/conformdag/platform/static/**"]
 
 [tool.pytest.ini_options]
 addopts = ["--strict-markers", "--strict-config"]

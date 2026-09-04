@@ -1,0 +1,36 @@
+name: Action self-test
+
+on:
+  push:
+    paths:
+      - action.yml
+      - .github/workflows/action-selftest.yml
+  pull_request:
+    paths:
+      - action.yml
+      - .github/workflows/action-selftest.yml
+
+jobs:
+  composite-action:
+    name: Run the composite action against the sample repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Community pack scan from the checked-out CLI
+        uses: ./
+        with:
+          path: examples/sample-repository
+          policy-pack: community
+          version: local
+          upload-sarif: false
+          fail-on-blocking: false
+      - name: Pull the organizational pack from this repository's git
+        uses: ./
+        with:
+          path: examples/sample-repository
+          policy-pack: https://github.com/${{ github.repository }}.git
+          version: local
+          upload-sarif: false
+          fail-on-blocking: false
+      - name: Verify the SARIF artifact was produced
+        run: test -f .conformdag/report.sarif && python3 -c "import json; json.load(open('.conformdag/report.sarif'))"
