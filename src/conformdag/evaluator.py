@@ -7,12 +7,21 @@ import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol, cast
 
-from conformdag.analysis import CallRecord, DagRecord, SourceModel, TaskRecord
+from conformdag.analysis import (
+    CallRecord,
+    DagRecord,
+    SourceModel,
+    TaskRecord,
+    secret_like,
+)
 from conformdag.models import (
     AirflowProfile,
+    CatchupPolicyConfig,
+    DynamicDagFactoryConfig,
     EnforcementType,
     ExecutionTimeoutConfig,
     Finding,
@@ -20,6 +29,7 @@ from conformdag.models import (
     FindingLocation,
     FindingStatus,
     ForbiddenOperatorsConfig,
+    ModuleScopeVariablesConfig,
     OperatorRule,
     Policy,
     RemediationAction,
@@ -28,6 +38,8 @@ from conformdag.models import (
     RequiredOwnerConfig,
     RequiredTagsConfig,
     RetryBoundsConfig,
+    SensitiveLoggingConfig,
+    StartDateFreshnessConfig,
     TopLevelIOConfig,
 )
 
@@ -554,6 +566,193 @@ class ForbiddenOperatorEvaluator:
         return findings
 
 
+class StartDateFreshnessEvaluator:
+    """Deterministic check kind: ``start-date-freshness``."""
+
+    policy_id = "AIR-DET-007"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(StartDateFreshnessConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        current_year = datetime.now(UTC).year
+        for model in context.models:
+            for dag in model.dags:
+                if dag.start_date is None:
+                    continue
+                year, month, day = dag.start_date
+                naive = dag.start_date_tz is False
+                stale = (current_year - year) > configuration.max_age_years
+                if not stale and not (naive and configuration.require_timezone):
+                    continue
+                problems: list[str] = []
+                if stale:
+                    problems.append(
+                        f"start_date {year:04d}-{month:02d}-{day:02d} is older than "
+                        f"{configuration.max_age_years} year(s)"
+                    )
+                if naive and configuration.require_timezone:
+                    problems.append("start_date has no timezone")
+                anchor = f"dag:{dag.variable_name or dag.line}:start_date"
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        dag.line,
+                        FindingStatus.FAIL,
+                        "; ".join(problems),
+                        anchor,
+                        fix_payload=RemediationPayload(
+                            fix_kind="start-date-freshness",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(dag.line, dag.variable_name, "dag-call"),
+                            hint="move start_date to a recent timezone-aware date "
+                            "(e.g. pendulum.datetime(..., tz='UTC'))",
+                        ),
+                    )
+                )
+        return findings
+
+
+class CatchupPolicyEvaluator:
+    """Deterministic check kind: ``catchup-policy``."""
+
+    policy_id = "AIR-DET-008"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(CatchupPolicyConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for dag in model.dags:
+                if dag.catchup is not True or configuration.allow_catchup:
+                    continue
+                anchor = f"dag:{dag.variable_name or dag.line}:catchup"
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        dag.line,
+                        FindingStatus.FAIL,
+                        f"catchup is enabled for {dag.variable_name or 'dag'}; with a stale "
+                        "start_date this schedules every missed interval (backfill bomb)",
+                        anchor,
+                        fix_payload=RemediationPayload(
+                            fix_kind="catchup-policy",
+                            action=RemediationAction.SET_KWARG,
+                            kwarg="catchup",
+                            target=fix_target(dag.line, dag.variable_name, "dag-call"),
+                            value="False",
+                            hint="sets catchup=False on the DAG call",
+                        ),
+                    )
+                )
+        return findings
+
+
+class ModuleScopeVariablesEvaluator:
+    """Deterministic check kind: ``module-scope-variables``."""
+
+    policy_id = "AIR-DET-009"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(ModuleScopeVariablesConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for call in model.calls:
+                if not call.module_scope:
+                    continue
+                if not any(call.qualified_name == pattern for pattern in configuration.patterns):
+                    continue
+                anchor = f"call:{call.qualified_name}:{call.line}"
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        call.line,
+                        FindingStatus.FAIL,
+                        f"top-level {call.qualified_name}() hits the metadata database on every scheduler parse cycle",
+                        anchor,
+                        fix_payload=RemediationPayload(
+                            fix_kind="module-scope-variables",
+                            action=RemediationAction.MOVE_STATEMENT,
+                            target=fix_target(call.line, call.qualified_name, "statement"),
+                            hint="move the variable access into a task body, or use a {{ var.value.* }} Jinja template",
+                        ),
+                    )
+                )
+        return findings
+
+
+class SensitiveLoggingEvaluator:
+    """Deterministic check kind: ``sensitive-logging`` (hardcoded secrets)."""
+
+    policy_id = "AIR-DET-010"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(SensitiveLoggingConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for constant in model.constants:
+                if not isinstance(constant.value, str):
+                    continue
+                looks_secret = secret_like(constant.name) or any(
+                    pattern.lower() in constant.name.lower() for pattern in configuration.secret_patterns
+                )
+                if not looks_secret:
+                    continue
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        constant.line,
+                        FindingStatus.FAIL,
+                        f"module-scope constant {constant.name!r} looks like a hardcoded credential",
+                        anchor=f"secret:{constant.name}:{constant.line}",
+                        fix_payload=RemediationPayload(
+                            fix_kind="sensitive-logging",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(constant.line, constant.name, "statement"),
+                            hint="move the value into an Airflow Connection or a secrets "
+                            "backend; never commit credentials",
+                        ),
+                    )
+                )
+        return findings
+
+
+class DynamicDagFactoryEvaluator:
+    """Deterministic check kind: ``dynamic-dag-factory`` (loop-generated DAGs)."""
+
+    policy_id = "AIR-DET-011"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(DynamicDagFactoryConfig, context.policy.configuration)
+        if configuration.allow:
+            return []
+        findings: list[Finding] = []
+        for model in context.models:
+            for line in model.dynamic_dag_lines:
+                anchor = f"dynamic-dag:{model.source.relative_path}:{line}"
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        line,
+                        FindingStatus.FAIL,
+                        "module-scope loop generates DAGs; per Airflow best practices "
+                        "this slows fleet-wide parsing and multiplies scheduling load",
+                        anchor,
+                        fix_payload=RemediationPayload(
+                            fix_kind="dynamic-dag-factory",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(line, None, "statement"),
+                            hint="prefer dynamic task mapping, DAG bundles, or config-file "
+                            "generation committed to the repo",
+                        ),
+                    )
+                )
+        return findings
+
+
 CHECK_EVALUATORS: dict[str, DeterministicEvaluator] = {
     "effective-owner": OwnerEvaluator(),
     "tags": TagEvaluator(),
@@ -561,6 +760,11 @@ CHECK_EVALUATORS: dict[str, DeterministicEvaluator] = {
     "retry-bounds": RetryEvaluator(),
     "module-scope-io": TopLevelIOEvaluator(),
     "operator-allow-list": ForbiddenOperatorEvaluator(),
+    "start-date-freshness": StartDateFreshnessEvaluator(),
+    "catchup-policy": CatchupPolicyEvaluator(),
+    "module-scope-variables": ModuleScopeVariablesEvaluator(),
+    "sensitive-logging": SensitiveLoggingEvaluator(),
+    "dynamic-dag-factory": DynamicDagFactoryEvaluator(),
 }
 
 LEGACY_POLICY_EVALUATORS: dict[str, DeterministicEvaluator] = {

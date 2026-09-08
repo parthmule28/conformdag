@@ -58,6 +58,12 @@ class DagRecord:
     tags: tuple[str, ...]
     variable_name: str | None = None
     defaults: dict[str, object] = field(default_factory=_empty_defaults)
+    start_date: tuple[int, int, int] | None = None
+    start_date_tz: bool | None = None
+    catchup: bool | None = None
+    schedule: str | None = None
+    max_active_runs: int | None = None
+    factory_function: str | None = None
 
 
 @dataclass
@@ -67,6 +73,43 @@ class TaskRecord:
     task_id: str | None
     dag_name: str | None
     values: dict[str, object]
+    taskflow: bool = False
+
+
+def _empty_secrets() -> list[SecretAssignment]:
+    return []
+
+
+def _empty_constants() -> list[ConstantAssignment]:
+    return []
+
+
+def _empty_dynamic_loops() -> list[int]:
+    return []
+
+
+@dataclass(frozen=True)
+class ConstantAssignment:
+    """A module-scope constant assignment: name, value, and line."""
+
+    line: int
+    name: str
+    value: object
+
+
+@dataclass(frozen=True)
+class SecretAssignment:
+    """A module-scope assignment whose name looks like a credential holder."""
+
+    line: int
+    name: str
+
+
+def secret_like(name: str) -> bool:
+    lowered = name.lower()
+    return any(
+        marker in lowered for marker in ("password", "passwd", "token", "secret", "api_key", "apikey", "credential")
+    )
 
 
 def _empty_imports() -> list[ImportRecord]:
@@ -97,6 +140,9 @@ class SourceModel:
     dags: list[DagRecord] = field(default_factory=_empty_dags)
     tasks: list[TaskRecord] = field(default_factory=_empty_tasks)
     assignments: dict[str, object] = field(default_factory=_empty_assignments)
+    constants: list[ConstantAssignment] = field(default_factory=_empty_constants)
+    secret_assignments: list[SecretAssignment] = field(default_factory=_empty_secrets)
+    dynamic_dag_lines: list[int] = field(default_factory=_empty_dynamic_loops)
 
 
 def _matches(relative_path: str, patterns: tuple[str, ...]) -> bool:
@@ -175,6 +221,10 @@ class _ModelVisitor(ast.NodeVisitor):
         value = _literal_value(node.value)
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and value is not None:
             self.model.assignments[node.targets[0].id] = value
+            if self._function_depth == 0:
+                self.model.constants.append(ConstantAssignment(node.lineno, node.targets[0].id, value))
+                if isinstance(value, str) and secret_like(node.targets[0].id):
+                    self.model.secret_assignments.append(SecretAssignment(node.lineno, node.targets[0].id))
         if isinstance(node.value, ast.Call) and self._is_dag_call(node.value):
             variable_name = node.targets[0].id if isinstance(node.targets[0], ast.Name) else None
             for dag in reversed(self.model.dags):
@@ -183,14 +233,52 @@ class _ModelVisitor(ast.NodeVisitor):
                     break
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._function_depth += 1
+        self._enter_decorated_function(node)
         self.generic_visit(node)
         self._function_depth -= 1
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._function_depth += 1
+        self._enter_decorated_function(node)
         self.generic_visit(node)
         self._function_depth -= 1
+
+    def visit_For(self, node: ast.For) -> None:
+        if self._function_depth == 0:
+            for nested in ast.walk(node):
+                if isinstance(nested, ast.Call) and self._is_dag_call(nested):
+                    self.model.dynamic_dag_lines.append(node.lineno)
+                    break
+        self.generic_visit(node)
+
+    def _enter_decorated_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._check_taskflow_decorator(node)
+        self._function_depth += 1
+
+    def _check_taskflow_decorator(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        for decorator in node.decorator_list:
+            target = decorator.func if isinstance(decorator, ast.Call) else decorator
+            qualified_name = _qualified_name(target)
+            if qualified_name is None:
+                continue
+            leaf = qualified_name.rsplit(".", 1)[-1]
+            if leaf != "task":
+                continue
+            values: dict[str, object] = {}
+            if isinstance(decorator, ast.Call):
+                for keyword in decorator.keywords:
+                    if keyword.arg:
+                        values[keyword.arg] = _literal_value(keyword.value)
+            task_id = values.get("task_id")
+            self.model.tasks.append(
+                TaskRecord(
+                    line=node.lineno,
+                    qualified_name=node.name + " (taskflow)",
+                    task_id=task_id if isinstance(task_id, str) else node.name,
+                    dag_name=None,
+                    values=values,
+                    taskflow=True,
+                )
+            )
 
     def visit_Call(self, node: ast.Call) -> None:
         qualified_name = _qualified_name(node.func)
@@ -220,6 +308,11 @@ class _ModelVisitor(ast.NodeVisitor):
         owner_source: str | None = None
         tags: tuple[str, ...] = ()
         defaults: dict[str, object] = {}
+        start_date: tuple[int, int, int] | None = None
+        start_date_tz: bool | None = None
+        catchup: bool | None = None
+        schedule: str | None = None
+        max_active_runs: int | None = None
         for keyword in node.keywords:
             if (
                 keyword.arg == "owner"
@@ -238,7 +331,30 @@ class _ModelVisitor(ast.NodeVisitor):
                 resolved_tags = self._resolve_value(keyword.value)
                 if isinstance(resolved_tags, list):
                     tags = tuple(item for item in cast(list[object], resolved_tags) if isinstance(item, str))
-        return DagRecord(node.lineno, owner, owner_source, tags, defaults=defaults)
+            if keyword.arg == "start_date":
+                start_date, start_date_tz = _datetime_parts(keyword.value)
+            if keyword.arg == "catchup" and isinstance(keyword.value, ast.Constant):
+                catchup = bool(keyword.value.value)
+            if keyword.arg == "schedule" and isinstance(keyword.value, ast.Constant):
+                schedule = str(keyword.value.value)
+            if (
+                keyword.arg == "max_active_runs"
+                and isinstance(keyword.value, ast.Constant)
+                and isinstance(keyword.value.value, int)
+            ):
+                max_active_runs = keyword.value.value
+        return DagRecord(
+            node.lineno,
+            owner,
+            owner_source,
+            tags,
+            defaults=defaults,
+            start_date=start_date,
+            start_date_tz=start_date_tz,
+            catchup=catchup,
+            schedule=schedule,
+            max_active_runs=max_active_runs,
+        )
 
     def _task_record(self, node: ast.Call, qualified_name: str) -> TaskRecord:
         values: dict[str, object] = {}
@@ -301,6 +417,26 @@ def _literal_value(node: ast.AST) -> object:
             total += float(value) * multiplier
         return total
     return None
+
+
+def _datetime_parts(node: ast.AST) -> tuple[tuple[int, int, int] | None, bool | None]:
+    """Extract (year, month, day) and timezone-awareness from a date expression.
+
+    Understands ``datetime(y, m, d)`` / ``pendulum.datetime(...)`` calls (with
+    an optional tz keyword marking awareness) and ISO ``"YYYY-MM-DD"`` strings.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        parts = node.value.split("-")
+        if len(parts) == 3 and all(part.strip().isdigit() for part in parts):
+            return (int(parts[0]), int(parts[1]), int(parts[2])), False
+        return None, None
+    if not isinstance(node, ast.Call):
+        return None, None
+    args = [cast("int", _literal_value(arg)) for arg in node.args[:3]]
+    if len(args) < 3 or any(arg < 0 for arg in args):
+        return None, None
+    has_tz = any(keyword.arg in {"tz", "tzinfo"} for keyword in node.keywords)
+    return (args[0], args[1], args[2]), has_tz
 
 
 def analyze_source(source: SourceFile, cache: ParseCache | None = None) -> tuple[SourceModel | None, ParseIssue | None]:

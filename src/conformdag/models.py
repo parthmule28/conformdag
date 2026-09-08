@@ -181,6 +181,27 @@ class SensitiveLoggingConfig(ConformModel):
     logging_calls: list[str] = Field(default_factory=lambda: [])
 
 
+class StartDateFreshnessConfig(ConformModel):
+    kind: Literal["start-date-freshness"] = "start-date-freshness"
+    max_age_years: int = Field(default=2, ge=1)
+    require_timezone: bool = True
+
+
+class CatchupPolicyConfig(ConformModel):
+    kind: Literal["catchup-policy"] = "catchup-policy"
+    allow_catchup: bool = False
+
+
+class ModuleScopeVariablesConfig(ConformModel):
+    kind: Literal["module-scope-variables"] = "module-scope-variables"
+    patterns: list[str] = Field(default_factory=lambda: ["Variable.get"])
+
+
+class DynamicDagFactoryConfig(ConformModel):
+    kind: Literal["dynamic-dag-factory"] = "dynamic-dag-factory"
+    allow: bool = False
+
+
 class ApprovedAbstractionsConfig(ConformModel):
     kind: Literal["approved-abstractions"] = "approved-abstractions"
     abstractions: dict[str, str] = Field(default_factory=lambda: {})
@@ -196,7 +217,11 @@ PolicyConfiguration = Annotated[
     | IdempotenceConfig
     | OrchestrationBoundaryConfig
     | SensitiveLoggingConfig
-    | ApprovedAbstractionsConfig,
+    | ApprovedAbstractionsConfig
+    | StartDateFreshnessConfig
+    | CatchupPolicyConfig
+    | ModuleScopeVariablesConfig
+    | DynamicDagFactoryConfig,
     Field(discriminator="kind"),
 ]
 
