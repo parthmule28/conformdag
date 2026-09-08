@@ -27,6 +27,42 @@
       "title": "ApprovedAbstractionsConfig",
       "type": "object"
     },
+    "CatchupPolicyConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_catchup": {
+          "default": false,
+          "title": "Allow Catchup",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "catchup-policy",
+          "default": "catchup-policy",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "CatchupPolicyConfig",
+      "type": "object"
+    },
+    "DynamicDagFactoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "default": false,
+          "title": "Allow",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "dynamic-dag-factory",
+          "default": "dynamic-dag-factory",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "DynamicDagFactoryConfig",
+      "type": "object"
+    },
     "EnforcementConfig": {
       "additionalProperties": false,
       "properties": {
@@ -199,6 +235,26 @@
       "title": "LifecycleStatus",
       "type": "string"
     },
+    "ModuleScopeVariablesConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "module-scope-variables",
+          "default": "module-scope-variables",
+          "title": "Kind",
+          "type": "string"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
+        }
+      },
+      "title": "ModuleScopeVariablesConfig",
+      "type": "object"
+    },
     "OperatorRule": {
       "additionalProperties": false,
       "properties": {
@@ -364,14 +420,18 @@
           "discriminator": {
             "mapping": {
               "approved-abstractions": "#/$defs/ApprovedAbstractionsConfig",
+              "catchup-policy": "#/$defs/CatchupPolicyConfig",
+              "dynamic-dag-factory": "#/$defs/DynamicDagFactoryConfig",
               "execution-timeout": "#/$defs/ExecutionTimeoutConfig",
               "forbidden-operators": "#/$defs/ForbiddenOperatorsConfig",
               "idempotence": "#/$defs/IdempotenceConfig",
+              "module-scope-variables": "#/$defs/ModuleScopeVariablesConfig",
               "orchestration-boundary": "#/$defs/OrchestrationBoundaryConfig",
               "required-owner": "#/$defs/RequiredOwnerConfig",
               "required-tags": "#/$defs/RequiredTagsConfig",
               "retry-bounds": "#/$defs/RetryBoundsConfig",
               "sensitive-logging": "#/$defs/SensitiveLoggingConfig",
+              "start-date-freshness": "#/$defs/StartDateFreshnessConfig",
               "top-level-io": "#/$defs/TopLevelIOConfig"
             },
             "propertyName": "kind"
@@ -406,6 +466,18 @@
             },
             {
               "$ref": "#/$defs/ApprovedAbstractionsConfig"
+            },
+            {
+              "$ref": "#/$defs/StartDateFreshnessConfig"
+            },
+            {
+              "$ref": "#/$defs/CatchupPolicyConfig"
+            },
+            {
+              "$ref": "#/$defs/ModuleScopeVariablesConfig"
+            },
+            {
+              "$ref": "#/$defs/DynamicDagFactoryConfig"
             }
           ],
           "title": "Configuration"
@@ -684,6 +756,30 @@
       ],
       "title": "Severity",
       "type": "string"
+    },
+    "StartDateFreshnessConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "start-date-freshness",
+          "default": "start-date-freshness",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_age_years": {
+          "default": 2,
+          "minimum": 1,
+          "title": "Max Age Years",
+          "type": "integer"
+        },
+        "require_timezone": {
+          "default": true,
+          "title": "Require Timezone",
+          "type": "boolean"
+        }
+      },
+      "title": "StartDateFreshnessConfig",
+      "type": "object"
     },
     "TopLevelIOConfig": {
       "additionalProperties": false,

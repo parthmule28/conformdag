@@ -23,6 +23,7 @@ from conformdag.platform.db import (
     new_id,
     utcnow,
 )
+from conformdag.platform.packs import PackError, PackService
 from conformdag.platform.workspace import load_workspace
 from conformdag.reporting import render_html, render_sarif
 
@@ -61,6 +62,21 @@ class WorkspaceLoadRequest(BaseModel):
     """Optional explicit path of the workspace file to register."""
 
     path: str | None = None
+
+
+class PolicyUpsertRequest(BaseModel):
+    """Payload for creating or updating a policy in a pack."""
+
+    title: str
+    version: str
+    status: str
+    severity: str
+    check_kind: str
+    check_config: dict[str, Any]
+    source_document: str
+    source_section: str
+    invariant: str
+    safe_path: str | None = None
 
 
 class SuppressionCreate(BaseModel):
@@ -308,6 +324,7 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     app = FastAPI(title="ConformDAG Platform", version="1")
     app.state.session_factory = session_factory
     app.state.settings = settings
+    app.state.pack_service = PackService()
 
     app.get(API_PREFIX + "/health")(_health)
     app.post(API_PREFIX + "/repos", dependencies=[Depends(require_admin)])(register_repository)
@@ -323,10 +340,57 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     app.get(API_PREFIX + "/suppressions")(list_suppressions)
     app.post(API_PREFIX + "/suppressions", dependencies=[Depends(require_admin)])(create_suppression)
     app.patch(API_PREFIX + "/suppressions/{suppression_id}", dependencies=[Depends(require_admin)])(update_suppression)
+
+    app.get(API_PREFIX + "/packs")(_pack_list)
+    app.get(API_PREFIX + "/packs/{pack_name}/policies")(_pack_policies)
+    app.put(API_PREFIX + "/packs/{pack_name}/policies/{policy_id}", dependencies=[Depends(require_admin)])(
+        _pack_upsert_policy
+    )
+    app.delete(API_PREFIX + "/packs/{pack_name}/policies/{policy_id}", dependencies=[Depends(require_admin)])(
+        _pack_delete_policy
+    )
+    app.post(API_PREFIX + "/packs/{pack_name}/validate", dependencies=[Depends(require_admin)])(_pack_validate)
+
     app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "DELETE"])(_api_fallback)
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
+
+
+def _pack_list(request: Request) -> list[dict[str, Any]]:
+    service: PackService = request.app.state.pack_service
+    return service.list_packs()
+
+
+def _pack_policies(request: Request, pack_name: str) -> list[dict[str, Any]]:
+    service: PackService = request.app.state.pack_service
+    try:
+        return service.list_policies(pack_name)
+    except PackError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _pack_upsert_policy(request: Request, pack_name: str, policy_id: str, payload: dict[str, Any]) -> dict[str, str]:
+    service: PackService = request.app.state.pack_service
+    try:
+        service.upsert_policy(pack_name, policy_id, payload)
+    except PackError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "saved", "policy_id": policy_id}
+
+
+def _pack_delete_policy(request: Request, pack_name: str, policy_id: str) -> dict[str, str]:
+    service: PackService = request.app.state.pack_service
+    try:
+        service.delete_policy(pack_name, policy_id)
+    except PackError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "deleted", "policy_id": policy_id}
+
+
+def _pack_validate(request: Request, pack_name: str) -> dict[str, Any]:
+    service: PackService = request.app.state.pack_service
+    return service.validate_pack(pack_name)
 
 
 def _api_fallback(rest: str) -> dict[str, str]:

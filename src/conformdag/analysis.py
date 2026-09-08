@@ -332,7 +332,7 @@ class _ModelVisitor(ast.NodeVisitor):
                 if isinstance(resolved_tags, list):
                     tags = tuple(item for item in cast(list[object], resolved_tags) if isinstance(item, str))
             if keyword.arg == "start_date":
-                start_date, start_date_tz = _datetime_parts(keyword.value)
+                start_date, start_date_tz = datetime_parts(keyword.value)
             if keyword.arg == "catchup" and isinstance(keyword.value, ast.Constant):
                 catchup = bool(keyword.value.value)
             if keyword.arg == "schedule" and isinstance(keyword.value, ast.Constant):
@@ -419,7 +419,7 @@ def _literal_value(node: ast.AST) -> object:
     return None
 
 
-def _datetime_parts(node: ast.AST) -> tuple[tuple[int, int, int] | None, bool | None]:
+def datetime_parts(node: ast.AST) -> tuple[tuple[int, int, int] | None, bool | None]:
     """Extract (year, month, day) and timezone-awareness from a date expression.
 
     Understands ``datetime(y, m, d)`` / ``pendulum.datetime(...)`` calls (with
