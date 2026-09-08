@@ -111,3 +111,59 @@ export function updateSuppression(
 export function exportUrl(scanId: string, format: "sarif" | "html" | "json"): string {
   return `${BASE}/scans/${scanId}/export/${format}`;
 }
+
+export interface PackSummary {
+  name: string;
+  path: string;
+  id: string | null;
+  version: string | null;
+  policy_count: number;
+  error: string | null;
+}
+
+export interface PolicyInfo {
+  id: string;
+  title: string;
+  version: string;
+  status: string;
+  severity: string;
+  check_kind: string;
+  check_config: Record<string, unknown>;
+  source_document: string;
+  source_section: string;
+}
+
+export function listPacks(): Promise<PackSummary[]> {
+  return request<PackSummary[]>("/packs");
+}
+
+export function listPackPolicies(packName: string): Promise<PolicyInfo[]> {
+  return request<PolicyInfo[]>(`/packs/${packName}/policies`);
+}
+
+export function upsertPolicy(
+  packName: string,
+  policyId: string,
+  payload: Record<string, unknown>,
+): Promise<{ status: string }> {
+  return request(`/packs/${packName}/policies/${policyId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deletePolicy(packName: string, policyId: string): Promise<{ status: string }> {
+  return request(`/packs/${packName}/policies/${policyId}`, { method: "DELETE" });
+}
+
+export function updatePolicy(
+  packName: string,
+  policyId: string,
+  payload: Record<string, unknown>,
+): Promise<{ status: string }> {
+  return upsertPolicy(packName, policyId, payload);
+}
+
+export function validatePack(packName: string): Promise<{ valid: boolean; errors: string[] }> {
+  return request(`/packs/${packName}/validate`, { method: "POST" });
+}

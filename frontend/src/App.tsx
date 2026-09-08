@@ -4,78 +4,110 @@ import { useState, type FormEvent } from "react";
 import {
   adminToken,
   createSuppression,
-  exportUrl,
+  deletePolicy,
   findings,
+  listPackPolicies,
+  listPacks,
   listRepositories,
   listSuppressions,
   scanHistory,
   setAdminToken,
   triggerScan,
+  updatePolicy,
   updateSuppression,
+  validatePack,
   type Finding,
+  type PackSummary,
+  type PolicyInfo,
   type Repository,
   type ScanSummary,
-  type Suppression,
 } from "./api";
 
 const queryClient = new QueryClient();
 
+type Page = "repos" | "policies" | "suppressions";
+
 function App() {
+  const [page, setPage] = useState<Page>("repos");
   const [token, setToken] = useState(adminToken() ?? "");
   return (
     <QueryClientProvider client={queryClient}>
-      <main className="mx-auto max-w-5xl p-8">
-        <h1 className="mb-2 text-2xl font-semibold">ConformDAG Platform</h1>
-        <TokenBar token={token} onSet={(next) => { setAdminToken(next); setToken(next); }} />
-        <SuppressionsPanel />
-        <h2 className="mt-8 mb-2 text-xl font-semibold">Repositories</h2>
-        <RepositoryList />
-      </main>
+      <div className="min-h-screen bg-gray-950 text-gray-100">
+        <header className="border-b border-gray-800 px-6 py-3">
+          <div className="mx-auto flex max-w-6xl items-center justify-between">
+            <h1 className="text-lg font-semibold text-gray-100">ConformDAG Platform</h1>
+            <nav className="flex items-center gap-1">
+              {(["repos", "policies", "suppressions"] as Page[]).map((item) => (
+                <button
+                  key={item}
+                  className={`rounded px-3 py-1.5 text-sm capitalize ${
+                    page === item
+                      ? "bg-blue-600 text-white"
+                      : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+                  }`}
+                  onClick={() => setPage(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            </nav>
+            <TokenInput token={token} onSet={(next) => { setAdminToken(next); setToken(next); }} />
+          </div>
+        </header>
+        <main className="mx-auto max-w-6xl p-6">
+          {page === "repos" && <RepositoriesPage />}
+          {page === "policies" && <PoliciesPage />}
+          {page === "suppressions" && <SuppressionsPage />}
+        </main>
+      </div>
     </QueryClientProvider>
   );
 }
 
-function TokenBar({ token, onSet }: { token: string; onSet: (token: string) => void }) {
+function TokenInput({ token, onSet }: { token: string; onSet: (token: string) => void }) {
+  if (token) {
+    return (
+      <span className="text-xs text-gray-500">
+        admin authenticated
+        <button className="ml-2 text-blue-400 hover:underline" onClick={() => onSet("")}>
+          clear
+        </button>
+      </span>
+    );
+  }
   return (
     <form
-      className="mb-6 flex items-center gap-2"
-      onSubmit={(event: FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
-        const input = event.currentTarget.elements.namedItem("admin-token") as HTMLInputElement;
+      onSubmit={(e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        const input = e.currentTarget.elements.namedItem("admin-token") as HTMLInputElement;
         onSet(input.value);
       }}
+      className="flex items-center gap-2"
     >
       <input
-        className="rounded border border-gray-300 px-2 py-1 text-sm"
+        className="w-48 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-sm text-gray-200 placeholder-gray-500"
         type="password"
         name="admin-token"
-        placeholder="Admin token (kept in this tab only)"
-        defaultValue={token}
+        placeholder="Admin token…"
       />
-      <button className="rounded bg-gray-700 px-3 py-1 text-sm text-white hover:bg-gray-800">
+      <button className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700">
         Save
       </button>
-      <span className="text-sm text-gray-500">
-        Required for scans, suppressions, and workspace registration
-      </span>
     </form>
   );
 }
 
-function RepositoryList() {
-  const repositories = useQuery({ queryKey: ["repos"], queryFn: listRepositories });
+/* ─── Repositories ──────────────────────────────────────────────── */
 
-  if (repositories.isLoading) {
-    return <p className="text-gray-500">Loading repositories…</p>;
-  }
-  if (repositories.isError) {
-    return <p className="text-red-600">Failed to load repositories.</p>;
-  }
+function RepositoriesPage() {
+  const repositories = useQuery({ queryKey: ["repos"], queryFn: listRepositories });
   return (
     <div className="grid gap-4">
       {(repositories.data ?? []).map((repository: Repository) => (
         <RepositoryCard key={repository.id} repository={repository} />
       ))}
+      {repositories.isPending && <LoadingBanner text="Loading packs…" />}
+      {repositories.isError && <ErrorBanner message="Failed to load repositories." />}
     </div>
   );
 }
@@ -85,17 +117,15 @@ function RepositoryCard({ repository }: { repository: Repository }) {
     queryKey: ["scans", repository.id],
     queryFn: () => scanHistory(repository.id),
     refetchInterval: (query) => {
-      const statuses = query.state.data?.map((scan: ScanSummary) => scan.status) ?? [];
-      const active = statuses.some((status) => status === "queued" || status === "running");
-      return active ? 2000 : false;
+      const scans = query.state.data ?? [];
+      return scans.some((s) => s.status === "queued" || s.status === "running") ? 2000 : false;
     },
   });
-  const scans = history.data ?? [];
-  const latest = scans[0];
+  const latest = history.data?.[0];
   const latestFindings = useQuery({
     queryKey: ["findings", latest?.scan_id],
     queryFn: () => (latest ? findings(latest.scan_id, "fail") : Promise.resolve([])),
-    enabled: latest !== undefined && latest.status === "succeeded",
+    enabled: latest?.status === "succeeded",
   });
   const trigger = useMutation({
     mutationFn: () => triggerScan(repository.id),
@@ -103,15 +133,14 @@ function RepositoryCard({ repository }: { repository: Repository }) {
   });
 
   return (
-    <section className="rounded-lg border border-gray-200 p-4">
+    <section className="rounded-lg border border-gray-800 bg-gray-900 p-4">
       <header className="flex items-center justify-between">
         <div>
-          <h3 className="font-medium">{repository.name}</h3>
+          <h2 className="font-medium text-gray-100">{repository.name}</h2>
           <p className="text-sm text-gray-500">{repository.path}</p>
-          {repository.policy_pack && <p className="text-xs text-gray-400">pack: {repository.policy_pack}</p>}
         </div>
         <button
-          className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700 disabled:opacity-50"
+          className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
           disabled={trigger.isPending}
           onClick={() => trigger.mutate()}
         >
@@ -119,50 +148,54 @@ function RepositoryCard({ repository }: { repository: Repository }) {
         </button>
       </header>
 
-      {trigger.isError && <p className="mt-2 text-sm text-red-600">Trigger failed — is the admin token set?</p>}
-
-      <ScanHistoryList scans={scans} />
-      {latest?.status === "succeeded" && (
-        <ExportButtons scanId={latest.scan_id} />
+      {trigger.isError && <ErrorBanner message="Trigger failed — check the admin token." />}
+      {latest && (
+        <p className="mt-2 text-sm text-gray-400">
+          Latest scan: <strong className="text-gray-200">{latest.status}</strong>
+          {latest.result_fingerprint && (
+            <code className="ml-2 text-xs text-gray-600">
+              {latest.result_fingerprint.slice(0, 12)}
+            </code>
+          )}
+        </p>
       )}
-      <FindingsList
-        scanId={latest?.scan_id ?? null}
-        state={latestFindings}
-      />
+      <ScanHistoryList scans={history.data ?? []} />
+      {latest?.status === "succeeded" && <ExportButtons scanId={latest.scan_id} />}
+      <FindingsList scanId={latest?.scan_id ?? null} state={latestFindings} />
     </section>
   );
 }
 
 function ScanHistoryList({ scans }: { scans: ScanSummary[] }) {
-  const recent = scans.slice(0, 5);
   if (scans.length === 0) {
-    return <p className="mt-2 text-sm text-gray-500">No scans yet.</p>;
+    return <p className="mt-2 text-sm text-gray-600">No scans yet.</p>;
   }
+  const recent = scans.slice(0, 5);
   return (
-    <ul className="mt-3 space-y-1 text-sm">
+    <div className="mt-3 space-y-1 text-sm">
       {recent.map((scan) => (
-        <li key={scan.scan_id} className="flex items-center gap-3">
+        <div key={scan.scan_id} className="flex items-center gap-3">
           <StatusBadge status={scan.status} />
           <span className="text-gray-500">{new Date(scan.created_at).toLocaleString()}</span>
           {scan.result_fingerprint && (
-            <code className="text-xs text-gray-400">{scan.result_fingerprint.slice(0, 12)}</code>
+            <code className="text-xs text-gray-600">{scan.result_fingerprint.slice(0, 12)}</code>
           )}
-        </li>
+        </div>
       ))}
       {scans.length > recent.length && (
-        <li className="text-xs text-gray-400">{scans.length - recent.length} older scan(s) in history</li>
+        <p className="text-xs text-gray-600">{scans.length - recent.length} older scan(s) in history</p>
       )}
-    </ul>
+    </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
   const color =
     status === "succeeded"
-      ? "bg-green-100 text-green-800"
+      ? "bg-green-900 text-green-300"
       : status === "failed" || status === "cancelled"
-        ? "bg-red-100 text-red-800"
-        : "bg-amber-100 text-amber-800";
+        ? "bg-red-900 text-red-300"
+        : "bg-amber-900 text-amber-300";
   return <span className={`rounded px-2 py-0.5 text-xs font-medium ${color}`}>{status}</span>;
 }
 
@@ -172,11 +205,11 @@ function ExportButtons({ scanId }: { scanId: string }) {
       {(["sarif", "html", "json"] as const).map((format) => (
         <a
           key={format}
-          className="rounded border border-gray-300 px-2 py-1 hover:bg-gray-50"
-          href={exportUrl(scanId, format)}
+          className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
+          href={`/api/v1/scans/${scanId}/export/${format}`}
           download={`conformdag-report.${format}`}
         >
-          Export {format.toUpperCase()}
+          {format.toUpperCase()}
         </a>
       ))}
     </div>
@@ -197,21 +230,21 @@ function FindingsList({ scanId, state }: { scanId: string | null; state: Finding
   const rows = state.data ?? [];
   return (
     <div className="mt-3">
-      <h4 className="text-sm font-medium">Failing findings ({rows.length})</h4>
-      {rows.length === 0 && <p className="text-sm text-green-700">No failing findings.</p>}
+      <h4 className="text-sm font-medium text-gray-300">Failing findings ({rows.length})</h4>
+      {rows.length === 0 && <p className="text-sm text-green-500">No failing findings.</p>}
       <ul className="mt-1 space-y-1 text-sm">
         {rows.map((finding) => (
           <li key={finding.fingerprint} className="flex items-start justify-between gap-2">
             <div>
-              <span className="font-mono text-xs">{finding.policy_id}</span>{" "}
-              <span className="text-gray-700">
+              <span className="font-mono text-xs text-gray-500">{finding.policy_id}</span>{" "}
+              <span className="text-gray-300">
                 {finding.file_path}
                 {finding.start_line ? `:${finding.start_line}` : ""}
               </span>
               <p className="text-gray-500">{finding.explanation}</p>
             </div>
             <button
-              className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50"
+              className="shrink-0 rounded border border-gray-700 px-2 py-0.5 text-xs text-gray-300 hover:bg-gray-800"
               onClick={() => setPrefill(finding)}
             >
               Suppress…
@@ -219,12 +252,7 @@ function FindingsList({ scanId, state }: { scanId: string | null; state: Finding
           </li>
         ))}
       </ul>
-      {prefill && (
-        <SuppressionForm
-          prefill={prefill}
-          onClose={() => setPrefill(null)}
-        />
-      )}
+      {prefill && <SuppressionForm prefill={prefill} onClose={() => setPrefill(null)} />}
     </div>
   );
 }
@@ -232,7 +260,7 @@ function FindingsList({ scanId, state }: { scanId: string | null; state: Finding
 function SuppressionForm({ prefill, onClose }: { prefill: Finding; onClose: () => void }) {
   const [reason, setReason] = useState("");
   const [owner, setOwner] = useState("");
-  const [expires, setExpires] = useState("2027-01-01T00:00:00Z");
+  const [expires, setExpires] = useState("2027-01-01");
   const create = useMutation({
     mutationFn: () =>
       createSuppression({
@@ -240,7 +268,7 @@ function SuppressionForm({ prefill, onClose }: { prefill: Finding; onClose: () =
         fingerprint: prefill.fingerprint,
         reason,
         owner,
-        expires_at: expires,
+        expires_at: `${expires}T00:00:00Z`,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["suppressions"] });
@@ -249,101 +277,234 @@ function SuppressionForm({ prefill, onClose }: { prefill: Finding; onClose: () =
   });
   return (
     <form
-      className="mt-2 grid gap-2 rounded border border-amber-200 bg-amber-50 p-3 text-sm"
-      onSubmit={(event) => {
-        event.preventDefault();
+      className="mt-2 grid gap-2 rounded border border-amber-800 bg-amber-950 p-3 text-sm"
+      onSubmit={(e) => {
+        e.preventDefault();
         create.mutate();
       }}
     >
-      <p>
+      <p className="text-amber-300">
         Suppress <strong>{prefill.policy_id}</strong> {prefill.file_path}
-        {prefill.start_line ? `:${prefill.start_line}` : ""} — requires admin token.
+        {prefill.start_line ? `:${prefill.start_line}` : ""}
       </p>
-      <input className="rounded border px-2 py-1" placeholder="Reason" value={reason} onChange={(e) => setReason(e.target.value)} required />
-      <input className="rounded border px-2 py-1" placeholder="Owner" value={owner} onChange={(e) => setOwner(e.target.value)} required />
-      <input className="rounded border px-2 py-1" type="datetime-local" value={expires} onChange={(e) => setExpires(e.target.value)} />
+      <input className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200" placeholder="Reason" value={reason} onChange={(e) => setReason(e.target.value)} required />
+      <input className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200" placeholder="Owner" value={owner} onChange={(e) => setOwner(e.target.value)} required />
+      <input className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} />
       <div className="flex gap-2">
         <button className="rounded bg-amber-600 px-3 py-1 text-white hover:bg-amber-700 disabled:opacity-50" disabled={create.isPending}>
-          {create.isPending ? "Creating…" : "Create suppression"}
+          {create.isPending ? "Creating…" : "Create"}
         </button>
-        <button type="button" className="rounded border px-3 py-1" onClick={onClose}>
+        <button type="button" className="rounded border border-gray-700 px-3 py-1 text-gray-300" onClick={onClose}>
           Cancel
         </button>
       </div>
-      {create.isError && <p className="text-red-600">Creation failed — check the admin token.</p>}
+      {create.isError && <p className="text-red-400">Creation failed — check the admin token.</p>}
     </form>
   );
 }
 
-function SuppressionsPanel() {
+/* ─── Policies ─────────────────────────────────────────────────── */
+
+function PoliciesPage() {
+  const packs = useQuery({ queryKey: ["packs"], queryFn: listPacks });
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold text-gray-100">Policy Packs</h2>
+      {(packs.data ?? []).map((pack: PackSummary) => (
+        <PackEditor key={pack.name} pack={pack} />
+      ))}
+      {packs.isPending && <LoadingBanner text="Loading packs…" />}
+      {packs.isError && <ErrorBanner message="Failed to load packs." />}
+    </div>
+  );
+}
+
+function PackEditor({ pack }: { pack: PackSummary }) {
+  const [expanded, setExpanded] = useState(false);
+  const policies = useQuery({
+    queryKey: ["policies", pack.name],
+    queryFn: () => listPackPolicies(pack.name),
+    enabled: expanded,
+  });
+  const validation = useMutation({
+    mutationFn: () => validatePack(pack.name),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["policies", pack.name] }),
+  });
+
+  return (
+    <section className="rounded-lg border border-gray-800 bg-gray-900 p-4">
+      <header className="flex items-center justify-between">
+        <div>
+          <h3 className="font-medium text-gray-100">{pack.name}</h3>
+          <p className="text-sm text-gray-500">
+            {pack.version ?? "?"} · {pack.policy_count} policies · {pack.path}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "Collapse" : "Manage"}
+          </button>
+          <button
+            className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
+            onClick={() => validation.mutate()}
+          >
+            Validate
+          </button>
+        </div>
+      </header>
+      {pack.error && <ErrorBanner message={pack.error} />}
+      {validation.isSuccess && (
+        <p className={`mt-2 text-sm ${validation.data.valid ? "text-green-500" : "text-red-500"}`}>
+          {validation.data.valid ? "✓ Pack is valid" : `✗ ${validation.data.errors.join("; ")}`}
+        </p>
+      )}
+      {expanded && (
+        <div className="mt-3">
+          {(policies.data ?? []).map((policy: PolicyInfo) => (
+            <PolicyEditor key={policy.id} packName={pack.name} policy={policy} />
+          ))}
+          {policies.isPending && <LoadingBanner text="Loading policies…" />}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PolicyEditor({ packName, policy }: { packName: string; policy: PolicyInfo }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(policy);
+  const save = useMutation({
+    mutationFn: () =>
+      updatePolicy(packName, policy.id, {
+        title: draft.title,
+        version: draft.version,
+        status: draft.status,
+        severity: draft.severity,
+        check_kind: draft.check_kind,
+        check_config: draft.check_config,
+        source_document: draft.source_document,
+        source_section: draft.source_section,
+        invariant: draft.check_config?.invariant as string | undefined ?? "No invariant set",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["policies", packName] });
+      setEditing(false);
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => deletePolicy(packName, policy.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["policies", packName] }),
+  });
+
+  if (editing) {
+    return (
+      <div className="mt-2 rounded border border-blue-800 bg-blue-950 p-3 text-sm">
+        <input className="mb-2 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+        <textarea className="mb-2 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1 font-mono text-xs text-gray-200" rows={3} value={JSON.stringify(draft.check_config, null, 2)} onChange={(e) => { try { setDraft({ ...draft, check_config: JSON.parse(e.target.value) }); } catch { /* keep raw while editing */ } }} />
+        <div className="flex gap-2">
+          <button className="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50" disabled={save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? "Saving…" : "Save"}
+          </button>
+          <button type="button" className="rounded border border-gray-700 px-3 py-1 text-gray-300" onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+        </div>
+        {save.isError && <p className="text-red-500">Save failed — check the admin token and pack path.</p>}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center justify-between rounded border border-gray-800 p-2 text-sm">
+      <div>
+        <span className="font-mono text-xs text-gray-500">{policy.id}</span>{" "}
+        <span className="text-gray-300">{policy.title}</span>
+        <span className="ml-2 rounded bg-gray-800 px-2 py-0.5 text-xs text-gray-400">{policy.check_kind}</span>
+        <p className="text-xs text-gray-600">{policy.source_document} · {policy.version}</p>
+      </div>
+      <div className="flex gap-1">
+        <button className="rounded border border-gray-700 px-2 py-0.5 text-xs hover:bg-gray-800" onClick={() => { setDraft(policy); setEditing(true); }}>
+          Edit
+        </button>
+        <button className="rounded border border-red-800 px-2 py-0.5 text-xs text-red-400 hover:bg-red-900" onClick={() => remove.mutate()}>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Suppressions ─────────────────────────────────────────────── */
+
+function SuppressionsPage() {
   const suppressions = useQuery({
     queryKey: ["suppressions"],
     queryFn: listSuppressions,
     refetchInterval: 15_000,
   });
   const rows = suppressions.data ?? [];
-
-  const editId = useMutation({
-    mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
-      updateSuppression(id, { reason }),
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftReason, setDraftReason] = useState("");
+  const edit = useMutation({
+    mutationFn: (input: { id: string; reason: string }) => updateSuppression(input.id, { reason: input.reason }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["suppressions"] }),
   });
-  const [editing, setEditing] = useState<Suppression | null>(null);
-  const [draftReason, setDraftReason] = useState("");
 
   return (
-    <section className="rounded-lg border border-gray-200 p-4">
-      <h2 className="text-xl font-semibold">Suppressions</h2>
-      <p className="text-sm text-gray-500">
-        Operational, audited exceptions owned by the platform. Pack-owned suppressions
-        live in git.
+    <section>
+      <h2 className="mb-2 text-lg font-semibold text-gray-100">Suppressions</h2>
+      <p className="mb-4 text-sm text-gray-500">
+        Operational, audited exceptions. Pack-owned suppressions live in git.
       </p>
-      {rows.length === 0 && <p className="mt-2 text-sm text-gray-500">No suppressions recorded.</p>}
-      <ul className="mt-2 space-y-2 text-sm">
+      {rows.length === 0 && <p className="text-sm text-gray-600">No suppressions recorded.</p>}
+      <div className="space-y-2">
         {rows.map((suppression) => (
-          <li key={suppression.id} className="rounded border border-gray-100 p-2">
+          <div key={suppression.id} className="rounded border border-gray-800 bg-gray-900 p-3 text-sm">
             <div className="flex items-center justify-between">
-              <div>
-                <span className="font-mono text-xs">{suppression.policy_id}</span>{" "}
-                <code className="text-xs text-gray-400">{suppression.fingerprint.slice(0, 12)}</code>{" "}
-                <span className="rounded bg-gray-100 px-2 py-0.5 text-xs">{suppression.source}</span>
-              </div>
+              <span className="font-mono text-xs text-gray-500">{suppression.policy_id}</span>
+              <span className="rounded bg-gray-800 px-2 py-0.5 text-xs text-gray-400">{suppression.source}</span>
               <button
-                className="rounded border px-2 py-0.5 text-xs hover:bg-gray-50"
-                onClick={() => {
-                  setEditing(suppression);
-                  setDraftReason(suppression.reason);
-                }}
+                className="rounded border border-gray-700 px-2 py-0.5 text-xs hover:bg-gray-800"
+                onClick={() => { setEditingId(suppression.id); setDraftReason(suppression.reason); }}
               >
-                Edit…
+                Edit
               </button>
             </div>
-            <p className="text-gray-600">{suppression.reason}</p>
-            <p className="text-xs text-gray-400">
+            <p className="mt-1 text-gray-300">{suppression.reason}</p>
+            <p className="text-xs text-gray-600">
               {suppression.owner} · expires {new Date(suppression.expires_at).toLocaleDateString()}
             </p>
-          </li>
+            {editingId === suppression.id && (
+              <form
+                className="mt-2 flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  edit.mutate({ id: suppression.id, reason: draftReason });
+                  setEditingId(null);
+                }}
+              >
+                <input className="flex-1 rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200" value={draftReason} onChange={(e) => setDraftReason(e.target.value)} />
+                <button className="rounded bg-blue-600 px-3 py-1 text-white">Save</button>
+              </form>
+            )}
+          </div>
         ))}
-      </ul>
-      {editing && (
-        <form
-          className="mt-2 flex gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            editId.mutate({ id: editing.id, reason: draftReason });
-            setEditing(null);
-          }}
-        >
-          <input
-            className="flex-1 rounded border px-2 py-1"
-            value={draftReason}
-            onChange={(e) => setDraftReason(e.target.value)}
-          />
-          <button className="rounded bg-blue-600 px-3 py-1 text-white">Save reason</button>
-        </form>
-      )}
+      </div>
     </section>
   );
+}
+
+/* ─── Shared UI components ──────────────────────────────────────── */
+
+function LoadingBanner({ text }: { text: string }) {
+  return <p className="animate-pulse text-sm text-gray-500">{text}</p>;
+}
+
+function ErrorBanner({ message }: { message: string }) {
+  return <p className="rounded border border-red-800 bg-red-950 p-3 text-sm text-red-400">{message}</p>;
 }
 
 export default App;
