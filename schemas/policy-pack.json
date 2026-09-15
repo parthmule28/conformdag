@@ -285,7 +285,7 @@
     },
     "MaxFindingsRule": {
       "additionalProperties": false,
-      "description": "Rule: fewer than ``count`` total failing findings.",
+      "description": "Rule: fewer than ``count`` failing findings (a report with none always passes).",
       "properties": {
         "count": {
           "minimum": 0,

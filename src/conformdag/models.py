@@ -244,7 +244,7 @@ class MaxSeverityRule(ConformModel):
 
 
 class MaxFindingsRule(ConformModel):
-    """Rule: fewer than ``count`` total failing findings."""
+    """Rule: fewer than ``count`` failing findings (a report with none always passes)."""
 
     type: Literal["max-findings"] = "max-findings"
     count: NonNegativeInt
