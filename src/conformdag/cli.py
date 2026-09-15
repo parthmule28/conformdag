@@ -17,6 +17,7 @@ from conformdag.benchmark import (
 )
 from conformdag.config import load_project_config, semantic_api_key
 from conformdag.fixing import run_fix
+from conformdag.gates import validate_quality_gates
 from conformdag.models import (
     AirflowProfile,
     FindingStatus,
@@ -153,6 +154,9 @@ def validate_policies(path: Path | None = None) -> None:
     try:
         resolved = resolve_policy_pack_path(path) if path is not None else None
         pack = select_policy_pack(resolved, Path.cwd())
+        gate_issues = validate_quality_gates(pack)
+        if gate_issues:
+            _fail(PolicyValidationError(gate_issues))
     except PolicyValidationError as exc:
         _fail(exc)
     typer.echo(f"valid policy pack: {pack.id} {pack.version} ({len(pack.policies)} policies)")

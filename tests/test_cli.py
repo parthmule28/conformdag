@@ -30,6 +30,30 @@ def test_validate_policies_accepts_bundled_community_alias() -> None:
     assert "valid policy pack: conformdag-community" in result.stdout
 
 
+def test_validate_policies_rejects_unknown_gate_policy_references(tmp_path: Path) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "standards").mkdir()
+    (tmp_path / "standards/dag-authoring.md").write_text("# DAG Authoring Standards\n", encoding="utf-8")
+    (tmp_path / "policies/pack.yaml").write_text(
+        "schema_version: '1'\n"
+        "id: x\n"
+        "version: '1'\n"
+        "policies: []\n"
+        "quality_gates:\n"
+        "  - id: default\n"
+        "    rules:\n"
+        "      - type: always-block\n"
+        "        policy_ids: [AIR-DET-999]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["validate-policies", "--path", str(tmp_path / "policies" / "pack.yaml")])
+
+    assert result.exit_code != 0
+    assert "AIR-DET-999" in result.stderr
+
+
 def test_terminal_scan_output_is_human_readable() -> None:
     result = CliRunner().invoke(app, ["scan", "--path", ".", "--format", "terminal"])
 

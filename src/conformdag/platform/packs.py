@@ -8,6 +8,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
+from conformdag.gates import validate_quality_gates
 from conformdag.models import Policy, PolicyPack
 from conformdag.policy import PolicyValidationError, load_policy_pack
 
@@ -102,10 +103,11 @@ class PackService:
     def validate_pack(self, pack_name: str) -> dict[str, Any]:
         pack_path = self._require_pack(pack_name)
         try:
-            load_policy_pack(pack_path, pack_path.parent)
-            return {"valid": True, "errors": []}
+            pack = load_policy_pack(pack_path, pack_path.parent)
         except PolicyValidationError as exc:
             return {"valid": False, "errors": str(exc).split("; ")}
+        issues = validate_quality_gates(pack)
+        return {"valid": not issues, "errors": issues}
 
     def _require_pack(self, pack_name: str) -> Path:
         path = self.pack_paths.get(pack_name)

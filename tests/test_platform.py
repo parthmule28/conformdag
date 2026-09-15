@@ -763,6 +763,34 @@ def test_pack_service_validate(tmp_path: Path) -> None:
     assert result["valid"] is True
 
 
+def test_pack_validate_reports_gate_errors(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackService
+
+    pack_path = tmp_path / "pack.yaml"
+    pack_path.write_text(
+        "schema_version: '1'\n"
+        "id: x\n"
+        "version: '1'\n"
+        "policies: []\n"
+        "quality_gates:\n"
+        "  - id: a\n"
+        "    rules:\n"
+        "      - type: max-findings\n"
+        "        count: 1\n"
+        "  - id: a\n"
+        "    rules:\n"
+        "      - type: max-findings\n"
+        "        count: 2\n",
+        encoding="utf-8",
+    )
+    service = PackService({"test": pack_path})
+
+    result = service.validate_pack("test")
+
+    assert not result["valid"]
+    assert any("unique" in error for error in result["errors"])
+
+
 def test_pack_list_endpoint_returns_empty_when_no_packs(client: TestClient) -> None:
     result = _get(client, "/api/v1/packs")
     assert result.status_code == 200
