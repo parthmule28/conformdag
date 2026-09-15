@@ -6,7 +6,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
@@ -97,6 +97,12 @@ class SuppressionUpdate(BaseModel):
     expires_at: datetime | None = None
 
 
+class BaselineSetRequest(BaseModel):
+    """Selection payload marking one scan as a repository's baseline."""
+
+    scan_id: str
+
+
 def require_admin(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     """Reject mutation requests unless the single-admin bearer token matches."""
     settings: PlatformSettings = request.app.state.settings
@@ -176,6 +182,7 @@ def list_repositories(request: Request) -> list[dict[str, str | None]]:
                 "path": row.path,
                 "policy_pack": row.policy_pack,
                 "airflow_profile": row.airflow_profile,
+                "baseline_scan_id": row.baseline_scan_id,
             }
             for row in rows
         ]
@@ -225,6 +232,11 @@ def scan_status(request: Request, scan_id: str) -> dict[str, object]:
             "complete": scan.complete,
             "result_fingerprint": scan.result_fingerprint,
             "error": scan.error,
+            "gate_passed": (
+                cast("dict[str, object]", scan.report_json.get("gate_result") or {}).get("passed")
+                if scan.report_json
+                else None
+            ),
         }
 
 
@@ -245,6 +257,21 @@ def scan_history(request: Request, repository_id: str) -> list[dict[str, object]
             }
             for row in rows
         ]
+
+
+def set_baseline(request: Request, repository_id: str, payload: BaselineSetRequest) -> dict[str, str]:
+    """Mark one finished scan as the baseline for its repository."""
+    factory = _factory(request)
+    with factory() as session:
+        repository = session.get(RepositoryRow, repository_id)
+        if repository is None:
+            raise HTTPException(status_code=404, detail="repository not registered")
+        scan = session.get(ScanRow, payload.scan_id)
+        if scan is None or scan.repository_id != repository_id:
+            raise HTTPException(status_code=404, detail="scan not found for this repository")
+        repository.baseline_scan_id = payload.scan_id
+        session.commit()
+        return {"repository_id": repository_id, "baseline_scan_id": payload.scan_id}
 
 
 def scan_report(request: Request, scan_id: str) -> dict[str, Any]:
@@ -334,6 +361,7 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     app.post(API_PREFIX + "/scans/{scan_id}/cancel", dependencies=[Depends(require_admin)])(cancel_scan)
     app.get(API_PREFIX + "/scans/{scan_id}")(scan_status)
     app.get(API_PREFIX + "/repos/{repository_id}/scans")(scan_history)
+    app.put(API_PREFIX + "/repos/{repository_id}/baseline", dependencies=[Depends(require_admin)])(set_baseline)
     app.get(API_PREFIX + "/scans/{scan_id}/report")(scan_report)
     app.get(API_PREFIX + "/scans/{scan_id}/findings")(scan_findings)
     app.get(API_PREFIX + "/scans/{scan_id}/export/{scan_format}")(export_scan)

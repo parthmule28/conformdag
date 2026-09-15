@@ -1,5 +1,6 @@
 """Platform tier tests: workspace model, HTTP API contract, and worker durability."""
 
+import hashlib
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from ruamel.yaml import YAML
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -69,6 +71,11 @@ def _platform_state(client: TestClient) -> tuple[sessionmaker[Session], Platform
     factory = cast("sessionmaker[Session]", app.state.session_factory)
     settings = cast("PlatformSettings", app.state.settings)
     return factory, settings
+
+
+def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        YAML(typ="safe").dump(payload, handle)  # pyright: ignore[reportUnknownMemberType]
 
 
 @pytest.fixture(name="platform_env")
@@ -456,6 +463,65 @@ def test_cancel_terminal_scan_conflicts(client: TestClient, tmp_path: Path) -> N
     assert response.status_code == 409
 
 
+def test_baseline_set_and_listed(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="scan1", repository_id=repository_id, status="succeeded", result_fingerprint="f" * 64))
+        session.commit()
+
+    response = _as_httpx(client).put(
+        f"/api/v1/repos/{repository_id}/baseline",
+        json={"scan_id": "scan1"},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert response.status_code == 200
+
+    listed = _get(client, "/api/v1/repos").json()
+    repo = next(row for row in listed if row["id"] == repository_id)
+    assert repo["baseline_scan_id"] == "scan1"
+
+
+def test_baseline_rejects_scan_from_another_repository(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(id="scan9", repository_id="somewhere-else", status="succeeded", result_fingerprint="f" * 64)
+        )
+        session.commit()
+
+    response = _as_httpx(client).put(
+        f"/api/v1/repos/{repository_id}/baseline",
+        json={"scan_id": "scan9"},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert response.status_code == 404
+
+
+def test_scan_status_includes_gate_passed(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(
+                id="scan-null-gate",
+                repository_id=repository_id,
+                status="succeeded",
+                report_json={"report_version": "2", "complete": True, "gate_result": None},
+            )
+        )
+        session.add(
+            ScanRow(
+                id="scan-passing-gate",
+                repository_id=repository_id,
+                status="succeeded",
+                report_json={"report_version": "2", "complete": True, "gate_result": {"passed": True}},
+            )
+        )
+        session.commit()
+
+    assert _get(client, "/api/v1/scans/scan-null-gate").json()["gate_passed"] is None
+    assert _get(client, "/api/v1/scans/scan-passing-gate").json()["gate_passed"] is True
+
+
 def test_load_settings_requires_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.platform.app import load_settings
 
@@ -494,6 +560,64 @@ def test_runner_rejects_non_running_scan(platform_env: str) -> None:
 
     assert execute_scan("scan1", platform_env) == 2
     assert execute_scan("missing", platform_env) == 2
+
+
+def test_runner_persists_gate_result(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "standards").mkdir()
+    (tmp_path / "standards/dag-authoring.md").write_text(
+        "# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8"
+    )
+    document = tmp_path / "standards/dag-authoring.md"
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "dags/dag.py").write_text("from airflow import DAG\ndag = DAG(dag_id='x')\n", encoding="utf-8")
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "x",
+        "version": "1",
+        "quality_gates": [{"id": "default", "rules": [{"type": "max-findings", "count": 1}]}],
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "owner",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "version": "1",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"], "blocking": True},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    _write_yaml(tmp_path / "pack.yaml", pack)
+    (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
+
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
+        session.commit()
+
+    handled = run_worker_once(factory, platform_env, WorkerSettings(retention_keep=50))
+
+    assert handled == "scan1"
+    with factory() as session:
+        scan = session.get(ScanRow, "scan1")
+        assert scan is not None and scan.status == "succeeded"
+        assert scan.report_json is not None
+        gate = scan.report_json.get("gate_result")
+        assert isinstance(gate, dict)
+        assert gate["gate_id"] == "default"
+        assert gate["passed"] is False
 
 
 def test_load_settings_reads_token_and_retention(monkeypatch: pytest.MonkeyPatch) -> None:

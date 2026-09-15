@@ -52,6 +52,7 @@ class RepositoryRow(Base):
     path: Mapped[str] = mapped_column(String(1024))
     policy_pack: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     airflow_profile: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    baseline_scan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

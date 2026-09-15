@@ -11,7 +11,8 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from conformdag.analysis import ParseCache
-from conformdag.models import ScanReport
+from conformdag.gates import evaluate_pack_gates
+from conformdag.models import GateResult, PolicyPack, ScanReport
 from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
@@ -19,6 +20,7 @@ from conformdag.platform.db import (
     create_session_factory,
     utcnow,
 )
+from conformdag.policy import load_policy_pack
 from conformdag.reporting import normalize_report
 from conformdag.scan import scan_repository
 
@@ -94,7 +96,24 @@ def execute_scan(scan_id: str, dsn: str) -> int:
         if refreshed is not None and refreshed.status == "cancelled":
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0
-        _ingest(session, scan, normalize_report(report))
+        gate_result: GateResult | None = None
+        if pack is not None:
+            loaded_pack: PolicyPack | None = None
+            try:
+                loaded_pack = load_policy_pack(Path(pack), Path(repository.path))
+            except (ValueError, OSError):
+                loaded_pack = None
+            if loaded_pack is not None:
+                baseline_report: ScanReport | None = None
+                if repository.baseline_scan_id is not None:
+                    baseline_scan = session.get(ScanRow, repository.baseline_scan_id)
+                    if baseline_scan is not None and baseline_scan.report_json is not None:
+                        baseline_report = ScanReport.model_validate(baseline_scan.report_json)
+                gate_result = evaluate_pack_gates(loaded_pack, report, baseline_report)
+        normalized = normalize_report(report)
+        if gate_result is not None:
+            normalized = normalized.model_copy(update={"gate_result": gate_result})
+        _ingest(session, scan, normalized)
         scan.status = "succeeded"
         scan.finished_at = utcnow()
         session.commit()
