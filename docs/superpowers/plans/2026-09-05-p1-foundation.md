@@ -1392,20 +1392,20 @@ In `src/conformdag/scan.py`:
 - After the `try:` block that computes `findings, evaluated, skipped`, add:
 
 ```python
-ruff_policies = [
-    policy
-    for policy in pack.policies
-    if policy.status.value == "ACTIVE" and any(check == "ruff-air" for check in policy.enforcement.deterministic_checks)
-]
-if ruff_policies and ruff_binary() is None:
-    issues.append(
-        RunIssue(
-            code="RUFF_UNAVAILABLE",
-            message="ruff binary not found; the ruff-air check was skipped",
-            phase="deterministic",
-            fatal=False,
+    ruff_policies = [
+        policy
+        for policy in pack.policies
+        if policy.status.value == "ACTIVE" and any(check == "ruff-air" for check in policy.enforcement.deterministic_checks)
+    ]
+    if ruff_policies and ruff_binary() is None:
+        issues.append(
+            RunIssue(
+                code="RUFF_UNAVAILABLE",
+                message="ruff binary not found; the ruff-air check was skipped",
+                phase="deterministic",
+                fatal=False,
+            )
         )
-    )
 ```
 
 - [ ] **Step 7: Run tests to verify they pass**
@@ -2095,24 +2095,26 @@ In `src/conformdag/platform/app.py`:
 - Inside `create_app` (before the route registrations):
 
 ```python
-@app.middleware("http")
-async def request_logging_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
-    start = time.perf_counter()
-    response = await call_next(request)
-    duration_ms = round((time.perf_counter() - start) * 1000, 1)
-    response.headers["X-Request-ID"] = request_id
-    logging.getLogger("conformdag.platform.request").info(
-        "request",
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-            "duration_ms": duration_ms,
-        },
-    )
-    return response
+    @app.middleware("http")
+    async def request_logging_middleware(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        response.headers["X-Request-ID"] = request_id
+        logging.getLogger("conformdag.platform.request").info(
+            "request",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
+        return response
 ```
 
 - [ ] **Step 5: Add worker/runner log lines**
@@ -2380,7 +2382,7 @@ In `src/conformdag/analysis.py`, in `_ModelVisitor.__init__`, add `self._with_da
 In `_check_taskflow_decorator`, replace `dag_name=None,` with:
 
 ```python
-dag_name = (self._with_dag_stack[-1] if self._with_dag_stack else None,)
+                    dag_name=self._with_dag_stack[-1] if self._with_dag_stack else None,
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
