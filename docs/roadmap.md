@@ -1,51 +1,91 @@
 # Roadmap
 
-## Beta foundation
+## Portfolio build (current plan)
 
-- [x] Bootstrap the Python/mise project and public schemas.
-- [x] Implement six deterministic Airflow policies and canonical report formats.
-- [x] Add the constrained, maintained Airflow 3.3.0 runtime profile; exclude the EOL 2.11.2 candidate from beta publication.
-- [x] Wire opt-in BYOK semantic evaluation for four semantic policies.
-- [x] Build a 240-case deterministic benchmark and CI release gates.
-- [x] Configure protected-main review, PyPI trusted publishing, and staged release jobs.
-- [x] Record provider-backed integration measurements and semantic accuracy limitations.
-- [x] Publish `0.1.0b1` after all release evidence is reviewed. Published 2026-08-01 to
-  PyPI and GHCR from tag `v0.1.0-beta.1`; see the [release checklist](release.md).
-- [x] Bundle a community policy pack with `--policy-pack community` (PR #11).
+The goal: a portfolio-grade product — great experience first, a legible story second,
+code quality as the process guarantee. No release dates; sub-projects ship when done.
 
-## 1.0.0 (org governance product)
+### Success criteria, in order
 
-See [ADR 0002](adr/0002-v1-product-thesis.md) and
-[ADR 0003](adr/0003-v1-agentic-platform-architecture.md), plus OpenSpec
-`org-governance-1-0`. Shape: two tiers — the PyPI package stays a pure
-offline tool; a Docker Compose platform serves governance teams. The agent is
-a tool user of the deterministic engine: codemods generate fixes, an
-LLM-verifier reviews them, humans merge the PRs. Not a ConformDAG-hosted
-SaaS. Quality-first with no external date: 1.0.0 ships only when all four
-capability changes land and the release gates pass.
+1. **Product experience** — the dashboard is beautiful and complete; no dead ends.
+2. **Story** — an outsider runs one command, sees the enforcement loop, and understands why the product matters.
+3. **Code quality** — TDD throughout, no known bugs, architecture a reviewer would praise.
 
-- [x] Publish `0.1.0b2` (bridge): exactly current `main` — bundled community
-  pack and provenance fixes plus release chores; no new features. (Deferred to
-  the next release train; the bridge content is already on `main`.)
-- [x] Phase 1 — fix engine (`fix-engine-and-codemods`): codemod registry,
-  verify-by-rescan, agent-readable findings, round-trip benchmark gate. Implemented
-  on `main` (2026-09-02); all gates green.
-- [x] Phase 2 — platform (`platform-server`): `serve` + worker + Postgres +
-  SPA, stable `/api/v1`, single-admin auth, suppression lifecycle. Implemented
-  with Alembic migrations and the dashboard SPA scaffold.
-- [x] Phase 3 — agent (`agent-harness`): triage, LLM-verifier, auto-PR via
-  App token (never merges), policy-review local mode. Implemented.
-- [x] Phase 4 — distribution (`distribution-and-ci`): `pack pull`
-  (git-native), composite GitHub Action with SARIF and blocking semantics. Implemented.
-- [ ] Publish `1.0.0b1` (soak) from tag `v1.0.0-beta.1`, then `1.0.0` after the
-  soak window.
+### Global decisions (approved 2026-09-05)
 
-## After 1.0.0
+| Decision | Choice |
+|---|---|
+| UI scope | Full design system + expanded surface: overview page, repo detail pages, scan detail views with filterable findings |
+| Demo | `mise run demo` with seeded realistic data + guided tour overlay + README leading with the demo |
+| Feature scope | dbt check pack → MCP server → report diff → scheduled scans + webhooks (in that order) |
+| Testing | Backend TDD (red→green→refactor); frontend covered by Playwright e2e on golden journeys |
+| Quality gates | Gates live **in the policy pack** (versioned, git-native); baselines live in the platform (per-repo operational state) |
+| Gate rule types | `no-new-findings`, `max-severity`, `max-findings`, `always-block`, `failure-rate` |
+| Ruff | Composed, not competed with — a `ruff-air` check kind maps AIR violations into findings |
+| Process | One sub-project at a time: spec → plan → implement → green gates → commit |
 
-- MCP server (first v1.x follow-up per ADR 0003).
-- SSO pack download via OAuth device flow (RFC 8628); platform-backed pack
-  source behind `pack pull`.
-- Signed/versioned policy bundle distribution (OCI/HTTP) if demand emerges.
-- Dashboard multi-user roles if self-hosted teams require it.
-- dbt support after Airflow quality and demand gates pass.
-- Additional exporters and repository integrations.
+### TDD workflow
+
+1. Red test first (watch it fail for the right reason)
+2. Minimal implementation
+3. Refactor under green (pyright strict, 0 errors)
+4. Full gate: `mise run check` + `mise run test:coverage` (≥90% is the safety net)
+5. Test + implementation committed together, conventional-commit message
+
+### Sub-projects
+
+```
+P1  Foundation (backend TDD)
+    Fix audit findings: pack-service wiring, atomic pack writes, org-pack updates,
+    fixability matrix, HTTP timeouts, worker graceful shutdown, structured logging,
+    pagination, retention wiring, CORS. DX commands: policy hash, policy new,
+    doctor, init→workspace. Quality-gate engine + baseline scans. Ruff AIR adapter.
+
+P2  Design system + UI surface
+    Type scale, tokens, component library, light/dark. Overview page (aggregate
+    stats + trend charts), repo detail pages, scan detail views with filterable
+    findings. Quality-gate configuration + reporting UI. Domain tags on policies.
+    Golden journeys as Playwright e2e.
+
+P3  Demo story
+    mise run demo: seeded realistic repos + scans + suppressions. Guided tour
+    overlay (finding → policy → fix payload → suppression → export). README
+    rewrite leading with the demo.
+
+P4  dbt check pack (Phase 1)
+    models-have-tests, descriptions, naming contracts reading manifest.json.
+    New check kinds + evaluators + configs. Establishes the multi-family
+    check pattern.
+
+P5  MCP server
+    conformdag mcp: scan/fix/explain/policy tools for AI coding assistants.
+    Makes the agent story visible in the demo.
+
+P6  Ops features
+    report diff (two scans, what changed), scheduled scans (cron per repo),
+    webhooks (Slack + generic HTTP).
+
+P7  Check pack wave 2
+    Operational checks: sla-defined, pool-bounded, max-active-runs-bounded,
+    depends-on-past-policy, deferrable-usage.
+
+P8  Impact graph view (stretch)
+    Force-directed graph: policy → repositories → findings; "change this policy,
+    these DAGs are affected" on the policy editor.
+```
+
+P4/P5/P6/P7/P8 are independent of the UI work and interleave once P1 is stable.
+
+### Shipped so far
+
+- `0.1.0b1` soak release (PyPI + GHCR images + GitHub Release)
+- v1 platform: single scan engine, fix engine with verify-by-rescan, agent harness
+  (triage → codemod → LLM verifier → human-merged PR), platform server
+  (FastAPI + Postgres + worker + Alembic), dashboard SPA, composite GitHub Action,
+  `pack pull`, round-trip benchmark gate
+- Check pack wave 1: 11 deterministic check kinds including TaskFlow decorator
+  analysis, start-date-freshness, catchup-policy, module-scope-variables,
+  sensitive-logging, dynamic-dag-factory (branch `feat/policy-management`)
+- Policy management backend (PackService + /api/v1/packs CRUD + auto-hash)
+- Dashboard 2.0: dark theme, navigation, policies page, suppression management
+- AGENTS.md for OpenCode sessions
