@@ -259,6 +259,65 @@
       "title": "FindingStatus",
       "type": "string"
     },
+    "GateResult": {
+      "additionalProperties": false,
+      "description": "The outcome of one gate: every rule must pass for the gate to pass.",
+      "properties": {
+        "gate_id": {
+          "title": "Gate Id",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/GateRuleResult"
+          },
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "gate_id",
+        "passed",
+        "rules"
+      ],
+      "title": "GateResult",
+      "type": "object"
+    },
+    "GateRuleResult": {
+      "additionalProperties": false,
+      "description": "The outcome of one rule during gate evaluation.",
+      "properties": {
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "matching_findings": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Matching Findings",
+          "type": "integer"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "rule_type": {
+          "title": "Rule Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_type",
+        "passed",
+        "detail"
+      ],
+      "title": "GateRuleResult",
+      "type": "object"
+    },
     "RemediationAction": {
       "enum": [
         "add-kwarg",
@@ -793,6 +852,17 @@
       },
       "title": "Findings",
       "type": "array"
+    },
+    "gate_result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GateResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "issues": {
       "items": {

@@ -7,6 +7,31 @@
       "title": "AirflowProfile",
       "type": "string"
     },
+    "AlwaysBlockRule": {
+      "additionalProperties": false,
+      "description": "Rule: the listed policy ids always block, even when otherwise gated out.",
+      "properties": {
+        "policy_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Policy Ids",
+          "type": "array"
+        },
+        "type": {
+          "const": "always-block",
+          "default": "always-block",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy_ids"
+      ],
+      "title": "AlwaysBlockRule",
+      "type": "object"
+    },
     "ApprovedAbstractionsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -176,6 +201,29 @@
       "title": "ExecutionTimeoutConfig",
       "type": "object"
     },
+    "FailureRateRule": {
+      "additionalProperties": false,
+      "description": "Rule: failing findings below ``max_percent`` percent of all findings.",
+      "properties": {
+        "max_percent": {
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "title": "Max Percent",
+          "type": "number"
+        },
+        "type": {
+          "const": "failure-rate",
+          "default": "failure-rate",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "max_percent"
+      ],
+      "title": "FailureRateRule",
+      "type": "object"
+    },
     "ForbiddenOperatorsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -235,6 +283,48 @@
       "title": "LifecycleStatus",
       "type": "string"
     },
+    "MaxFindingsRule": {
+      "additionalProperties": false,
+      "description": "Rule: fewer than ``count`` total failing findings.",
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "type": {
+          "const": "max-findings",
+          "default": "max-findings",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "title": "MaxFindingsRule",
+      "type": "object"
+    },
+    "MaxSeverityRule": {
+      "additionalProperties": false,
+      "description": "Rule: no failing findings at or above the given severity.",
+      "properties": {
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "type": {
+          "const": "max-severity",
+          "default": "max-severity",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity"
+      ],
+      "title": "MaxSeverityRule",
+      "type": "object"
+    },
     "ModuleScopeVariablesConfig": {
       "additionalProperties": false,
       "properties": {
@@ -253,6 +343,20 @@
         }
       },
       "title": "ModuleScopeVariablesConfig",
+      "type": "object"
+    },
+    "NoNewFindingsRule": {
+      "additionalProperties": false,
+      "description": "Rule: no failing findings that are absent from the baseline scan.",
+      "properties": {
+        "type": {
+          "const": "no-new-findings",
+          "default": "no-new-findings",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "NoNewFindingsRule",
       "type": "object"
     },
     "OperatorRule": {
@@ -606,6 +710,58 @@
       "title": "PolicySource",
       "type": "object"
     },
+    "QualityGate": {
+      "additionalProperties": false,
+      "description": "One org-defined pass/fail decision over a scan's findings.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "always-block": "#/$defs/AlwaysBlockRule",
+                "failure-rate": "#/$defs/FailureRateRule",
+                "max-findings": "#/$defs/MaxFindingsRule",
+                "max-severity": "#/$defs/MaxSeverityRule",
+                "no-new-findings": "#/$defs/NoNewFindingsRule"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/NoNewFindingsRule"
+              },
+              {
+                "$ref": "#/$defs/MaxSeverityRule"
+              },
+              {
+                "$ref": "#/$defs/MaxFindingsRule"
+              },
+              {
+                "$ref": "#/$defs/AlwaysBlockRule"
+              },
+              {
+                "$ref": "#/$defs/FailureRateRule"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "rules"
+      ],
+      "title": "QualityGate",
+      "type": "object"
+    },
     "RequiredOwnerConfig": {
       "additionalProperties": false,
       "properties": {
@@ -818,6 +974,13 @@
         "$ref": "#/$defs/Policy"
       },
       "title": "Policies",
+      "type": "array"
+    },
+    "quality_gates": {
+      "items": {
+        "$ref": "#/$defs/QualityGate"
+      },
+      "title": "Quality Gates",
       "type": "array"
     },
     "schema_version": {
