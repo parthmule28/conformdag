@@ -11,6 +11,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from conformdag.analysis import ParseCache
+from conformdag.config import load_project_config
 from conformdag.gates import evaluate_pack_gates
 from conformdag.models import GateResult, PolicyPack, ScanReport
 from conformdag.platform.db import (
@@ -20,7 +21,7 @@ from conformdag.platform.db import (
     create_session_factory,
     utcnow,
 )
-from conformdag.policy import load_policy_pack
+from conformdag.policy import resolve_configured_policy_pack, select_policy_pack
 from conformdag.reporting import normalize_report
 from conformdag.scan import scan_repository
 
@@ -97,19 +98,29 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0
         gate_result: GateResult | None = None
-        if pack is not None:
-            loaded_pack: PolicyPack | None = None
-            try:
-                loaded_pack = load_policy_pack(Path(pack), Path(repository.path))
-            except (ValueError, OSError):
-                loaded_pack = None
-            if loaded_pack is not None:
-                baseline_report: ScanReport | None = None
-                if repository.baseline_scan_id is not None:
-                    baseline_scan = session.get(ScanRow, repository.baseline_scan_id)
-                    if baseline_scan is not None and baseline_scan.report_json is not None:
-                        baseline_report = ScanReport.model_validate(baseline_scan.report_json)
-                gate_result = evaluate_pack_gates(loaded_pack, report, baseline_report)
+        loaded_pack: PolicyPack | None = None
+        try:
+            repository_root = Path(repository.path)
+            configured_pack = (
+                Path(pack)
+                if pack is not None
+                else load_project_config(repository_root / "conformdag.yaml").scan.policy_pack
+            )
+            resolved_pack = resolve_configured_policy_pack(
+                configured_pack,
+                scan_root=repository_root,
+                from_cli=pack is not None,
+            )
+            loaded_pack = select_policy_pack(resolved_pack, repository_root)
+        except (ValueError, OSError):
+            loaded_pack = None
+        if loaded_pack is not None:
+            baseline_report: ScanReport | None = None
+            if repository.baseline_scan_id is not None:
+                baseline_scan = session.get(ScanRow, repository.baseline_scan_id)
+                if baseline_scan is not None and baseline_scan.report_json is not None:
+                    baseline_report = ScanReport.model_validate(baseline_scan.report_json)
+            gate_result = evaluate_pack_gates(loaded_pack, report, baseline_report)
         normalized = normalize_report(report)
         if gate_result is not None:
             normalized = normalized.model_copy(update={"gate_result": gate_result})

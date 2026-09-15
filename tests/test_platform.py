@@ -620,6 +620,87 @@ def test_runner_persists_gate_result(platform_env: str, tmp_path: Path, monkeypa
         assert gate["passed"] is False
 
 
+def test_runner_persists_configured_pack_baseline_gate(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "standards").mkdir()
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    (tmp_path / "dags").mkdir()
+    dag = tmp_path / "dags/dag.py"
+    dag.write_text("from airflow import DAG\ndag = DAG(dag_id='x')\n", encoding="utf-8")
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "configured",
+        "version": "1",
+        "quality_gates": [{"id": "baseline", "rules": [{"type": "no-new-findings"}]}],
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "owner",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "version": "1",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"], "blocking": True},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    (tmp_path / "policies").mkdir()
+    _write_yaml(tmp_path / "policies/pack.yaml", pack)
+    (tmp_path / "conformdag.yaml").write_text(
+        'config_version: "1"\nscan:\n  policy_pack: policies/pack.yaml\n', encoding="utf-8"
+    )
+
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=None))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
+        session.commit()
+
+    settings = WorkerSettings(retention_keep=50)
+    assert run_worker_once(factory, platform_env, settings) == "scan1"
+    with factory() as session:
+        baseline = session.get(ScanRow, "scan1")
+        assert baseline is not None and baseline.status == "succeeded"
+        assert baseline.report_json is not None
+        baseline_gate = baseline.report_json.get("gate_result")
+        assert isinstance(baseline_gate, dict) and baseline_gate["passed"] is False
+        repository = session.get(RepositoryRow, "repo1")
+        assert repository is not None
+        repository.baseline_scan_id = "scan1"
+        session.add(ScanRow(id="scan2", repository_id="repo1", status="queued"))
+        session.commit()
+
+    assert run_worker_once(factory, platform_env, settings) == "scan2"
+    with factory() as session:
+        unchanged = session.get(ScanRow, "scan2")
+        assert unchanged is not None and unchanged.report_json is not None
+        unchanged_gate = unchanged.report_json.get("gate_result")
+        assert isinstance(unchanged_gate, dict) and unchanged_gate["passed"] is True
+        session.add(ScanRow(id="scan3", repository_id="repo1", status="queued"))
+        session.commit()
+    (tmp_path / "dags/dag2.py").write_text("from airflow import DAG\ndag = DAG(dag_id='y')\n", encoding="utf-8")
+
+    assert run_worker_once(factory, platform_env, settings) == "scan3"
+    with factory() as session:
+        changed = session.get(ScanRow, "scan3")
+        assert changed is not None and changed.report_json is not None
+        changed_gate = changed.report_json.get("gate_result")
+        assert isinstance(changed_gate, dict) and changed_gate["passed"] is False
+
+
 def test_load_settings_reads_token_and_retention(monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.platform.app import load_settings
 
