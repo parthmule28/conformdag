@@ -260,7 +260,9 @@ def _pack(*gates: QualityGate) -> PolicyPack:
 def test_no_new_findings_rule_compares_fingerprints_against_baseline() -> None:
     gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "no-new-findings"}]})
     baseline = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
-    current = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"), _finding("AIR-DET-002", FindingStatus.FAIL, "brand-new"))
+    current = _report(
+        _finding("AIR-DET-001", FindingStatus.FAIL, "known"), _finding("AIR-DET-002", FindingStatus.FAIL, "brand-new")
+    )
     result = evaluate_gate(gate, current, baseline)
     assert not result.passed
     rule = result.rules[0]
@@ -444,9 +446,7 @@ def evaluate_gate(gate: QualityGate, report: ScanReport, baseline_report: ScanRe
     return GateResult(gate_id=gate.id, passed=all(result.passed for result in results), rules=results)
 
 
-def evaluate_pack_gates(
-    pack: PolicyPack, report: ScanReport, baseline_report: ScanReport | None
-) -> GateResult | None:
+def evaluate_pack_gates(pack: PolicyPack, report: ScanReport, baseline_report: ScanReport | None) -> GateResult | None:
     """Evaluate all gates; return the first failing gate or the first gate overall.
 
     Returns None when the pack defines no gates (legacy behavior applies).
@@ -470,9 +470,7 @@ def validate_quality_gates(pack: PolicyPack) -> list[str]:
             if isinstance(rule, AlwaysBlockRule):
                 missing = sorted(set(rule.policy_ids) - policy_ids)
                 if missing:
-                    issues.append(
-                        f"gate {gate.id!r} references unknown policy ids: {', '.join(missing)}"
-                    )
+                    issues.append(f"gate {gate.id!r} references unknown policy ids: {', '.join(missing)}")
     return issues
 ```
 
@@ -713,7 +711,18 @@ def test_scan_without_gates_keeps_legacy_exit_code(tmp_path: Path) -> None:
 def test_scan_baseline_satisfies_no_new_findings(tmp_path: Path) -> None:
     root = _write_gate_repo(tmp_path, with_gate=False, owner=None)
     baseline = CliRunner().invoke(
-        app, ["scan", "--path", str(root), "--policy-pack", str(root / "pack.yaml"), "--format", "json", "--output", str(root / "baseline.json")]
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--policy-pack",
+            str(root / "pack.yaml"),
+            "--format",
+            "json",
+            "--output",
+            str(root / "baseline.json"),
+        ],
     )
     assert baseline.exit_code == 1
     pack = yaml.safe_load((root / "pack.yaml").read_text(encoding="utf-8"))
@@ -876,9 +885,7 @@ In `tests/test_platform.py` add:
 def test_baseline_set_and_listed(client: TestClient, tmp_path: Path) -> None:
     repository_id = _register(client, tmp_path)
     with _platform_state(client)[0]() as session:
-        session.add(
-            ScanRow(id="scan1", repository_id=repository_id, status="succeeded", result_fingerprint="f" * 64)
-        )
+        session.add(ScanRow(id="scan1", repository_id=repository_id, status="succeeded", result_fingerprint="f" * 64))
         session.commit()
 
     response = _as_httpx(client).put(
@@ -955,9 +962,7 @@ def test_runner_persists_gate_result(platform_env: str, tmp_path: Path, monkeypa
 
     factory = create_session_factory(platform_env)
     with factory() as session:
-        session.add(
-            RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml"))
-        )
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
         session.commit()
 
@@ -1110,9 +1115,7 @@ def test_ruff_air_evaluator_maps_violations_to_findings(tmp_path: Path, monkeypa
     assert "AIR002" in (finding.explanation or "")
 
 
-def test_ruff_air_evaluator_skips_when_binary_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ruff_air_evaluator_skips_when_binary_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     model = _source_model("from airflow import DAG\ndag = DAG(dag_id='x')\n")
     policy = _policy("AIR-TST-002", "ruff-air")
     context = EvaluationContext(policy, [model], repository_root=tmp_path)
@@ -1129,7 +1132,9 @@ In `tests/test_scan.py` add:
 ```python
 def test_scan_reports_ruff_unavailable_issue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "dags").mkdir()
-    (tmp_path / "dags/dag.py").write_text("from airflow import DAG\ndag = DAG(dag_id='x', owner='platform')\n", encoding="utf-8")
+    (tmp_path / "dags/dag.py").write_text(
+        "from airflow import DAG\ndag = DAG(dag_id='x', owner='platform')\n", encoding="utf-8"
+    )
     (tmp_path / "standards").mkdir()
     document = tmp_path / "standards/dag-authoring.md"
     document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
@@ -1387,21 +1392,20 @@ In `src/conformdag/scan.py`:
 - After the `try:` block that computes `findings, evaluated, skipped`, add:
 
 ```python
-    ruff_policies = [
-        policy
-        for policy in pack.policies
-        if policy.status.value == "ACTIVE"
-        and any(check == "ruff-air" for check in policy.enforcement.deterministic_checks)
-    ]
-    if ruff_policies and ruff_binary() is None:
-        issues.append(
-            RunIssue(
-                code="RUFF_UNAVAILABLE",
-                message="ruff binary not found; the ruff-air check was skipped",
-                phase="deterministic",
-                fatal=False,
-            )
+ruff_policies = [
+    policy
+    for policy in pack.policies
+    if policy.status.value == "ACTIVE" and any(check == "ruff-air" for check in policy.enforcement.deterministic_checks)
+]
+if ruff_policies and ruff_binary() is None:
+    issues.append(
+        RunIssue(
+            code="RUFF_UNAVAILABLE",
+            message="ruff binary not found; the ruff-air check was skipped",
+            phase="deterministic",
+            fatal=False,
         )
+    )
 ```
 
 - [ ] **Step 7: Run tests to verify they pass**
@@ -1438,7 +1442,12 @@ def test_org_pack_includes_the_new_check_kinds() -> None:
     kinds = {policy.configuration.kind for policy in pack.policies}
     assert {"start-date-freshness", "catchup-policy", "module-scope-variables", "dynamic-dag-factory"} <= kinds
     for policy in pack.policies:
-        if policy.configuration.kind in {"start-date-freshness", "catchup-policy", "module-scope-variables", "dynamic-dag-factory"}:
+        if policy.configuration.kind in {
+            "start-date-freshness",
+            "catchup-policy",
+            "module-scope-variables",
+            "dynamic-dag-factory",
+        }:
             assert policy.status.value == "ACTIVE"
 ```
 
@@ -1613,14 +1622,10 @@ git commit -m "fix: register catchup-policy codemod and new kinds in the fixabil
 In `tests/test_platform.py` add (imports: `PolicyPack` from models, `_write_pack` from `conformdag.platform.packs`, `pytest`):
 
 ```python
-def test_write_pack_is_atomic_on_replace_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_write_pack_is_atomic_on_replace_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pack_path = tmp_path / "pack.yaml"
     pack_path.write_text("original content\n", encoding="utf-8")
-    pack = PolicyPack.model_validate(
-        {"schema_version": "1", "id": "x", "version": "1", "policies": []}
-    )
+    pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
 
     def boom(source: Path, target: Path) -> None:
         raise OSError("simulated crash mid-write")
@@ -1637,9 +1642,7 @@ def test_write_pack_is_atomic_on_replace_failure(
 def test_write_pack_replaces_atomically_and_leaves_no_tmp(tmp_path: Path) -> None:
     pack_path = tmp_path / "pack.yaml"
     pack_path.write_text("stale\n", encoding="utf-8")
-    pack = PolicyPack.model_validate(
-        {"schema_version": "1", "id": "x", "version": "1", "policies": []}
-    )
+    pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
 
     packs_module._write_pack(pack, pack_path)
 
@@ -1709,19 +1712,12 @@ git commit -m "fix: atomic pack writes and dead-code removal (B2, B9/B10)"
 In `tests/test_platform.py` add:
 
 ```python
-def test_create_app_registers_workspace_packs_at_startup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_create_app_registers_workspace_packs_at_startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     packs_dir = tmp_path / "packs"
     packs_dir.mkdir()
-    (packs_dir / "org.yaml").write_text(
-        "schema_version: '1'\nid: org\nversion: '1'\npolicies: []\n", encoding="utf-8"
-    )
+    (packs_dir / "org.yaml").write_text("schema_version: '1'\nid: org\nversion: '1'\npolicies: []\n", encoding="utf-8")
     (tmp_path / "conformdag-workspace.yaml").write_text(
-        "schema_version: '1'\n"
-        "repositories: []\n"
-        "policy_packs:\n"
-        f"  - name: org\n    path: {packs_dir / 'org.yaml'}\n",
+        f"schema_version: '1'\nrepositories: []\npolicy_packs:\n  - name: org\n    path: {packs_dir / 'org.yaml'}\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -1830,9 +1826,7 @@ REQUEST_TIMEOUT: Final[float] = 120.0
 - Add the client factory and use it:
 
 ```python
-def _build_client(
-    api_url: str, token: str, transport: httpx.BaseTransport | None = None
-) -> httpx.Client:
+def _build_client(api_url: str, token: str, transport: httpx.BaseTransport | None = None) -> httpx.Client:
     return httpx.Client(
         base_url=api_url,
         headers={
@@ -1997,9 +1991,7 @@ def test_json_formatter_emits_single_line_json() -> None:
     from conformdag.platform import logging as platform_logging
 
     formatter = platform_logging.JsonFormatter()
-    record = logging.LogRecord(
-        "conformdag.worker", logging.INFO, "worker.py", 10, "scan started", None, None
-    )
+    record = logging.LogRecord("conformdag.worker", logging.INFO, "worker.py", 10, "scan started", None, None)
     record.scan_id = "scan1"
 
     payload = json.loads(formatter.format(record))
@@ -2103,26 +2095,24 @@ In `src/conformdag/platform/app.py`:
 - Inside `create_app` (before the route registrations):
 
 ```python
-    @app.middleware("http")
-    async def request_logging_middleware(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
-        start = time.perf_counter()
-        response = await call_next(request)
-        duration_ms = round((time.perf_counter() - start) * 1000, 1)
-        response.headers["X-Request-ID"] = request_id
-        logging.getLogger("conformdag.platform.request").info(
-            "request",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status": response.status_code,
-                "duration_ms": duration_ms,
-            },
-        )
-        return response
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = round((time.perf_counter() - start) * 1000, 1)
+    response.headers["X-Request-ID"] = request_id
+    logging.getLogger("conformdag.platform.request").info(
+        "request",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": duration_ms,
+        },
+    )
+    return response
 ```
 
 - [ ] **Step 5: Add worker/runner log lines**
@@ -2390,7 +2380,7 @@ In `src/conformdag/analysis.py`, in `_ModelVisitor.__init__`, add `self._with_da
 In `_check_taskflow_decorator`, replace `dag_name=None,` with:
 
 ```python
-                    dag_name=self._with_dag_stack[-1] if self._with_dag_stack else None,
+dag_name = (self._with_dag_stack[-1] if self._with_dag_stack else None,)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -2458,9 +2448,7 @@ def test_patch_candidates_converts_overlapping_spans_into_residuals(
     )
     monkeypatch.setattr(engine_module, "timedelta_import_span", lambda source: EditSpan(1, 0, 1, 0, ""))
 
-    candidates, residuals = engine_module._patch_candidates(
-        original, {}, {"dags/a.py": [finding]}, 1
-    )
+    candidates, residuals = engine_module._patch_candidates(original, {}, {"dags/a.py": [finding]}, 1)
 
     assert candidates == {}
     assert len(residuals) == 1
@@ -2795,11 +2783,7 @@ def doctor() -> None:
 
     if pack is not None and config is not None:
         unknown = sorted(
-            {
-                policy.configuration.kind
-                for policy in pack.policies
-                if policy.configuration.kind not in CHECK_EVALUATORS
-            }
+            {policy.configuration.kind for policy in pack.policies if policy.configuration.kind not in CHECK_EVALUATORS}
         )
         rows.append(
             (
@@ -2827,7 +2811,13 @@ def doctor() -> None:
         )
 
     docker = shutil.which("docker")
-    rows.append(("docker", docker is not None, "docker binary found" if docker else "docker not found; runtime checks unavailable"))
+    rows.append(
+        (
+            "docker",
+            docker is not None,
+            "docker binary found" if docker else "docker not found; runtime checks unavailable",
+        )
+    )
 
     for label, ok, detail in rows:
         console.print(f"[{'green' if ok else 'red'}]{'PASS' if ok else 'FAIL'}[/] {label}: {detail}")
