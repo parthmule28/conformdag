@@ -17,13 +17,14 @@ from conformdag.benchmark import (
 )
 from conformdag.config import load_project_config, semantic_api_key
 from conformdag.fixing import run_fix
-from conformdag.gates import validate_quality_gates
+from conformdag.gates import evaluate_pack_gates, validate_quality_gates
 from conformdag.models import (
     AirflowProfile,
     FindingStatus,
     Policy,
     PolicyPack,
     RunIssue,
+    ScanReport,
 )
 from conformdag.policy import PolicyValidationError, resolve_policy_pack_path, select_policy_pack
 from conformdag.reference import (
@@ -86,6 +87,11 @@ SEMANTIC_STRUCTURED_OUTPUT_OPTION = typer.Option(
     None,
     "--semantic-structured-output/--no-semantic-structured-output",
     help="Enable or disable provider-native strict JSON Schema output.",
+)
+BASELINE_OPTION = typer.Option(
+    None,
+    "--baseline",
+    help="Path to a baseline scan report JSON used by quality-gate rules.",
 )
 BENCHMARK_PATH_ARGUMENT = typer.Argument(Path("benchmarks/synthetic"))
 BENCHMARK_POLICY_PACK_OPTION = typer.Option(Path("policies/pack.yaml"), "--policy-pack")
@@ -314,6 +320,7 @@ def scan(
     semantic_base_url: str | None = SEMANTIC_BASE_URL_OPTION,
     semantic_model: str | None = SEMANTIC_MODEL_OPTION,
     semantic_structured_output: bool | None = SEMANTIC_STRUCTURED_OUTPUT_OPTION,
+    baseline: Path | None = BASELINE_OPTION,
 ) -> None:
     """Analyze sources and render JSON, SARIF, HTML, or terminal output."""
     if format not in {"json", "sarif", "html", "terminal"}:
@@ -330,6 +337,7 @@ def scan(
     selected_pack = resolve_policy_pack_path(policy_pack) if policy_pack is not None else None
     try:
         config = load_project_config(root / "conformdag.yaml")
+        pack = select_policy_pack(selected_pack, root)
         if preview_model_context:
             preview = build_model_context_preview(root, selected_pack)
             typer.echo(
@@ -478,6 +486,15 @@ def scan(
                 }
             )
         report = normalize_report(report)
+    baseline_report: ScanReport | None = None
+    if baseline is not None:
+        try:
+            baseline_report = ScanReport.model_validate(json.loads(baseline.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as exc:
+            _fail(ValueError(f"cannot load baseline report {baseline}: {exc}"))
+    gate_result = evaluate_pack_gates(pack, report, baseline_report)
+    if gate_result is not None:
+        report = report.model_copy(update={"gate_result": gate_result})
     output_report = report
     if no_evidence:
         output_report = report.model_copy(
@@ -511,7 +528,10 @@ def scan(
     )
     if any(issue.fatal for issue in report.issues):
         raise typer.Exit(code=3)
-    if has_blocking_failures(report):
+    if gate_result is not None:
+        if not gate_result.passed:
+            raise typer.Exit(code=1)
+    elif has_blocking_failures(report):
         raise typer.Exit(code=1)
     if any(observation.status is FindingStatus.FAIL for observation in report.runtime_observations):
         raise typer.Exit(code=1)
