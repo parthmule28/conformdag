@@ -204,6 +204,7 @@ class _ModelVisitor(ast.NodeVisitor):
     def __init__(self, source: SourceFile) -> None:
         self.model = SourceModel(source)
         self._function_depth = 0
+        self._with_dag_stack: list[str] = []
 
     def visit_Import(self, node: ast.Import) -> None:
         for item in node.names:
@@ -231,6 +232,21 @@ class _ModelVisitor(ast.NodeVisitor):
                 if dag.line == node.value.lineno:
                     dag.variable_name = variable_name
                     break
+
+    def visit_With(self, node: ast.With) -> None:
+        entered: list[str] = []
+        for item in node.items:
+            context = item.context_expr
+            name = None
+            qualified_name = _qualified_name(context.func) if isinstance(context, ast.Call) else None
+            if qualified_name is not None and qualified_name.rsplit(".", 1)[-1] == "DAG":
+                if item.optional_vars is not None and isinstance(item.optional_vars, ast.Name):
+                    name = item.optional_vars.id
+                self._with_dag_stack.append(name or "")
+                entered.append(name or "")
+        self.generic_visit(node)
+        for _ in entered:
+            self._with_dag_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._enter_decorated_function(node)
@@ -274,7 +290,7 @@ class _ModelVisitor(ast.NodeVisitor):
                     line=node.lineno,
                     qualified_name=node.name + " (taskflow)",
                     task_id=task_id if isinstance(task_id, str) else node.name,
-                    dag_name=None,
+                    dag_name=self._with_dag_stack[-1] if self._with_dag_stack else None,
                     values=values,
                     taskflow=True,
                 )

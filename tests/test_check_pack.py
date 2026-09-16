@@ -120,7 +120,7 @@ def test_taskflow_tasks_are_visible_to_the_analyzer() -> None:
     assert len(taskflow_tasks) == 2
     extract = next(task for task in taskflow_tasks if task.task_id == "extract")
     assert extract.values.get("retries") == 99
-    assert all(task.dag_name is None for task in taskflow_tasks)
+    assert all(task.dag_name == "dag" for task in taskflow_tasks)
 
 
 def test_taskflow_retry_bounds_are_enforced(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
