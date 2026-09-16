@@ -1,7 +1,12 @@
 """Platform tier tests: workspace model, HTTP API contract, and worker durability."""
 
 import hashlib
+import importlib
 import json
+import os
+import signal
+import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -436,6 +441,8 @@ def test_worker_loop_sleeps_when_idle(platform_env: str, monkeypatch: pytest.Mon
     from conformdag.platform import worker as worker_module
 
     sleeps: list[float] = []
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    previous_sigint = signal.getsignal(signal.SIGINT)
 
     def fake_sleep(seconds: float) -> None:
         sleeps.append(seconds)
@@ -444,9 +451,67 @@ def test_worker_loop_sleeps_when_idle(platform_env: str, monkeypatch: pytest.Mon
     monkeypatch.setattr(worker_module.time, "sleep", fake_sleep)
     factory = create_session_factory(platform_env)
 
-    worker_module.run_worker(factory, platform_env, WorkerSettings(poll_seconds=1.0))
+    try:
+        worker_module.run_worker(factory, platform_env, WorkerSettings(poll_seconds=1.0))
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        signal.signal(signal.SIGINT, previous_sigint)
 
     assert sleeps == [1.0]
+
+
+def test_worker_drains_inflight_scan_then_stops(platform_env: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    worker_module = importlib.import_module("conformdag.platform.worker")
+    worker_module._shutdown_requested.clear()
+    factory = create_session_factory(platform_env)
+    started = threading.Event()
+    calls: list[str] = []
+
+    def fake_once(*args: object, **kwargs: object) -> str:
+        _ = args, kwargs
+        calls.append("scan1")
+        started.set()
+        time.sleep(0.3)
+        return "scan1"
+
+    monkeypatch.setattr(worker_module, "run_worker_once", fake_once)
+    completed: list[str] = []
+
+    def run() -> None:
+        worker_module.run_worker(factory, platform_env, WorkerSettings(poll_seconds=0.05))
+        completed.append("done")
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        assert started.wait(timeout=5)
+        worker_module.request_shutdown()
+        thread.join(timeout=5)
+
+        assert not thread.is_alive()
+        assert completed == ["done"]
+        assert calls == ["scan1"]
+    finally:
+        worker_module.request_shutdown()
+        thread.join(timeout=1)
+        worker_module._shutdown_requested.clear()
+
+
+def test_signal_handler_requests_shutdown() -> None:
+    worker_module = importlib.import_module("conformdag.platform.worker")
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    worker_module._shutdown_requested.clear()
+    try:
+        worker_module.install_signal_handlers()
+
+        os.kill(os.getpid(), signal.SIGTERM)
+
+        assert worker_module._shutdown_requested.is_set()
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        signal.signal(signal.SIGINT, previous_sigint)
+        worker_module._shutdown_requested.clear()
 
 
 def test_register_repository_rejects_missing_paths(client: TestClient) -> None:

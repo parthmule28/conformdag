@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -23,6 +27,19 @@ DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_IDLE_SECONDS = 600
 DEFAULT_TIMEOUT_SECONDS = 1800
 DEFAULT_MAX_ATTEMPTS = 3
+
+_shutdown_requested = threading.Event()
+
+
+def install_signal_handlers() -> None:
+    """Request a graceful shutdown on SIGTERM/SIGINT (main thread only)."""
+    signal.signal(signal.SIGTERM, lambda signum, frame: _shutdown_requested.set())
+    signal.signal(signal.SIGINT, lambda signum, frame: _shutdown_requested.set())
+
+
+def request_shutdown() -> None:
+    """Ask the worker loop to stop after the in-flight scan completes."""
+    _shutdown_requested.set()
 
 
 @dataclass(frozen=True)
@@ -103,11 +120,15 @@ def _apply_retention(session: Session, repository_id: str, settings: WorkerSetti
 
 
 def run_worker(session_factory: sessionmaker[Session], dsn: str, settings: WorkerSettings) -> None:
-    """Run the durable worker loop until interrupted."""
-    while True:
+    """Run the durable worker loop until interrupted or shut down gracefully."""
+    logger = logging.getLogger("conformdag.worker")
+    with suppress(ValueError):
+        install_signal_handlers()
+    while not _shutdown_requested.is_set():
         try:
             handled = run_worker_once(session_factory, dsn, settings)
-            if handled is None:
+            if handled is None and not _shutdown_requested.is_set():
                 time.sleep(settings.poll_seconds)
         except KeyboardInterrupt:
             return
+    logger.info("worker drained the in-flight scan and shut down", extra={"event": "worker_stopped"})
