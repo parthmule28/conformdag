@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pytest import MonkeyPatch
+from ruamel.yaml import YAML
 
 from conformdag.models import (
     EnforcementConfig,
@@ -52,6 +54,56 @@ def _write_pack(path: Path, pack: PolicyPack) -> None:
     path.write_text(pack.model_dump_json(indent=2), encoding="utf-8")
 
 
+def write_pack(
+    tmp_path: Path,
+    *,
+    deterministic_checks: list[str] | None = None,
+    gate_policy_ids: list[str] | None = None,
+) -> Path:
+    """Write one provenance-valid pack with configurable enforcement and gates."""
+    standards = tmp_path / "standards" / "dag-authoring.md"
+    standards.parent.mkdir(parents=True, exist_ok=True)
+    standards.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(standards.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "boundary",
+        "version": "1",
+        "policies": [
+            {
+                "id": "AIR-TST-100",
+                "title": "Owner policy",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {
+                    "type": "deterministic",
+                    "deterministic_checks": deterministic_checks
+                    if deterministic_checks is not None
+                    else ["effective-owner"],
+                },
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    if gate_policy_ids is not None:
+        pack["quality_gates"] = [{"id": "default", "rules": [{"type": "always-block", "policy_ids": gate_policy_ids}]}]
+    pack_path = tmp_path / "policies" / "pack.yaml"
+    pack_path.parent.mkdir(parents=True, exist_ok=True)
+    with pack_path.open("w", encoding="utf-8") as handle:
+        YAML(typ="safe").dump(pack, handle)  # pyright: ignore[reportUnknownMemberType]
+    return pack_path
+
+
 def test_loads_pack_and_filters_inactive_policies(tmp_path: Path) -> None:
     source = tmp_path / "standards.md"
     source.write_text("# Owner standards\nEvery DAG has an owner.\n", encoding="utf-8")
@@ -81,6 +133,18 @@ def test_rejects_stale_provenance_and_missing_section(tmp_path: Path) -> None:
     _write_pack(pack_path, PolicyPack(id="default", version="1.0.0", policies=[policy]))
 
     with pytest.raises(PolicyValidationError, match="source hash mismatch"):
+        load_policy_pack(pack_path, tmp_path)
+
+
+def test_load_policy_pack_rejects_unknown_deterministic_check(tmp_path: Path) -> None:
+    pack_path = write_pack(tmp_path, deterministic_checks=["missing-check"])
+    with pytest.raises(PolicyValidationError, match="unknown deterministic check"):
+        load_policy_pack(pack_path, tmp_path)
+
+
+def test_load_policy_pack_rejects_unknown_gate_policy(tmp_path: Path) -> None:
+    pack_path = write_pack(tmp_path, gate_policy_ids=["AIR-MISSING-001"])
+    with pytest.raises(PolicyValidationError, match="unknown policy ids"):
         load_policy_pack(pack_path, tmp_path)
 
 

@@ -154,7 +154,7 @@ def test_doctor_accepts_the_real_org_pack(monkeypatch: pytest.MonkeyPatch) -> No
     result = CliRunner().invoke(app, ["doctor"])
 
     assert result.exit_code == 0, result.stderr
-    assert "PASS registry: every deterministic check is registered" in result.stdout
+    assert "PASS pack: conformdag-default" in result.stdout
 
 
 def test_doctor_reports_unknown_hybrid_deterministic_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,7 +204,7 @@ def test_doctor_reports_unknown_hybrid_deterministic_check(tmp_path: Path, monke
     result = CliRunner().invoke(app, ["doctor"])
 
     assert result.exit_code == 1
-    assert "unknown kinds: unknown-hybrid" in result.stdout
+    assert "unknown deterministic check 'unknown-hybrid'" in result.stdout
 
 
 def test_baseline_set_reports_platform_initialization_sqlalchemy_error(
@@ -291,6 +291,55 @@ def test_validate_policies_rejects_unknown_gate_policy_references(tmp_path: Path
 
     assert result.exit_code != 0
     assert "AIR-DET-999" in result.stderr
+
+
+def test_scan_fails_closed_on_unknown_check(tmp_path: Path) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=False, owner=None)
+    pack: dict[str, Any] = YAML(typ="safe").load((root / "pack.yaml").read_text(encoding="utf-8"))  # pyright: ignore[reportUnknownMemberType]
+    pack["policies"][0]["enforcement"]["deterministic_checks"] = ["missing-check"]
+    _write_yaml(root / "pack.yaml", pack)
+
+    result = CliRunner().invoke(
+        app, ["scan", "--path", str(root), "--policy-pack", str(root / "pack.yaml"), "--format", "json"]
+    )
+
+    assert result.exit_code == 2
+    assert "unknown deterministic check" in result.stderr
+
+
+def test_validate_policies_fails_closed_on_unknown_check(tmp_path: Path) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "standards").mkdir()
+    content = "# DAG Authoring Standards\n\n## Ownership and metadata\n"
+    (tmp_path / "standards/dag-authoring.md").write_text(content, encoding="utf-8")
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    (tmp_path / "policies/pack.yaml").write_text(
+        "schema_version: '1'\n"
+        "id: x\n"
+        "version: '1'\n"
+        "policies:\n"
+        "  - id: AIR-TST-901\n"
+        "    title: Owner policy\n"
+        "    version: '1.0.0'\n"
+        "    status: ACTIVE\n"
+        "    severity: high\n"
+        "    airflow_profiles: ['3.3.0']\n"
+        "    ownership: {owner: platform}\n"
+        "    source:\n"
+        "      document: standards/dag-authoring.md\n"
+        "      section: Ownership and metadata\n"
+        f"      content_hash: '{content_hash}'\n"
+        "    invariant: Every DAG declares an owner.\n"
+        "    safe_path: An owner is present.\n"
+        "    enforcement: {type: deterministic, deterministic_checks: [missing-check]}\n"
+        "    configuration: {kind: required-owner, allowed_values: [platform]}\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["validate-policies", "--path", str(tmp_path / "policies" / "pack.yaml")])
+
+    assert result.exit_code == 2
+    assert "unknown deterministic check" in result.stderr
 
 
 def test_terminal_scan_output_is_human_readable() -> None:

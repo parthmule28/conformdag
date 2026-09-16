@@ -5,12 +5,18 @@ from pathlib import Path
 
 from conformdag.gates import blocking_findings, evaluate_gate, evaluate_pack_gates, validate_quality_gates
 from conformdag.models import (
+    EnforcementConfig,
     EnforcementType,
     Finding,
     FindingLocation,
     FindingStatus,
+    LifecycleStatus,
+    Ownership,
+    Policy,
     PolicyPack,
+    PolicySource,
     QualityGate,
+    RequiredOwnerConfig,
     RunMetadata,
     ScanReport,
     Severity,
@@ -133,3 +139,37 @@ def test_validate_quality_gates_rejects_duplicate_ids_and_unknown_policies() -> 
         QualityGate.model_validate({"id": "g", "rules": [{"type": "always-block", "policy_ids": ["AIR-DET-999"]}]})
     )
     assert any("AIR-DET-999" in issue for issue in validate_quality_gates(referencing))
+
+
+def test_validate_policy_pack_reports_unknown_check_and_unknown_gate() -> None:
+    from conformdag.policy import validate_policy_pack
+
+    policy = Policy(
+        id="AIR-TST-100",
+        title="Owner policy",
+        version="1.0.0",
+        status=LifecycleStatus.ACTIVE,
+        severity=Severity.HIGH,
+        airflow_profiles=[],
+        ownership=Ownership(owner="platform"),
+        source=PolicySource(document=Path("standards/dag-authoring.md"), section="x", content_hash="x"),
+        invariant="Every DAG declares an owner.",
+        enforcement=EnforcementConfig(type=EnforcementType.DETERMINISTIC, deterministic_checks=["missing-check"]),
+        configuration=RequiredOwnerConfig(allowed_values=["platform"]),
+    )
+    pack = PolicyPack(
+        schema_version="1",
+        id="boundary",
+        version="1",
+        policies=[policy],
+        quality_gates=[
+            QualityGate.model_validate(
+                {"id": "g", "rules": [{"type": "always-block", "policy_ids": ["AIR-MISSING-001"]}]}
+            )
+        ],
+    )
+
+    issues = validate_policy_pack(pack)
+
+    assert any("unknown deterministic check" in issue for issue in issues)
+    assert any("unknown policy ids" in issue for issue in issues)

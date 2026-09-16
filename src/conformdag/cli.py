@@ -23,10 +23,9 @@ from conformdag.benchmark import (
 from conformdag.config import load_project_config, semantic_api_key
 from conformdag.evaluator import CHECK_EVALUATORS
 from conformdag.fixing import run_fix
-from conformdag.gates import evaluate_pack_gates, validate_quality_gates
+from conformdag.gates import evaluate_pack_gates
 from conformdag.models import (
     AirflowProfile,
-    EnforcementType,
     FindingStatus,
     Policy,
     PolicyPack,
@@ -278,22 +277,6 @@ def doctor() -> None:
         rows.append(("pack", "FAIL", str(exc)))
 
     if pack is not None and config is not None:
-        unknown = sorted(
-            {
-                check
-                for policy in pack.policies
-                if policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
-                for check in policy.enforcement.deterministic_checks
-                if check not in CHECK_EVALUATORS
-            }
-        )
-        rows.append(
-            (
-                "registry",
-                "PASS" if not unknown else "FAIL",
-                "every deterministic check is registered" if not unknown else f"unknown kinds: {', '.join(unknown)}",
-            )
-        )
         try:
             pack_path = resolve_configured_policy_pack(config.scan.policy_pack, scan_root=root, from_cli=False)
             provenance = validate_policy_provenance(pack, pack_path=pack_path, repository_root=root)
@@ -306,14 +289,6 @@ def doctor() -> None:
             )
         except (OSError, ValueError) as exc:
             rows.append(("provenance", "FAIL", str(exc)))
-        gate_issues = validate_quality_gates(pack)
-        rows.append(
-            (
-                "gates",
-                "PASS" if not gate_issues else "FAIL",
-                "; ".join(gate_issues) if gate_issues else "quality gates are well-formed",
-            )
-        )
 
     docker = shutil.which("docker")
     rows.append(
@@ -361,9 +336,6 @@ def validate_policies(path: Path | None = None) -> None:
     try:
         resolved = resolve_policy_pack_path(path) if path is not None else None
         pack = select_policy_pack(resolved, Path.cwd())
-        gate_issues = validate_quality_gates(pack)
-        if gate_issues:
-            _fail(PolicyValidationError(gate_issues))
     except PolicyValidationError as exc:
         _fail(exc)
     typer.echo(f"valid policy pack: {pack.id} {pack.version} ({len(pack.policies)} policies)")

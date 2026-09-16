@@ -1577,6 +1577,77 @@ def test_pack_service_validate(tmp_path: Path) -> None:
     assert result["valid"] is True
 
 
+def _write_unknown_check_pack(tmp_path: Path) -> Path:
+    """Write a provenance-valid pack whose deterministic check is not registered."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "standards").mkdir(exist_ok=True)
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    _write_yaml(
+        tmp_path / "pack.yaml",
+        {
+            "schema_version": "1",
+            "id": "boundary",
+            "version": "1",
+            "policies": [
+                {
+                    "id": "AIR-TST-100",
+                    "title": "Owner policy",
+                    "version": "1.0.0",
+                    "status": "ACTIVE",
+                    "severity": "high",
+                    "airflow_profiles": ["3.3.0"],
+                    "ownership": {"owner": "platform"},
+                    "source": {
+                        "document": "standards/dag-authoring.md",
+                        "section": "Ownership and metadata",
+                        "content_hash": content_hash,
+                    },
+                    "invariant": "Every DAG declares an owner.",
+                    "safe_path": "An owner is present.",
+                    "enforcement": {"type": "deterministic", "deterministic_checks": ["missing-check"]},
+                    "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+                }
+            ],
+        },
+    )
+    return tmp_path / "pack.yaml"
+
+
+def test_pack_service_validate_rejects_unknown_check(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackService
+
+    pack_path = _write_unknown_check_pack(tmp_path)
+
+    result = PackService({"test": pack_path}).validate_pack("test")
+
+    assert result["valid"] is False
+    assert any("unknown deterministic check" in error for error in result["errors"])
+
+
+def test_workspace_registration_surfaces_unknown_check(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _write_unknown_check_pack(tmp_path / "packs")
+    workspace = tmp_path / "conformdag-workspace.yaml"
+    _write_yaml(
+        workspace,
+        {"schema_version": "1", "repositories": [], "policy_packs": [{"name": "bad", "path": str(pack_path)}]},
+    )
+
+    response = _post(
+        client,
+        "/api/v1/workspace/load",
+        json={"path": str(workspace)},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert response.status_code == 200
+
+    listed = _get(client, "/api/v1/packs").json()
+    entry = next(pack for pack in listed if pack["name"] == "bad")
+    assert entry["error"] is not None
+    assert "unknown deterministic check" in entry["error"]
+
+
 def test_pack_validate_reports_gate_errors(tmp_path: Path) -> None:
     from conformdag.platform.packs import PackService
 
