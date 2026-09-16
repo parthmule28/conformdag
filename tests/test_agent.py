@@ -87,9 +87,7 @@ def test_pr_client_sets_a_120s_timeout() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(201, json={"html_url": "https://github.com/x/pull/1"})
 
-    client = pr_module._build_client(
-        "https://api.github.com", "token", transport=httpx.MockTransport(handler)
-    )
+    client = pr_module._build_client("https://api.github.com", "token", transport=httpx.MockTransport(handler))
 
     assert client.timeout == httpx.Timeout(120.0)
 
