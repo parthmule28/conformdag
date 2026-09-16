@@ -89,6 +89,7 @@ class ResidualFailure:
     path: str
     fix_kind: str
     iterations: int
+    reason: str = ""
 
 
 @dataclass
@@ -221,9 +222,26 @@ def _patch_candidates(
             needs_import = needs_import or import_needed
         if not spans:
             continue
+        unique_spans: list[EditSpan] = []
+        for span in spans:
+            if span not in unique_spans:
+                unique_spans.append(span)
         if needs_import:
-            spans.append(timedelta_import_span(source))
-        candidates[relative] = apply_spans(source, spans)
+            import_span = timedelta_import_span(source)
+            if import_span not in unique_spans:
+                unique_spans.append(import_span)
+        try:
+            candidates[relative] = apply_spans(source, unique_spans)
+        except ValueError as exc:
+            residuals.append(
+                ResidualFailure(
+                    policy_id=",".join(sorted({finding.policy_id for finding in findings})),
+                    path=relative,
+                    fix_kind=",".join(sorted({finding.fix.fix_kind for finding in findings if finding.fix})),
+                    iterations=iteration,
+                    reason=f"overlapping edit spans: {exc}",
+                )
+            )
     return candidates, residuals
 
 

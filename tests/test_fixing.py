@@ -23,12 +23,16 @@ from conformdag.fixing.codemods import (
     generate_spans,
     timedelta_import_span,
 )
+from conformdag.fixing.engine import ResidualFailure
 from conformdag.fixing.specs import EditSpan, apply_spans
 from conformdag.models import (
     AirflowProfile,
     EnforcementConfig,
     EnforcementType,
     ExecutionTimeoutConfig,
+    Finding,
+    FindingLocation,
+    FindingStatus,
     LifecycleStatus,
     Ownership,
     Policy,
@@ -586,6 +590,99 @@ def test_apply_spans_rejects_overlapping_and_out_of_range_edits() -> None:
     out_of_range = [EditSpan(9, 0, 9, 0, "x")]
     with pytest.raises(ValueError, match="outside source"):
         apply_spans(source, out_of_range)
+
+
+def test_patch_candidates_converts_overlapping_spans_into_residuals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from conformdag.fixing import engine as engine_module
+
+    original = {"dags/a.py": "line one\nline two\n"}
+    finding = Finding(
+        policy_id="AIR-TST-001",
+        policy_version="1.0.0",
+        status=FindingStatus.FAIL,
+        severity=Severity.HIGH,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(file=Path("dags/a.py"), start_line=1),
+        fingerprint="f" * 64,
+        fix=RemediationPayload(
+            fix_kind="x",
+            action=RemediationAction.SET_KWARG,
+            target=RemediationTarget(line=1, column=0, node="dag-call"),
+            value="False",
+        ),
+    )
+
+    def generate_overlapping_spans(_source: str, _payload: RemediationPayload) -> tuple[list[EditSpan], bool]:
+        return (
+            [
+                EditSpan(1, 0, 1, 8, "replaced"),
+                EditSpan(1, 3, 1, 4, "overlap"),
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(engine_module, "generate_spans", generate_overlapping_spans)
+
+    def import_span(_source: str) -> EditSpan:
+        return EditSpan(1, 0, 1, 0, "")
+
+    monkeypatch.setattr(engine_module, "timedelta_import_span", import_span)
+
+    patch_candidates = cast(
+        "Callable[[dict[str, str], dict[str, str], dict[str, list[Finding]], int], tuple[dict[str, str], list[ResidualFailure]]]",
+        engine_module.__dict__["_patch_candidates"],
+    )
+    candidates, residuals = patch_candidates(original, {}, {"dags/a.py": [finding]}, 1)
+
+    assert candidates == {}
+    assert len(residuals) == 1
+    assert residuals[0].policy_id == "AIR-TST-001"
+    assert "overlap" in residuals[0].reason
+
+
+def test_patch_candidates_deduplicates_identical_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from conformdag.fixing import engine as engine_module
+
+    original = {"dags/a.py": "from airflow import DAG\ndag = DAG()\n"}
+    finding = Finding(
+        policy_id="AIR-TST-001",
+        policy_version="1.0.0",
+        status=FindingStatus.FAIL,
+        severity=Severity.HIGH,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(file=Path("dags/a.py"), start_line=2),
+        fingerprint="f" * 64,
+        fix=RemediationPayload(
+            fix_kind="x",
+            action=RemediationAction.ADD_OWNER,
+            target=RemediationTarget(line=2, column=0, enclosing="dag", node="dag-call"),
+            value="platform",
+        ),
+    )
+    span = EditSpan(2, 10, 2, 10, "owner='platform'")
+
+    def generate_duplicate_spans(_source: str, _payload: RemediationPayload) -> tuple[list[EditSpan], bool]:
+        return [span, span], False
+
+    monkeypatch.setattr(engine_module, "generate_spans", generate_duplicate_spans)
+
+    def import_span(_source: str) -> EditSpan:
+        return EditSpan(1, 0, 1, 0, "")
+
+    monkeypatch.setattr(engine_module, "timedelta_import_span", import_span)
+
+    patch_candidates = cast(
+        "Callable[[dict[str, str], dict[str, str], dict[str, list[Finding]], int], tuple[dict[str, str], list[ResidualFailure]]]",
+        engine_module.__dict__["_patch_candidates"],
+    )
+    candidates, residuals = patch_candidates(original, {}, {"dags/a.py": [finding]}, 1)
+
+    assert not residuals
+    assert candidates["dags/a.py"].count("owner='platform'") == 1
 
 
 def test_cli_fix_apply_reports_residual_with_exit_one(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
