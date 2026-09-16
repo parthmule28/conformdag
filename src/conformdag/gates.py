@@ -39,12 +39,19 @@ def blocking_findings(report: ScanReport) -> list[Finding]:
     ]
 
 
-def _evaluate_rule(rule: GateRule, report: ScanReport, baseline_report: ScanReport | None) -> GateRuleResult:
+def _evaluate_rule(
+    rule: GateRule,
+    report: ScanReport,
+    baseline_report: ScanReport | None,
+    baseline_fingerprints: set[str] | None,
+) -> GateRuleResult:
     if isinstance(rule, NoNewFindingsRule):
-        baseline_fingerprints = (
-            {finding.fingerprint for finding in baseline_report.findings} if baseline_report is not None else set[str]()
+        fingerprints = (
+            {finding.fingerprint for finding in baseline_report.findings}
+            if baseline_report is not None
+            else baseline_fingerprints or set()
         )
-        new = [finding for finding in blocking_findings(report) if finding.fingerprint not in baseline_fingerprints]
+        new = [finding for finding in blocking_findings(report) if finding.fingerprint not in fingerprints]
         return GateRuleResult(
             rule_type=rule.type,
             passed=not new,
@@ -88,20 +95,35 @@ def _evaluate_rule(rule: GateRule, report: ScanReport, baseline_report: ScanRepo
     )
 
 
-def evaluate_gate(gate: QualityGate, report: ScanReport, baseline_report: ScanReport | None) -> GateResult:
+def evaluate_gate(
+    gate: QualityGate,
+    report: ScanReport,
+    baseline_report: ScanReport | None,
+    *,
+    baseline_fingerprints: set[str] | None = None,
+) -> GateResult:
     """Evaluate one gate; the gate passes only when every rule passes."""
-    results = [_evaluate_rule(rule, report, baseline_report) for rule in gate.rules]
+    results = [_evaluate_rule(rule, report, baseline_report, baseline_fingerprints) for rule in gate.rules]
     return GateResult(gate_id=gate.id, passed=all(result.passed for result in results), rules=results)
 
 
-def evaluate_pack_gates(pack: PolicyPack, report: ScanReport, baseline_report: ScanReport | None) -> GateResult | None:
+def evaluate_pack_gates(
+    pack: PolicyPack,
+    report: ScanReport,
+    baseline_report: ScanReport | None,
+    *,
+    baseline_fingerprints: set[str] | None = None,
+) -> GateResult | None:
     """Evaluate all gates; return the first failing gate or the first gate overall.
 
     Returns None when the pack defines no gates (legacy behavior applies).
     """
     if not pack.quality_gates:
         return None
-    results = [evaluate_gate(gate, report, baseline_report) for gate in pack.quality_gates]
+    results = [
+        evaluate_gate(gate, report, baseline_report, baseline_fingerprints=baseline_fingerprints)
+        for gate in pack.quality_gates
+    ]
     failing = next((result for result in results if not result.passed), None)
     return failing if failing is not None else results[0]
 

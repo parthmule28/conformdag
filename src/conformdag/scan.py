@@ -41,7 +41,7 @@ class SemanticProvider(Protocol):
     ) -> list[SemanticResponse]: ...
 
 
-def _load_pack_for_scan(
+def load_pack_for_scan(
     repository_root: Path,
     policy_pack: Path | None,
 ) -> tuple[ProjectConfig, PolicyPack]:
@@ -70,7 +70,7 @@ def scan_repository(
 ) -> ScanReport:
     """Run source analysis and any explicitly supplied semantic provider."""
     root = repository_root.resolve()
-    config, pack = _load_pack_for_scan(root, policy_pack)
+    config, pack = load_pack_for_scan(root, policy_pack)
     files, discovery_issues = discover_python_files(
         root,
         config.scan.include,
@@ -283,7 +283,7 @@ def scan_repository(
 def preview_model_context(repository_root: Path, policy_pack: Path | None = None) -> SemanticContext:
     """Build the redacted semantic context preview without contacting a provider."""
     root = repository_root.resolve()
-    config, pack = _load_pack_for_scan(root, policy_pack)
+    config, pack = load_pack_for_scan(root, policy_pack)
     files, _ = discover_python_files(
         root,
         config.scan.include,

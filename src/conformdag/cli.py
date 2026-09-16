@@ -50,8 +50,8 @@ from conformdag.reference import (
 )
 from conformdag.reporting import has_blocking_failures, normalize_report, render_html, render_sarif
 from conformdag.runtime import RuntimePhaseError, build_runtime_manifest, execute_runtime
+from conformdag.scan import load_pack_for_scan, scan_repository
 from conformdag.scan import preview_model_context as build_model_context_preview
-from conformdag.scan import scan_repository
 from conformdag.semantic import CachedSemanticProvider, OpenAICompatibleProvider, SemanticCache
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -589,12 +589,10 @@ def scan(
     ):
         _fail(ValueError("--preview-model-context cannot be combined with runtime, semantic, or output"))
     root = path.resolve()
-    selected_pack = resolve_policy_pack_path(policy_pack) if policy_pack is not None else None
     try:
-        config = load_project_config(root / "conformdag.yaml")
-        pack = select_policy_pack(selected_pack, root)
+        config, pack = load_pack_for_scan(root, policy_pack)
         if preview_model_context:
-            preview = build_model_context_preview(root, selected_pack)
+            preview = build_model_context_preview(root, policy_pack)
             typer.echo(
                 json.dumps(
                     {
@@ -669,7 +667,7 @@ def scan(
 
         report = scan_repository(
             root,
-            selected_pack,
+            policy_pack,
             semantic_provider=provider,
             semantic_provider_name=provider_name,
             semantic_model=selected_semantic_model if semantic_enabled else None,

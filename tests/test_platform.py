@@ -1132,6 +1132,78 @@ def test_runner_persists_configured_pack_baseline_gate(
         assert isinstance(changed_gate, dict) and changed_gate["passed"] is False
 
 
+def test_runner_uses_retained_baseline_findings_after_artifact_pruning(platform_env: str, tmp_path: Path) -> None:
+    (tmp_path / "standards").mkdir()
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "dags/dag.py").write_text("from airflow import DAG\ndag = DAG(dag_id='x')\n", encoding="utf-8")
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "retained-baseline",
+        "version": "1",
+        "quality_gates": [{"id": "baseline", "rules": [{"type": "no-new-findings"}]}],
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "owner",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "version": "1",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"], "blocking": True},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    pack_path = tmp_path / "pack.yaml"
+    _write_yaml(pack_path, pack)
+    (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
+
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(pack_path)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
+        session.commit()
+
+    settings = WorkerSettings(retention_keep=1)
+    assert run_worker_once(factory, platform_env, settings) == "scan1"
+    with factory() as session:
+        baseline = session.get(ScanRow, "scan1")
+        assert baseline is not None and baseline.report_json is not None
+        repository = session.get(RepositoryRow, "repo1")
+        assert repository is not None
+        repository.baseline_scan_id = "scan1"
+        session.add(ScanRow(id="scan2", repository_id="repo1", status="queued"))
+        session.commit()
+
+    assert run_worker_once(factory, platform_env, settings) == "scan2"
+    with factory() as session:
+        baseline = session.get(ScanRow, "scan1")
+        assert baseline is not None and baseline.report_json is None
+        retained = session.scalars(select(FindingRow).where(FindingRow.scan_id == "scan1")).all()
+        assert retained
+        session.add(ScanRow(id="scan3", repository_id="repo1", status="queued"))
+        session.commit()
+
+    assert run_worker_once(factory, platform_env, settings) == "scan3"
+    with factory() as session:
+        current = session.get(ScanRow, "scan3")
+        assert current is not None and current.report_json is not None
+        gate = current.report_json.get("gate_result")
+        assert isinstance(gate, dict) and gate["passed"] is True
+
+
 def test_load_settings_reads_token_and_retention(monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.platform.app import load_settings
 
@@ -1452,6 +1524,42 @@ def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
 
     with pytest.raises(PackError):
         service.delete_policy("test", "AIR-DET-001")
+
+
+def test_pack_policy_save_endpoint_persists_dashboard_check_fields(client: TestClient, tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackService
+
+    (tmp_path / "standards").mkdir()
+    pack_path = tmp_path / "pack.yaml"
+    copyfile("policies/pack.yaml", pack_path)
+    copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
+    app = cast("FastAPI", client.app)
+    service = cast("PackService", app.state.pack_service)
+    service.register("org", pack_path)
+
+    payload = {
+        "title": "Updated owner policy",
+        "version": "2.0.0",
+        "status": "ACTIVE",
+        "severity": "high",
+        "check_kind": "required-owner",
+        "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+        "source_document": "standards/dag-authoring.md",
+        "source_section": "Ownership and metadata",
+        "invariant": "Every DAG has an owner.",
+    }
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json=payload,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200
+    saved = load_policy_pack(pack_path, tmp_path)
+    policy = next(item for item in saved.policies if item.id == "AIR-DET-001")
+    assert policy.title == "Updated owner policy"
+    assert policy.configuration.kind == "required-owner"
+    assert policy.configuration.allowed_values == ["platform"]
 
 
 def test_pack_service_validate(tmp_path: Path) -> None:

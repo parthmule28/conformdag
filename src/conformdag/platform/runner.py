@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from conformdag.analysis import ParseCache
@@ -123,11 +123,23 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             loaded_pack = None
         if loaded_pack is not None:
             baseline_report: ScanReport | None = None
+            baseline_fingerprints: set[str] | None = None
             if repository.baseline_scan_id is not None:
                 baseline_scan = session.get(ScanRow, repository.baseline_scan_id)
                 if baseline_scan is not None and baseline_scan.report_json is not None:
                     baseline_report = ScanReport.model_validate(baseline_scan.report_json)
-            gate_result = evaluate_pack_gates(loaded_pack, report, baseline_report)
+                elif baseline_scan is not None:
+                    baseline_fingerprints = set(
+                        session.scalars(
+                            select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline_scan.id)
+                        ).all()
+                    )
+            gate_result = evaluate_pack_gates(
+                loaded_pack,
+                report,
+                baseline_report,
+                baseline_fingerprints=baseline_fingerprints,
+            )
         normalized = normalize_report(report)
         if gate_result is not None:
             normalized = normalized.model_copy(update={"gate_result": gate_result})

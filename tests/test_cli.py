@@ -146,6 +146,17 @@ def test_doctor_uses_configured_policy_pack(tmp_path: Path, monkeypatch: pytest.
     assert "PASS pack: configured 1" in result.stdout
 
 
+def test_doctor_accepts_the_real_org_pack(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    monkeypatch.delenv("CONFORMDAG_PLATFORM_DSN", raising=False)
+    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+
+    result = CliRunner().invoke(app, ["doctor"])
+
+    assert result.exit_code == 0, result.stderr
+    assert "PASS registry: every deterministic check is registered" in result.stdout
+
+
 def test_doctor_reports_unknown_hybrid_deterministic_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "policies").mkdir()
     standards = tmp_path / "standards" / "dag-authoring.md"
@@ -644,4 +655,29 @@ def test_scan_baseline_satisfies_no_new_findings(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     report = json.loads(result.stdout)
+    assert report["gate_result"]["passed"] is True
+
+
+def test_scan_uses_configured_pack_for_gate_evaluation(tmp_path: Path) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=True, owner=None, count=2)
+    configured_dir = root / "configured"
+    configured_dir.mkdir()
+    (configured_dir / "pack.yaml").write_text((root / "pack.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+
+    implicit_dir = root / "policies"
+    implicit_dir.mkdir()
+    implicit_pack: dict[str, Any] = YAML(typ="safe").load(  # pyright: ignore[reportUnknownMemberType]
+        (root / "pack.yaml").read_text(encoding="utf-8")
+    )
+    implicit_pack["quality_gates"] = [{"id": "implicit", "rules": [{"type": "max-findings", "count": 1}]}]
+    _write_yaml(implicit_dir / "pack.yaml", implicit_pack)
+    (root / "conformdag.yaml").write_text(
+        'config_version: "1"\nscan:\n  policy_pack: configured/pack.yaml\n', encoding="utf-8"
+    )
+
+    result = CliRunner().invoke(app, ["scan", "--path", str(root), "--format", "json"])
+
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["gate_result"]["gate_id"] == "default"
     assert report["gate_result"]["passed"] is True

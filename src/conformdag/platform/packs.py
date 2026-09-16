@@ -71,22 +71,42 @@ class PackService:
     def upsert_policy(self, pack_name: str, policy_id: str, policy_data: dict[str, Any]) -> None:
         pack_path = self._require_pack(pack_name)
         pack = load_policy_pack(pack_path, pack_path.parent)
+        existing = next((policy for policy in pack.policies if policy.id == policy_id), None)
+        clean = existing.model_dump(mode="json") if existing is not None else dict(policy_data)
+        clean.update(
+            {
+                "title": policy_data["title"],
+                "version": policy_data["version"],
+                "status": policy_data["status"],
+                "severity": policy_data["severity"],
+                "invariant": policy_data["invariant"],
+            }
+        )
+        if policy_data.get("safe_path") is not None:
+            clean["safe_path"] = policy_data["safe_path"]
         source_doc = self._resolve_source(pack_path, policy_data.get("source_document", "standards/dag-authoring.md"))
         source_text = source_doc.read_text(encoding="utf-8")
         content_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
 
-        policy_data["source"] = {
+        clean["source"] = {
             "document": policy_data.get("source_document", "standards/dag-authoring.md"),
             "section": policy_data.get("source_section", "Standards"),
             "content_hash": content_hash,
         }
-        policy_data["id"] = policy_id
+        clean["id"] = policy_id
+        if "check_config" in policy_data or "check_kind" in policy_data:
+            configuration = dict(policy_data["check_config"])
+            configuration["kind"] = policy_data["check_kind"]
+            clean["configuration"] = configuration
+        elif "configuration" in policy_data:
+            clean["configuration"] = policy_data["configuration"]
+        for key in ("source_document", "source_section", "check_kind", "check_config"):
+            clean.pop(key, None)
 
-        # Strip transport-only fields before validation
-        transport_keys = {"source_document", "source_section", "check_kind", "check_config"}
-        clean = {k: v for k, v in policy_data.items() if k not in transport_keys}
-
-        validated = Policy.model_validate(clean)
+        try:
+            validated = Policy.model_validate(clean)
+        except ValueError as exc:
+            raise PackError(str(exc)) from exc
         idx = next((i for i, p in enumerate(pack.policies) if p.id == policy_id), None)
         if idx is not None:
             pack.policies[idx] = validated

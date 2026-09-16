@@ -513,10 +513,12 @@ def _pack_policies(request: Request, pack_name: str) -> list[dict[str, Any]]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-def _pack_upsert_policy(request: Request, pack_name: str, policy_id: str, payload: dict[str, Any]) -> dict[str, str]:
+def _pack_upsert_policy(
+    request: Request, pack_name: str, policy_id: str, payload: PolicyUpsertRequest
+) -> dict[str, str]:
     service: PackService = request.app.state.pack_service
     try:
-        service.upsert_policy(pack_name, policy_id, payload)
+        service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json"))
     except PackError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "saved", "policy_id": policy_id}

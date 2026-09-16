@@ -148,7 +148,7 @@ policies:
     ownership: {owner: platform}
     source: {document: standards/dag-authoring.md, section: "Semantic review", version: "1", content_hash: 5d787d525046bab834a504d24649a119eb7a992829cc29d1809894becd3647ab}
     invariant: Logs do not expose credentials or sensitive values.
-    enforcement: {type: hybrid, deterministic_checks: [logging-calls], model_check: true, allow_abstention: true, blocking: true}
+    enforcement: {type: hybrid, deterministic_checks: [sensitive-logging], model_check: true, allow_abstention: true, blocking: true}
     configuration: {kind: sensitive-logging, secret_patterns: [password, token, secret], logging_calls: [logging.info, logging.warning, logging.error]}
   - id: AIR-SEM-004
     title: Approved abstractions preserve intent
