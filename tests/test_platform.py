@@ -3,6 +3,7 @@
 import hashlib
 import importlib
 import json
+import logging
 import os
 import signal
 import threading
@@ -81,6 +82,11 @@ def _platform_state(client: TestClient) -> tuple[sessionmaker[Session], Platform
     return factory, settings
 
 
+def _log_extra(record: logging.LogRecord, name: str) -> object:
+    """Read a dynamically-added logging extra with a concrete type boundary."""
+    return cast("object", record.__dict__[name])
+
+
 def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         YAML(typ="safe").dump(payload, handle)  # pyright: ignore[reportUnknownMemberType]
@@ -155,6 +161,43 @@ def test_workspace_rejects_missing_paths_and_duplicates(tmp_path: Path) -> None:
 def test_health_is_open_and_reads_need_no_token(client: TestClient) -> None:
     assert _get(client, "/api/v1/health").status_code == 200
     assert _get(client, "/api/v1/repos").status_code == 200
+
+
+def test_json_formatter_emits_single_line_json() -> None:
+    from conformdag.platform import logging as platform_logging
+
+    formatter = platform_logging.JsonFormatter()
+    record = logging.LogRecord("conformdag.worker", logging.INFO, "worker.py", 10, "scan started", None, None)
+    record.scan_id = "scan1"
+
+    payload = json.loads(formatter.format(record))
+
+    assert payload["level"] == "INFO"
+    assert payload["logger"] == "conformdag.worker"
+    assert payload["message"] == "scan started"
+    assert payload["scan_id"] == "scan1"
+
+
+def test_platform_startup_installs_json_logging(client: TestClient) -> None:
+    from conformdag.platform.logging import JsonFormatter
+
+    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
+
+
+def test_request_middleware_logs_and_echoes_request_id(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    request_id = "request-123"
+    with caplog.at_level(logging.INFO, logger="conformdag.platform.request"):
+        response = _as_httpx(client).get("/api/v1/health", headers={"X-Request-ID": request_id})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"] == request_id
+    request_records = [record for record in caplog.records if record.name == "conformdag.platform.request"]
+    assert len(request_records) == 1
+    record = request_records[0]
+    assert _log_extra(record, "request_id") == request_id
+    assert _log_extra(record, "method") == "GET"
+    assert _log_extra(record, "path") == "/api/v1/health"
+    assert _log_extra(record, "status") == 200
 
 
 def test_mutations_require_admin_token(client: TestClient, platform_env: str) -> None:
@@ -289,7 +332,7 @@ def test_abandoned_scan_fails_after_attempt_budget(platform_env: str) -> None:
 
 
 def test_worker_executes_queued_scan_end_to_end(
-    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     (tmp_path / "standards").mkdir()
     copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
@@ -307,9 +350,18 @@ def test_worker_executes_queued_scan_end_to_end(
         session.commit()
 
     settings = WorkerSettings(retention_keep=50)
-    handled = run_worker_once(factory, platform_env, settings)
+    worker_logger = logging.getLogger("conformdag.worker")
+    worker_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="conformdag.worker"):
+            handled = run_worker_once(factory, platform_env, settings)
+    finally:
+        worker_logger.removeHandler(caplog.handler)
 
     assert handled == "scan1"
+    events = [record for record in caplog.records if record.name == "conformdag.worker"]
+    assert [record.getMessage() for record in events] == ["scan_claimed", "scan_finished"]
+    assert all(_log_extra(record, "scan_id") == "scan1" for record in events)
     with factory() as session:
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "succeeded"
@@ -622,7 +674,9 @@ def test_load_settings_requires_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
         load_settings()
 
 
-def test_runner_persists_scan_failure(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_persists_scan_failure(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     from conformdag.platform.runner import execute_scan
 
     factory = create_session_factory(platform_env)
@@ -632,9 +686,21 @@ def test_runner_persists_scan_failure(platform_env: str, tmp_path: Path, monkeyp
         session.commit()
 
     monkeypatch.chdir(tmp_path)
-    code = execute_scan("scan1", platform_env)
+    runner_logger = logging.getLogger("conformdag.runner")
+    runner_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="conformdag.runner"):
+            code = execute_scan("scan1", platform_env)
+    finally:
+        runner_logger.removeHandler(caplog.handler)
 
     assert code == 1
+    from conformdag.platform.logging import JsonFormatter
+
+    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
+    events = [record for record in caplog.records if record.name == "conformdag.runner"]
+    assert [record.getMessage() for record in events] == ["scan_started", "scan_completed"]
+    assert all(_log_extra(record, "scan_id") == "scan1" for record in events)
     with factory() as session:
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "failed"

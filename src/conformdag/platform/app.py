@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
+import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -23,6 +27,7 @@ from conformdag.platform.db import (
     new_id,
     utcnow,
 )
+from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackError, PackService
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
 from conformdag.reporting import render_html, render_sarif
@@ -358,6 +363,7 @@ def update_suppression(request: Request, suppression_id: str, payload: Suppressi
 
 def create_app(session_factory: sessionmaker[Session], settings: PlatformSettings) -> FastAPI:
     """Build the platform FastAPI application bound to one session factory."""
+    install_json_logging()
     app = FastAPI(title="ConformDAG Platform", version="1")
     app.state.session_factory = session_factory
     app.state.settings = settings
@@ -368,6 +374,28 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
         pass
     else:
         _register_workspace_packs(app.state.pack_service, workspace)
+
+    async def request_logging_middleware(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+        start = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        response.headers["X-Request-ID"] = request_id
+        logging.getLogger("conformdag.platform.request").info(
+            "request",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
+        return response
+
+    app.middleware("http")(request_logging_middleware)
 
     app.get(API_PREFIX + "/health")(_health)
     app.post(API_PREFIX + "/repos", dependencies=[Depends(require_admin)])(register_repository)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ from conformdag.platform.db import (
     create_session_factory,
     utcnow,
 )
+from conformdag.platform.logging import install_json_logging
 from conformdag.policy import resolve_configured_policy_pack, select_policy_pack
 from conformdag.reporting import normalize_report
 from conformdag.scan import scan_repository
@@ -68,7 +70,9 @@ def _ingest(session: Session, scan: ScanRow, report: ScanReport) -> None:
 
 def execute_scan(scan_id: str, dsn: str) -> int:
     """Run one claimed scan inside this subprocess and persist the outcome."""
+    logger = logging.getLogger("conformdag.runner")
     factory = create_session_factory(dsn)
+    install_json_logging()
     with factory() as session:
         scan = session.get(ScanRow, scan_id)
         if scan is None or scan.status != "running":
@@ -83,15 +87,18 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             return 2
         pack = repository.policy_pack
         try:
+            logger.info("scan_started", extra={"scan_id": scan_id})
             report = scan_repository(
                 Path(repository.path), Path(pack) if pack else None, parse_cache=worker_parse_cache()
             )
         except PERSISTENT_FAILURES as exc:
+            logger.info("scan_completed", extra={"scan_id": scan_id, "error": str(exc)})
             scan.status = "failed"
             scan.error = str(exc)
             scan.finished_at = utcnow()
             session.commit()
             return 1
+        logger.info("scan_completed", extra={"scan_id": scan_id})
         session.expire_all()
         refreshed = session.get(ScanRow, scan_id)
         if refreshed is not None and refreshed.status == "cancelled":

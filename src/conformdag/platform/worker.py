@@ -22,6 +22,7 @@ from conformdag.platform.db import (
     stale_running_cutoff,
     utcnow,
 )
+from conformdag.platform.logging import install_json_logging
 
 DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_IDLE_SECONDS = 600
@@ -91,12 +92,14 @@ def execute_claimed_scan(dsn: str, scan_id: str, settings: WorkerSettings) -> st
 
 def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: WorkerSettings) -> str | None:
     """Claim and execute at most one scan; return the handled scan id or None."""
+    logger = logging.getLogger("conformdag.worker")
     with session_factory() as session:
         scan = claim_queued_scan(session, stale_running_cutoff(settings.idle_seconds), settings.max_attempts)
         if scan is None:
             return None
         scan_id = scan.id
         session.commit()
+    logger.info("scan_claimed", extra={"scan_id": scan_id})
 
     outcome_error = execute_claimed_scan(dsn, scan_id, settings)
 
@@ -110,6 +113,10 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
             _apply_retention(session, final.repository_id, settings)
         elif final is not None:
             _apply_retention(session, final.repository_id, settings)
+    finished_extra: dict[str, object] = {"scan_id": scan_id}
+    if outcome_error:
+        finished_extra["error"] = outcome_error
+    logger.info("scan_finished", extra=finished_extra)
     return scan_id
 
 
@@ -121,6 +128,7 @@ def _apply_retention(session: Session, repository_id: str, settings: WorkerSetti
 
 def run_worker(session_factory: sessionmaker[Session], dsn: str, settings: WorkerSettings) -> None:
     """Run the durable worker loop until interrupted or shut down gracefully."""
+    install_json_logging()
     logger = logging.getLogger("conformdag.worker")
     with suppress(ValueError):
         install_signal_handlers()
