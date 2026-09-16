@@ -26,6 +26,7 @@ from conformdag.platform.db import (
     RepositoryRow,
     ScanRow,
     SuppressionRow,
+    eligible_baseline,
     new_id,
     utcnow,
 )
@@ -299,6 +300,11 @@ def set_baseline(request: Request, repository_id: str, payload: BaselineSetReque
         scan = session.get(ScanRow, payload.scan_id)
         if scan is None or scan.repository_id != repository_id:
             raise HTTPException(status_code=404, detail="scan not found for this repository")
+        if eligible_baseline(session, repository_id, payload.scan_id) is None:
+            raise HTTPException(
+                status_code=409,
+                detail="scan is not eligible as a baseline: it must be a succeeded, complete scan",
+            )
         repository.baseline_scan_id = payload.scan_id
         session.commit()
         return {"repository_id": repository_id, "baseline_scan_id": payload.scan_id}
@@ -335,11 +341,11 @@ def scan_findings(
         if scan is not None:
             repository = session.get(RepositoryRow, scan.repository_id)
             baseline = (
-                session.get(ScanRow, repository.baseline_scan_id)
+                eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
                 if repository and repository.baseline_scan_id
                 else None
             )
-            if baseline is not None and baseline.repository_id == scan.repository_id and baseline.status == "succeeded":
+            if baseline is not None:
                 baseline_fingerprints = set(
                     session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline.id)).all()
                 )

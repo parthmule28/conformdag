@@ -76,7 +76,11 @@ def _evaluate_rule(
             matching_findings=len(failing),
         )
     if isinstance(rule, AlwaysBlockRule):
-        blocked = [f for f in blocking_findings(report) if f.policy_id in rule.policy_ids]
+        blocked = [
+            finding
+            for finding in report.findings
+            if finding.status is FindingStatus.FAIL and not finding.suppressed and finding.policy_id in rule.policy_ids
+        ]
         return GateRuleResult(
             rule_type=rule.type,
             passed=not blocked,

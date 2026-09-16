@@ -23,15 +23,24 @@ from conformdag.models import (
 )
 
 
-def _finding(policy_id: str, status: FindingStatus, fingerprint: str, *, suppressed: bool = False) -> Finding:
+def _finding(
+    policy_id: str,
+    status: FindingStatus,
+    fingerprint: str,
+    *,
+    suppressed: bool = False,
+    enforcement: EnforcementType = EnforcementType.DETERMINISTIC,
+    blocking: bool = False,
+) -> Finding:
     return Finding(
         policy_id=policy_id,
         policy_version="1.0.0",
         status=status,
         severity=Severity.HIGH,
-        enforcement=EnforcementType.DETERMINISTIC,
+        enforcement=enforcement,
         location=FindingLocation(file=Path("dags/a.py"), start_line=1),
         fingerprint=fingerprint,
+        blocking=blocking,
         suppressed=suppressed,
     )
 
@@ -90,6 +99,16 @@ def test_always_block_lists_policy_ids() -> None:
     gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "always-block", "policy_ids": ["AIR-DET-005"]}]})
     assert not evaluate_gate(gate, _report(_finding("AIR-DET-005", FindingStatus.FAIL, "f1")), None).passed
     assert evaluate_gate(gate, _report(_finding("AIR-DET-001", FindingStatus.FAIL, "f2")), None).passed
+
+
+def test_always_block_includes_nonblocking_semantic_failures() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "always-block", "policy_ids": ["AIR-SEM-001"]}]})
+    finding = _finding("AIR-SEM-001", FindingStatus.FAIL, "f1", enforcement=EnforcementType.SEMANTIC, blocking=False)
+    result = evaluate_gate(gate, _report(finding), None)
+    assert result.passed is False
+
+    passing = _finding("AIR-SEM-001", FindingStatus.PASS, "f2", enforcement=EnforcementType.SEMANTIC, blocking=False)
+    assert evaluate_gate(gate, _report(passing), None).passed
 
 
 def test_failure_rate_uses_failing_over_total() -> None:

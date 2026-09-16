@@ -40,8 +40,10 @@ from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
     ScanRow,
+    SuppressionRow,
     claim_queued_scan,
     create_session_factory,
+    new_suppression_id,
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
@@ -134,6 +136,37 @@ def _register(client: TestClient, tmp_path: Path) -> str:
     )
     assert response.status_code == 200
     return response.json()["id"]
+
+
+def queue_repository_with_syntax_error(platform_env: str, tmp_path: Path) -> str:
+    """Register one repository whose DAG cannot parse and return a running scan id."""
+    root = tmp_path / "broken-repo"
+    (root / "dags").mkdir(parents=True)
+    (root / "dags/broken.py").write_text("def broken(:\n", encoding="utf-8")
+    (root / "pack.yaml").write_text("schema_version: '1'\nid: x\nversion: '1'\npolicies: []\n", encoding="utf-8")
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        session.add(
+            RepositoryRow(
+                id="repo-broken",
+                name="broken",
+                path=str(root),
+                policy_pack=str(root / "pack.yaml"),
+            )
+        )
+        scan = ScanRow(id="scan-broken", repository_id="repo-broken", status="running")
+        session.add(scan)
+        session.commit()
+        return scan.id
+
+
+def load_scan(platform_env: str, scan_id: str) -> ScanRow:
+    """Return the persisted scan row for one scan id."""
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        scan = session.get(ScanRow, scan_id)
+        assert scan is not None
+        return scan
 
 
 def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
@@ -609,6 +642,7 @@ def test_findings_endpoint_labels_findings_against_repository_baseline(client: T
                 id="baseline-scan",
                 repository_id=repository_id,
                 status="succeeded",
+                complete=True,
                 result_fingerprint="b" * 64,
             )
         )
@@ -883,7 +917,15 @@ def test_cancel_terminal_scan_conflicts(client: TestClient, tmp_path: Path) -> N
 def test_baseline_set_and_listed(client: TestClient, tmp_path: Path) -> None:
     repository_id = _register(client, tmp_path)
     with _platform_state(client)[0]() as session:
-        session.add(ScanRow(id="scan1", repository_id=repository_id, status="succeeded", result_fingerprint="f" * 64))
+        session.add(
+            ScanRow(
+                id="scan1",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="f" * 64,
+            )
+        )
         session.commit()
 
     response = _as_httpx(client).put(
@@ -991,6 +1033,232 @@ def test_runner_rejects_non_running_scan(platform_env: str) -> None:
 
     assert execute_scan("scan1", platform_env) == 2
     assert execute_scan("missing", platform_env) == 2
+
+
+def test_runner_marks_incomplete_report_failed(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    scan_id = queue_repository_with_syntax_error(platform_env, tmp_path)
+
+    assert execute_scan(scan_id, platform_env) == 1
+
+    scan = load_scan(platform_env, scan_id)
+    assert scan.status == "failed"
+    assert scan.complete is False
+    assert scan.error is not None and "PARSE_ERROR" in scan.error
+    assert scan.report_json is not None
+
+
+def test_baseline_eligibility_rejects_ineligible_scans(platform_env: str) -> None:
+    from conformdag.platform.db import eligible_baseline
+
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(RepositoryRow(id="repo2", name="other", path="."))
+        session.add(ScanRow(id="scan-ok", repository_id="repo1", status="succeeded", complete=True))
+        for status in ("queued", "running", "failed", "cancelled"):
+            session.add(ScanRow(id=f"scan-{status}", repository_id="repo1", status=status, complete=True))
+        session.add(ScanRow(id="scan-incomplete", repository_id="repo1", status="succeeded", complete=False))
+        session.add(ScanRow(id="scan-null-complete", repository_id="repo1", status="succeeded"))
+        session.add(ScanRow(id="scan-elsewhere", repository_id="repo2", status="succeeded", complete=True))
+        session.commit()
+
+        assert eligible_baseline(session, "repo1", "scan-ok") is not None
+        for scan_id in (
+            "scan-queued",
+            "scan-running",
+            "scan-failed",
+            "scan-cancelled",
+            "scan-incomplete",
+            "scan-null-complete",
+            "scan-elsewhere",
+            "scan-missing",
+        ):
+            assert eligible_baseline(session, "repo1", scan_id) is None
+
+
+@pytest.mark.parametrize(
+    ("status", "complete"),
+    [("queued", None), ("running", None), ("failed", None), ("cancelled", None), ("succeeded", False)],
+)
+def test_baseline_eligibility_rejects_queued_failed_cancelled_and_incomplete_scans(
+    client: TestClient, tmp_path: Path, status: str, complete: bool | None
+) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="scan1", repository_id=repository_id, status=status, complete=complete))
+        session.commit()
+
+    response = _as_httpx(client).put(
+        f"/api/v1/repos/{repository_id}/baseline",
+        json={"scan_id": "scan1"},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 409
+    with _platform_state(client)[0]() as session:
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        assert repository.baseline_scan_id is None
+
+
+def test_runner_baseline_eligibility_requires_succeeded_and_complete(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    (tmp_path / "standards").mkdir()
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "dags/dag.py").write_text("from airflow import DAG\ndag = DAG(dag_id='x')\n", encoding="utf-8")
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "baseline-eligibility",
+        "version": "1",
+        "quality_gates": [{"id": "baseline", "rules": [{"type": "no-new-findings"}]}],
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "owner",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"], "blocking": True},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    _write_yaml(tmp_path / "pack.yaml", pack)
+    (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
+
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    assert execute_scan("scan1", platform_env) == 0
+
+    with factory() as session:
+        finding = session.scalars(select(FindingRow).where(FindingRow.scan_id == "scan1")).one()
+        session.add(ScanRow(id="scan-baseline", repository_id="repo1", status="failed", complete=False))
+        session.add(
+            FindingRow(
+                scan_id="scan-baseline",
+                repository_id="repo1",
+                policy_id=finding.policy_id,
+                policy_version=finding.policy_version,
+                status="FAIL",
+                severity=finding.severity,
+                file_path=finding.file_path,
+                start_line=finding.start_line,
+                fingerprint=finding.fingerprint,
+            )
+        )
+        repository = session.get(RepositoryRow, "repo1")
+        assert repository is not None
+        repository.baseline_scan_id = "scan-baseline"
+        session.add(ScanRow(id="scan2", repository_id="repo1", status="running"))
+        session.commit()
+
+    assert execute_scan("scan2", platform_env) == 0
+
+    scan = load_scan(platform_env, "scan2")
+    assert scan.status == "succeeded"
+    assert scan.report_json is not None
+    gate = scan.report_json.get("gate_result")
+    assert isinstance(gate, dict)
+    assert gate["passed"] is False
+
+
+def test_runner_applies_platform_suppression_before_gate_evaluation(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    (tmp_path / "standards").mkdir()
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "dags/dag.py").write_text("from airflow import DAG\ndag = DAG(dag_id='x')\n", encoding="utf-8")
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "suppressed",
+        "version": "1",
+        "quality_gates": [{"id": "default", "rules": [{"type": "max-findings", "count": 0}]}],
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "owner",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"], "blocking": True},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    _write_yaml(tmp_path / "pack.yaml", pack)
+    (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
+
+    factory = create_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    assert execute_scan("scan1", platform_env) == 0
+
+    prescan = load_scan(platform_env, "scan1")
+    assert prescan.status == "succeeded"
+    assert prescan.report_json is not None
+    pregate = prescan.report_json.get("gate_result")
+    assert isinstance(pregate, dict) and pregate["passed"] is False
+
+    with factory() as session:
+        finding = session.scalars(select(FindingRow).where(FindingRow.scan_id == "scan1")).one()
+        session.add(
+            SuppressionRow(
+                id=new_suppression_id(),
+                policy_id=finding.policy_id,
+                fingerprint=finding.fingerprint,
+                reason="legacy DAG, remediation scheduled",
+                owner="platform",
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+            )
+        )
+        session.add(ScanRow(id="scan2", repository_id="repo1", status="running"))
+        session.commit()
+
+    assert execute_scan("scan2", platform_env) == 0
+
+    with factory() as session:
+        suppressed = session.scalars(select(FindingRow).where(FindingRow.scan_id == "scan2")).one()
+        assert suppressed.suppressed is True
+        scan = session.get(ScanRow, "scan2")
+        assert scan is not None and scan.status == "succeeded"
+        assert scan.report_json is not None
+        gate = scan.report_json.get("gate_result")
+        assert isinstance(gate, dict)
+        assert gate["passed"] is True
 
 
 def test_runner_persists_gate_result(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

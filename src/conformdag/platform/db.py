@@ -191,6 +191,21 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
     return queued_scan
 
 
+def eligible_baseline(session: Session, repository_id: str, scan_id: str) -> ScanRow | None:
+    """Return the scan row when it may serve as one repository's baseline.
+
+    A baseline must belong to the same repository and be a succeeded, complete
+    scan; queued, running, failed, cancelled, and incomplete scans are never
+    eligible.
+    """
+    scan = session.get(ScanRow, scan_id)
+    if scan is None or scan.repository_id != repository_id:
+        return None
+    if scan.status != "succeeded" or scan.complete is not True:
+        return None
+    return scan
+
+
 def count_scans(session: Session, repository_id: str) -> int:
     """Return the number of scans recorded for one repository."""
     return int(

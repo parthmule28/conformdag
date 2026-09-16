@@ -717,6 +717,8 @@ def scan(
             baseline_report = ScanReport.model_validate(json.loads(baseline.read_text(encoding="utf-8")))
         except (OSError, ValueError) as exc:
             _fail(ValueError(f"cannot load baseline report {baseline}: {exc}"))
+        if baseline_report.complete is not True:
+            _fail(ValueError(f"baseline report {baseline} is incomplete and cannot be used"))
     gate_result = evaluate_pack_gates(pack, report, baseline_report)
     if gate_result is not None:
         report = report.model_copy(update={"gate_result": gate_result})
@@ -925,7 +927,7 @@ def baseline_set(scan_id: str) -> None:
     try:
         from sqlalchemy.exc import SQLAlchemyError
 
-        from conformdag.platform.db import RepositoryRow, ScanRow
+        from conformdag.platform.db import RepositoryRow, ScanRow, eligible_baseline
     except ImportError as exc:  # pragma: no cover - guarded by the platform extra
         _fail(ValueError(f"platform extra is not installed: {exc}"))
     try:
@@ -942,6 +944,10 @@ def baseline_set(scan_id: str) -> None:
             repository = session.get(RepositoryRow, scan.repository_id)
             if repository is None:
                 _fail(ValueError(f"repository not found for scan: {scan_id}"))
+            if eligible_baseline(session, scan.repository_id, scan_id) is None:
+                _fail(
+                    ValueError(f"scan {scan_id} is not eligible as a baseline: it must be a succeeded, complete scan")
+                )
             repository.baseline_scan_id = scan_id
             session.commit()
             repository_id = repository.id

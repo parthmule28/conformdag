@@ -249,7 +249,7 @@ def test_baseline_set_marks_scan_in_platform_store(tmp_path: Path, monkeypatch: 
     factory = create_session_factory(dsn)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="core-dags", path=str(tmp_path)))
-        session.add(ScanRow(id="scan1", repository_id="repo1", status="succeeded"))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="succeeded", complete=True))
         session.commit()
 
     result = CliRunner().invoke(app, ["baseline", "set", "scan1"])
@@ -260,6 +260,32 @@ def test_baseline_set_marks_scan_in_platform_store(tmp_path: Path, monkeypatch: 
         repository = session.get(RepositoryRow, "repo1")
         assert repository is not None
         assert repository.baseline_scan_id == "scan1"
+
+
+def test_baseline_eligibility_rejects_ineligible_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform.db import RepositoryRow, ScanRow, create_session_factory
+
+    dsn = f"sqlite:///{tmp_path / 'platform.db'}"
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", dsn)
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_TOKEN", "secret-token")
+    factory = create_session_factory(dsn)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="core-dags", path=str(tmp_path)))
+        for status in ("queued", "failed", "cancelled"):
+            session.add(ScanRow(id=f"scan-{status}", repository_id="repo1", status=status))
+        session.add(ScanRow(id="scan-incomplete", repository_id="repo1", status="succeeded", complete=False))
+        session.commit()
+
+    for scan_id in ("scan-queued", "scan-failed", "scan-cancelled", "scan-incomplete"):
+        result = CliRunner().invoke(app, ["baseline", "set", scan_id])
+
+        assert result.exit_code == 2
+        assert "eligible" in result.stderr
+
+    with factory() as session:
+        repository = session.get(RepositoryRow, "repo1")
+        assert repository is not None
+        assert repository.baseline_scan_id is None
 
 
 def test_validate_policies_accepts_bundled_community_alias() -> None:
@@ -705,6 +731,46 @@ def test_scan_baseline_satisfies_no_new_findings(tmp_path: Path) -> None:
     assert result.exit_code == 0
     report = json.loads(result.stdout)
     assert report["gate_result"]["passed"] is True
+
+
+def test_scan_rejects_incomplete_report_as_baseline(tmp_path: Path) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=True, owner=None, count=2)
+    baseline = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--policy-pack",
+            str(root / "pack.yaml"),
+            "--format",
+            "json",
+            "--output",
+            str(root / "baseline.json"),
+        ],
+    )
+    assert baseline.exit_code == 0
+    payload = json.loads((root / "baseline.json").read_text(encoding="utf-8"))
+    payload["complete"] = False
+    (root / "baseline.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--policy-pack",
+            str(root / "pack.yaml"),
+            "--baseline",
+            str(root / "baseline.json"),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "incomplete" in result.stderr
 
 
 def test_scan_uses_configured_pack_for_gate_evaluation(tmp_path: Path) -> None:

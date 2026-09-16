@@ -19,7 +19,9 @@ from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
     ScanRow,
+    SuppressionRow,
     create_session_factory,
+    eligible_baseline,
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
@@ -68,6 +70,36 @@ def _ingest(session: Session, scan: ScanRow, report: ScanReport) -> None:
         )
 
 
+def _apply_platform_suppressions(session: Session, report: ScanReport) -> ScanReport:
+    """Mark canonical findings matching an active platform suppression as suppressed."""
+    active = session.scalars(select(SuppressionRow).where(SuppressionRow.expires_at > utcnow())).all()
+    if not active:
+        return report
+    suppressed_identities = {(row.policy_id, row.fingerprint) for row in active}
+    findings = [
+        finding
+        if finding.suppressed or (finding.policy_id, finding.fingerprint) not in suppressed_identities
+        else finding.model_copy(update={"suppressed": True})
+        for finding in report.findings
+    ]
+    return report.model_copy(update={"findings": findings})
+
+
+def _incomplete_error(report: ScanReport) -> str:
+    """Return a concise parse/discovery error for an incomplete report."""
+    for issue in report.issues:
+        if issue.fatal:
+            return f"scan incomplete: {issue.code}: {issue.message}"
+    return "scan incomplete: discovery did not finish"  # pragma: no cover - scan marks fatal issues
+
+
+def _was_cancelled(session: Session, scan_id: str) -> bool:
+    """Re-read the scan row so cancellation wins over any runner outcome."""
+    session.expire_all()
+    refreshed = session.get(ScanRow, scan_id)
+    return refreshed is not None and refreshed.status == "cancelled"
+
+
 def execute_scan(scan_id: str, dsn: str) -> int:
     """Run one claimed scan inside this subprocess and persist the outcome."""
     logger = logging.getLogger("conformdag.runner")
@@ -99,11 +131,18 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             session.commit()
             return 1
         logger.info("scan_completed", extra={"scan_id": scan_id})
-        session.expire_all()
-        refreshed = session.get(ScanRow, scan_id)
-        if refreshed is not None and refreshed.status == "cancelled":
-            print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
-            return 0
+        report = _apply_platform_suppressions(session, report)
+        normalized = normalize_report(report)
+        if not normalized.complete:
+            if _was_cancelled(session, scan_id):
+                print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
+                return 0
+            _ingest(session, scan, normalized)
+            scan.status = "failed"
+            scan.error = _incomplete_error(normalized)
+            scan.finished_at = utcnow()
+            session.commit()
+            return 1
         gate_result: GateResult | None = None
         loaded_pack: PolicyPack | None = None
         try:
@@ -124,11 +163,15 @@ def execute_scan(scan_id: str, dsn: str) -> int:
         if loaded_pack is not None:
             baseline_report: ScanReport | None = None
             baseline_fingerprints: set[str] | None = None
-            if repository.baseline_scan_id is not None:
-                baseline_scan = session.get(ScanRow, repository.baseline_scan_id)
-                if baseline_scan is not None and baseline_scan.report_json is not None:
+            baseline_scan = (
+                eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
+                if repository.baseline_scan_id is not None
+                else None
+            )
+            if baseline_scan is not None:
+                if baseline_scan.report_json is not None:
                     baseline_report = ScanReport.model_validate(baseline_scan.report_json)
-                elif baseline_scan is not None:
+                else:
                     baseline_fingerprints = set(
                         session.scalars(
                             select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline_scan.id)
@@ -136,13 +179,15 @@ def execute_scan(scan_id: str, dsn: str) -> int:
                     )
             gate_result = evaluate_pack_gates(
                 loaded_pack,
-                report,
+                normalized,
                 baseline_report,
                 baseline_fingerprints=baseline_fingerprints,
             )
-        normalized = normalize_report(report)
         if gate_result is not None:
             normalized = normalized.model_copy(update={"gate_result": gate_result})
+        if _was_cancelled(session, scan_id):
+            print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
+            return 0
         _ingest(session, scan, normalized)
         scan.status = "succeeded"
         scan.finished_at = utcnow()
