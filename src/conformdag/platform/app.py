@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import PlainTextResponse
 
 from conformdag.models import ScanReport
 from conformdag.platform.db import (
@@ -375,29 +376,36 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     else:
         _register_workspace_packs(app.state.pack_service, workspace)
 
+    def request_error_handler(request: Request, exc: Exception) -> Response:
+        """Add request observability to Starlette's normal unhandled-error response."""
+        request_id = cast(str, request.state.request_id)
+        start = cast(float, request.state.request_started)
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        response = PlainTextResponse("Internal Server Error", status_code=500)
+        response.headers["X-Request-ID"] = request_id
+        logging.getLogger("conformdag.platform.request").exception(
+            "request",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+                "error": str(exc),
+            },
+        )
+        return response
+
+    app.add_exception_handler(Exception, request_error_handler)
+
     async def request_logging_middleware(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
         start = time.perf_counter()
-        try:
-            response = await call_next(request)
-        except Exception as exc:
-            duration_ms = round((time.perf_counter() - start) * 1000, 1)
-            response = Response(status_code=500)
-            response.headers["X-Request-ID"] = request_id
-            logging.getLogger("conformdag.platform.request").exception(
-                "request",
-                extra={
-                    "request_id": request_id,
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status": response.status_code,
-                    "duration_ms": duration_ms,
-                    "error": str(exc),
-                },
-            )
-            return response
+        request.state.request_id = request_id
+        request.state.request_started = start
+        response = await call_next(request)
         duration_ms = round((time.perf_counter() - start) * 1000, 1)
         response.headers["X-Request-ID"] = request_id
         logging.getLogger("conformdag.platform.request").info(

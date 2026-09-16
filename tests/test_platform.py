@@ -230,12 +230,36 @@ def test_request_middleware_handles_unexpected_exception(
         response = _as_httpx(error_client).get("/api/v1/repos", headers={"X-Request-ID": request_id})
 
     assert response.status_code == 500
+    assert response.text == "Internal Server Error"
     assert response.headers["X-Request-ID"] == request_id
     request_records = [record for record in caplog.records if record.name == "conformdag.platform.request"]
     assert len(request_records) == 1
     record = request_records[0]
     assert _log_extra(record, "request_id") == request_id
     assert _log_extra(record, "path") == "/api/v1/repos"
+    assert _log_extra(record, "status") == 500
+
+
+def test_request_middleware_preserves_default_exception_propagation(
+    client: TestClient, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = cast("FastAPI", client.app)
+
+    def exploding_session_factory() -> sessionmaker[Session]:
+        raise RuntimeError("request exploded")
+
+    monkeypatch.setattr(app.state, "session_factory", exploding_session_factory)
+    request_id = "propagated-error-request-123"
+    with (
+        caplog.at_level(logging.INFO, logger="conformdag.platform.request"),
+        pytest.raises(RuntimeError, match="request exploded"),
+    ):
+        _as_httpx(client).get("/api/v1/repos", headers={"X-Request-ID": request_id})
+
+    request_records = [record for record in caplog.records if record.name == "conformdag.platform.request"]
+    assert len(request_records) == 1
+    record = request_records[0]
+    assert _log_extra(record, "request_id") == request_id
     assert _log_extra(record, "status") == 500
 
 
