@@ -87,6 +87,21 @@ def _log_extra(record: logging.LogRecord, name: str) -> object:
     return cast("object", record.__dict__[name])
 
 
+def _json_log_payloads(text: str) -> list[dict[str, Any]]:
+    """Decode JSON log lines from a captured stream, ignoring plain-text diagnostics."""
+    payloads: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            payloads.append(cast("dict[str, Any]", payload))
+    return payloads
+
+
 def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         YAML(typ="safe").dump(payload, handle)  # pyright: ignore[reportUnknownMemberType]
@@ -198,6 +213,30 @@ def test_request_middleware_logs_and_echoes_request_id(client: TestClient, caplo
     assert _log_extra(record, "method") == "GET"
     assert _log_extra(record, "path") == "/api/v1/health"
     assert _log_extra(record, "status") == 200
+
+
+def test_request_middleware_handles_unexpected_exception(
+    client: TestClient, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = cast("FastAPI", client.app)
+
+    def exploding_session_factory() -> sessionmaker[Session]:
+        raise RuntimeError("request exploded")
+
+    monkeypatch.setattr(app.state, "session_factory", exploding_session_factory)
+    error_client = TestClient(app, raise_server_exceptions=False)
+    request_id = "error-request-123"
+    with caplog.at_level(logging.INFO, logger="conformdag.platform.request"):
+        response = _as_httpx(error_client).get("/api/v1/repos", headers={"X-Request-ID": request_id})
+
+    assert response.status_code == 500
+    assert response.headers["X-Request-ID"] == request_id
+    request_records = [record for record in caplog.records if record.name == "conformdag.platform.request"]
+    assert len(request_records) == 1
+    record = request_records[0]
+    assert _log_extra(record, "request_id") == request_id
+    assert _log_extra(record, "path") == "/api/v1/repos"
+    assert _log_extra(record, "status") == 500
 
 
 def test_mutations_require_admin_token(client: TestClient, platform_env: str) -> None:
@@ -332,7 +371,11 @@ def test_abandoned_scan_fails_after_attempt_budget(platform_env: str) -> None:
 
 
 def test_worker_executes_queued_scan_end_to_end(
-    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     (tmp_path / "standards").mkdir()
     copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
@@ -362,6 +405,13 @@ def test_worker_executes_queued_scan_end_to_end(
     events = [record for record in caplog.records if record.name == "conformdag.worker"]
     assert [record.getMessage() for record in events] == ["scan_claimed", "scan_finished"]
     assert all(_log_extra(record, "scan_id") == "scan1" for record in events)
+    runner_events = [
+        payload
+        for payload in _json_log_payloads(capsys.readouterr().err)
+        if payload.get("logger") == "conformdag.runner"
+    ]
+    assert [payload["message"] for payload in runner_events] == ["scan_started", "scan_completed"]
+    assert all(payload["scan_id"] == "scan1" for payload in runner_events)
     with factory() as session:
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "succeeded"

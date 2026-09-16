@@ -380,7 +380,24 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     ) -> Response:
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
         start = time.perf_counter()
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - start) * 1000, 1)
+            response = Response(status_code=500)
+            response.headers["X-Request-ID"] = request_id
+            logging.getLogger("conformdag.platform.request").exception(
+                "request",
+                extra={
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration_ms": duration_ms,
+                    "error": str(exc),
+                },
+            )
+            return response
         duration_ms = round((time.perf_counter() - start) * 1000, 1)
         response.headers["X-Request-ID"] = request_id
         logging.getLogger("conformdag.platform.request").info(

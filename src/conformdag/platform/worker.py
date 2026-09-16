@@ -85,6 +85,9 @@ def execute_claimed_scan(dsn: str, scan_id: str, settings: WorkerSettings) -> st
         )
     except subprocess.TimeoutExpired:
         return f"scan exceeded the {settings.timeout_seconds}s worker timeout"
+    if process.stderr:
+        sys.stderr.write(process.stderr)
+        sys.stderr.flush()
     if process.returncode != 0:
         return f"runner exited with code {process.returncode}: {process.stderr.strip()}"
     return ""
