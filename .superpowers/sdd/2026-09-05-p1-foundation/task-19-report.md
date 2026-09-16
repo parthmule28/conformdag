@@ -98,3 +98,68 @@ warning without changing the exit code.
 - `src/conformdag/cli.py`
 - `tests/test_cli.py`
 - `.superpowers/sdd/2026-09-05-p1-foundation/task-19-report.md`
+
+## Fix Round 1
+
+### Findings Addressed
+
+- `doctor` now resolves and loads `config.scan.policy_pack` as the effective pack,
+  including configured paths outside implicit `policies/` discovery.
+- `baseline set` now converts `SQLAlchemyError` from platform session/migration
+  initialization into the existing user-facing CLI failure path.
+- Doctor registry validation now checks deterministic references on both `DETERMINISTIC`
+  and `HYBRID` policies, matching the scanner's deterministic evaluation path.
+
+### TDD Evidence
+
+Regression tests were written before the fix:
+
+- `test_doctor_uses_configured_policy_pack`
+- `test_doctor_reports_unknown_hybrid_deterministic_check`
+- `test_baseline_set_reports_platform_initialization_sqlalchemy_error`
+
+Red command and result:
+
+```text
+mise exec -- uv run pytest tests/test_cli.py -k "configured_policy_pack or hybrid_deterministic or initialization_sqlalchemy" --tb=short
+3 failed, 31 deselected
+```
+
+Each failure demonstrated the corresponding review defect: implicit-pack output,
+accepted unknown hybrid reference, and uncaught `SQLAlchemyError`.
+
+Focused green result:
+
+```text
+3 passed, 31 deselected
+```
+
+The full CLI suite passed with `34 passed`.
+
+### Validation
+
+`mise run check` passed with:
+
+```text
+format-check: 118 files already formatted
+lint: All checks passed!
+typecheck: 0 errors, 0 warnings, 0 informations
+test: 267 passed, 13 deselected, 1 warning
+validate:packs: both policy packs valid
+```
+
+`mise run test:coverage` passed with:
+
+```text
+267 passed, 13 deselected
+Required test coverage of 90% reached. Total coverage: 90.97%
+```
+
+The existing default pack's `AIR-SEM-003` `HYBRID` reference to `logging-calls` is
+now reported by doctor as an unregistered deterministic check, as required by the
+registry contract. No pack or evaluator scope was added in this fix round.
+
+### Shared Minor
+
+The existing Task 5 API also accepts an unfinished scan as a baseline. This remains
+recorded as a shared Minor only; baseline status validation is outside this fix round.

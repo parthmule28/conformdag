@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 from unittest.mock import patch
 
 import pytest
@@ -120,6 +120,99 @@ def test_doctor_reports_platform_dsn_reachability(tmp_path: Path, monkeypatch: p
     assert result.exit_code == 0
     assert "platform-dsn" in result.stdout
     assert "reachable" in result.stdout
+
+
+def test_doctor_uses_configured_policy_pack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "configured").mkdir()
+    _write_yaml(
+        tmp_path / "policies" / "pack.yaml",
+        {"schema_version": "1", "id": "implicit", "version": "1", "policies": []},
+    )
+    _write_yaml(
+        tmp_path / "configured" / "pack.yaml",
+        {"schema_version": "1", "id": "configured", "version": "1", "policies": []},
+    )
+    (tmp_path / "conformdag.yaml").write_text(
+        'config_version: "1"\nscan:\n  policy_pack: configured/pack.yaml\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONFORMDAG_PLATFORM_DSN", raising=False)
+    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+
+    result = CliRunner().invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "PASS pack: configured 1" in result.stdout
+
+
+def test_doctor_reports_unknown_hybrid_deterministic_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "policies").mkdir()
+    standards = tmp_path / "standards" / "dag-authoring.md"
+    standards.parent.mkdir()
+    standards.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(standards.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    _write_yaml(
+        tmp_path / "policies" / "pack.yaml",
+        {
+            "schema_version": "1",
+            "id": "hybrid-pack",
+            "version": "1",
+            "policies": [
+                {
+                    "id": "AIR-TST-900",
+                    "title": "Hybrid policy",
+                    "version": "1.0.0",
+                    "status": "ACTIVE",
+                    "severity": "medium",
+                    "airflow_profiles": ["3.3.0"],
+                    "ownership": {"owner": "platform"},
+                    "source": {
+                        "document": "standards/dag-authoring.md",
+                        "section": "Ownership and metadata",
+                        "version": "1",
+                        "content_hash": content_hash,
+                    },
+                    "invariant": "Hybrid checks use registered deterministic evaluators.",
+                    "safe_path": "Use a registered deterministic check.",
+                    "enforcement": {
+                        "type": "hybrid",
+                        "deterministic_checks": ["unknown-hybrid"],
+                        "model_check": True,
+                    },
+                    "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+                }
+            ],
+        },
+    )
+    (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONFORMDAG_PLATFORM_DSN", raising=False)
+    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+
+    result = CliRunner().invoke(app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "unknown kinds: unknown-hybrid" in result.stdout
+
+
+def test_baseline_set_reports_platform_initialization_sqlalchemy_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", "sqlite:///platform.db")
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_TOKEN", "secret-token")
+
+    def fail_create_session_factory(_dsn: str) -> NoReturn:
+        raise SQLAlchemyError("migration failed")
+
+    monkeypatch.setattr("conformdag.platform.db.create_session_factory", fail_create_session_factory)
+
+    result = CliRunner().invoke(app, ["baseline", "set", "scan1"])
+
+    assert result.exit_code == 2
+    assert "migration failed" in result.stderr
 
 
 def test_doctor_fails_when_configured_platform_dsn_is_unreachable(

@@ -265,9 +265,14 @@ def doctor() -> None:
     except (OSError, ValueError) as exc:
         rows.append(("config", "FAIL", str(exc)))
 
+    selected_pack = (
+        resolve_configured_policy_pack(config.scan.policy_pack, scan_root=root, from_cli=False)
+        if config is not None
+        else None
+    )
     pack: PolicyPack | None = None
     try:
-        pack = select_policy_pack(None, root)
+        pack = select_policy_pack(selected_pack, root)
         rows.append(("pack", "PASS", f"{pack.id} {pack.version} ({len(pack.policies)} policies)"))
     except PolicyValidationError as exc:
         rows.append(("pack", "FAIL", str(exc)))
@@ -277,7 +282,7 @@ def doctor() -> None:
             {
                 check
                 for policy in pack.policies
-                if policy.enforcement.type is EnforcementType.DETERMINISTIC
+                if policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
                 for check in policy.enforcement.deterministic_checks
                 if check not in CHECK_EVALUATORS
             }
@@ -955,7 +960,7 @@ def baseline_set(scan_id: str) -> None:
         _fail(ValueError(f"platform extra is not installed: {exc}"))
     try:
         settings, session_factory = _platform_session_factory()
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:
         _fail(exc)
     if not settings.admin_token:
         _fail(ValueError("platform admin token is not configured; mutations are disabled"))
