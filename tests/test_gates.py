@@ -111,6 +111,16 @@ def test_always_block_includes_nonblocking_semantic_failures() -> None:
     assert evaluate_gate(gate, _report(passing), None).passed
 
 
+def test_always_block_honors_suppressions() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "always-block", "policy_ids": ["AIR-DET-005"]}]})
+    finding = _finding("AIR-DET-005", FindingStatus.FAIL, "f1", suppressed=True)
+    result = evaluate_gate(gate, _report(finding), None)
+    assert result.passed is True
+    rule = result.rules[0]
+    assert rule.rule_type == "always-block"
+    assert rule.matching_findings == 0
+
+
 def test_failure_rate_uses_failing_over_total() -> None:
     gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "failure-rate", "max_percent": 50.0}]})
     half = _report(
