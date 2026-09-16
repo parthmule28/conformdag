@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from ruamel.yaml import YAML
 from typer.core import TyperGroup, TyperOption
 from typer.main import get_command
@@ -17,6 +18,14 @@ from conformdag.models import FindingStatus, RuntimeObservation
 from conformdag.runtime import RuntimePhaseError
 
 
+def _missing_binary(_command: str) -> None:
+    return None
+
+
+def _docker_binary(_command: str) -> str:
+    return "/usr/bin/docker"
+
+
 def test_init_writes_quoted_scan_globs(tmp_path: Path) -> None:
     result = CliRunner().invoke(app, ["init", "--path", str(tmp_path)])
 
@@ -24,6 +33,129 @@ def test_init_writes_quoted_scan_globs(tmp_path: Path) -> None:
     config = (tmp_path / "conformdag.yaml").read_text(encoding="utf-8")
     assert '"dags/**/*.py"' in config
     assert "policy_pack: policies/pack.yaml" in config
+
+
+def test_policy_hash_prints_sha256_of_document(tmp_path: Path) -> None:
+    document = tmp_path / "standards.md"
+    document.write_text("hello\n", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["policy", "hash", str(document)])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == hashlib.sha256(b"hello\n").hexdigest()
+
+
+def test_policy_new_rejects_unknown_kind() -> None:
+    result = CliRunner().invoke(app, ["policy", "new", "AIR-TST-999", "--kind", "nope"])
+
+    assert result.exit_code != 0
+    assert "unknown check kind" in result.stderr
+
+
+def test_policy_new_scaffolds_valid_policy_for_every_registered_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.evaluator import CHECK_EVALUATORS
+    from conformdag.models import Policy, PolicyPack
+    from conformdag.policy import validate_policy_provenance
+
+    document = tmp_path / "standards" / "dag-authoring.md"
+    document.parent.mkdir()
+    document.write_text(
+        "# DAG Authoring Standards\n\n## Execution safety\n\nUse safe defaults.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    for index, kind in enumerate(CHECK_EVALUATORS):
+        result = CliRunner().invoke(app, ["policy", "new", f"AIR-TST-{index:03d}", "--kind", kind])
+
+        assert result.exit_code == 0, result.stderr
+        block = YAML(typ="safe").load(result.stdout)  # pyright: ignore[reportUnknownMemberType]
+        policy = Policy.model_validate(block)
+        pack = PolicyPack(schema_version="1", id="test", version="1", policies=[policy])
+        assert (
+            validate_policy_provenance(
+                pack,
+                pack_path=tmp_path / "policies" / "pack.yaml",
+                repository_root=tmp_path,
+            )
+            == []
+        )
+        if kind == "ruff-air":
+            assert block["configuration"]["rules"] == ["AIR001", "AIR002", "AIR301", "AIR302", "AIR311", "AIR312"]
+
+
+def test_init_writes_workspace_scaffold(tmp_path: Path) -> None:
+    result = CliRunner().invoke(app, ["init", "--path", str(tmp_path)])
+
+    assert result.exit_code == 0
+    workspace = (tmp_path / "conformdag-workspace.yaml").read_text(encoding="utf-8")
+    assert "schema_version" in workspace
+    assert "policy_packs:" in workspace
+
+
+def test_doctor_reports_healthy_tmp_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert CliRunner().invoke(app, ["init", "--path", str(tmp_path)]).exit_code == 0
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONFORMDAG_PLATFORM_DSN", raising=False)
+    monkeypatch.setattr("conformdag.cli.shutil.which", _missing_binary)
+
+    result = CliRunner().invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "config" in result.stdout
+    assert "pack" in result.stdout
+    assert "WARN docker" in result.stdout
+
+
+def test_doctor_reports_platform_dsn_reachability(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert CliRunner().invoke(app, ["init", "--path", str(tmp_path)]).exit_code == 0
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", f"sqlite:///{tmp_path / 'platform.db'}")
+    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+
+    result = CliRunner().invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "platform-dsn" in result.stdout
+    assert "reachable" in result.stdout
+
+
+def test_doctor_fails_when_configured_platform_dsn_is_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert CliRunner().invoke(app, ["init", "--path", str(tmp_path)]).exit_code == 0
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", "postgresql://invalid-host.invalid/conformdag")
+    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+
+    result = CliRunner().invoke(app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "FAIL platform-dsn" in result.stdout
+
+
+def test_baseline_set_marks_scan_in_platform_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform.db import RepositoryRow, ScanRow, create_session_factory
+
+    dsn = f"sqlite:///{tmp_path / 'platform.db'}"
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", dsn)
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_TOKEN", "secret-token")
+    factory = create_session_factory(dsn)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="core-dags", path=str(tmp_path)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="succeeded"))
+        session.commit()
+
+    result = CliRunner().invoke(app, ["baseline", "set", "scan1"])
+
+    assert result.exit_code == 0
+    assert "baseline set" in result.stdout
+    with factory() as session:
+        repository = session.get(RepositoryRow, "repo1")
+        assert repository is not None
+        assert repository.baseline_scan_id == "scan1"
 
 
 def test_validate_policies_accepts_bundled_community_alias() -> None:

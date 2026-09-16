@@ -1,6 +1,10 @@
 """Command-line entry point for policy-pack and scan workflows."""
 
+import hashlib
+import io
 import json
+import os
+import shutil
 from pathlib import Path
 from typing import NoReturn
 from urllib.parse import urlsplit
@@ -8,6 +12,7 @@ from urllib.parse import urlsplit
 import typer
 from rich.console import Console
 from rich.table import Table
+from ruamel.yaml import YAML
 
 from conformdag import __version__
 from conformdag.benchmark import (
@@ -16,17 +21,26 @@ from conformdag.benchmark import (
     run_deterministic_benchmark,
 )
 from conformdag.config import load_project_config, semantic_api_key
+from conformdag.evaluator import CHECK_EVALUATORS
 from conformdag.fixing import run_fix
 from conformdag.gates import evaluate_pack_gates, validate_quality_gates
 from conformdag.models import (
     AirflowProfile,
+    EnforcementType,
     FindingStatus,
     Policy,
     PolicyPack,
+    ProjectConfig,
     RunIssue,
     ScanReport,
 )
-from conformdag.policy import PolicyValidationError, resolve_policy_pack_path, select_policy_pack
+from conformdag.policy import (
+    PolicyValidationError,
+    resolve_configured_policy_pack,
+    resolve_policy_pack_path,
+    select_policy_pack,
+    validate_policy_provenance,
+)
 from conformdag.reference import (
     EXIT_CODE_REFERENCE,
     OUTCOME_REFERENCE,
@@ -43,11 +57,14 @@ from conformdag.semantic import CachedSemanticProvider, OpenAICompatibleProvider
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 policy_app = typer.Typer(add_completion=False, no_args_is_help=True)
 agent_app = typer.Typer(add_completion=False, no_args_is_help=True)
+baseline_app = typer.Typer(add_completion=False, no_args_is_help=True)
 pack_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(policy_app, name="policy")
 app.add_typer(agent_app, name="agent")
+app.add_typer(baseline_app, name="baseline")
 app.add_typer(pack_app, name="pack")
 console = Console()
+RUFF_AIR_RULES = ["AIR001", "AIR002", "AIR301", "AIR302", "AIR311", "AIR312"]
 RUNTIME_OPTION = typer.Option(
     None,
     "--runtime",
@@ -120,6 +137,73 @@ def _validate_semantic_base_url(value: str) -> str:
     return value
 
 
+def _policy_configuration(kind: str) -> dict[str, object]:
+    configurations: dict[str, dict[str, object]] = {
+        "effective-owner": {"kind": "required-owner", "allowed_values": ["platform"]},
+        "tags": {
+            "kind": "required-tags",
+            "required_keys": ["domain", "owner"],
+            "allowed_values": {"domain": ["data", "analytics", "platform"]},
+        },
+        "effective-timeout": {
+            "kind": "execution-timeout",
+            "min_seconds": 1,
+            "max_seconds": 86400,
+            "approved_default_seconds": 3600,
+        },
+        "retry-bounds": {
+            "kind": "retry-bounds",
+            "min_retries": 0,
+            "max_retries": 5,
+            "min_delay_seconds": 0,
+            "max_delay_seconds": 3600,
+            "allow_zero_retries": True,
+        },
+        "module-scope-io": {
+            "kind": "top-level-io",
+            "forbidden_calls": ["requests.get", "boto3.client", "subprocess.run"],
+            "uncertain_as_review": True,
+        },
+        "operator-allow-list": {
+            "kind": "forbidden-operators",
+            "operators": {"airflow.operators.python.PythonOperator": "use-taskflow"},
+        },
+        "start-date-freshness": {"kind": "start-date-freshness", "max_age_years": 2, "require_timezone": True},
+        "catchup-policy": {"kind": "catchup-policy", "allow_catchup": False},
+        "module-scope-variables": {"kind": "module-scope-variables", "patterns": ["Variable.get"]},
+        "sensitive-logging": {
+            "kind": "sensitive-logging",
+            "secret_patterns": ["password", "token", "secret"],
+            "logging_calls": ["logging.info", "logging.warning", "logging.error"],
+        },
+        "dynamic-dag-factory": {"kind": "dynamic-dag-factory", "allow": False},
+        "ruff-air": {"kind": "ruff-air", "rules": list(RUFF_AIR_RULES)},
+    }
+    try:
+        return configurations[kind].copy()
+    except KeyError as exc:
+        raise ValueError(f"no policy scaffold is defined for check kind {kind!r}") from exc
+
+
+def _source_section(document_text: str) -> str:
+    subsection: str | None = None
+    heading: str | None = None
+    first_text: str | None = None
+    for line in document_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        first_text = first_text or stripped
+        if stripped.startswith("##") and not stripped.startswith("###"):
+            subsection = stripped.lstrip("#").strip()
+        elif stripped.startswith("#"):
+            heading = heading or stripped.lstrip("#").strip()
+    section = subsection or heading or first_text
+    if not section:
+        raise ValueError("standards document must contain a non-empty section")
+    return section
+
+
 @app.command("init")
 def init(path: Path = Path("."), force: bool = False) -> None:
     """Create a safe starter configuration and policy-pack scaffold."""
@@ -141,6 +225,17 @@ def init(path: Path = Path("."), force: bool = False) -> None:
             "runtime:\n"
             "  enabled: false\n"
         ),
+        root / "conformdag-workspace.yaml": (
+            "# ConformDAG platform workspace (optional - only the platform reads this).\n"
+            'schema_version: "1"\n'
+            "# repositories:\n"
+            "#   - name: core-dags\n"
+            "#     path: ./dags-repo\n"
+            "#     policy_pack: ./policies/pack.yaml\n"
+            "# policy_packs:\n"
+            "#   - name: org\n"
+            "#     path: ./policies/pack.yaml\n"
+        ),
         root / "policies" / "pack.yaml": ('schema_version: "1"\nid: default\nversion: 0.1.0\npolicies: []\n'),
         root / "standards" / "dag-authoring.md": "# DAG Authoring Standards\n",
         root / ".conformdag" / "suppressions.yaml": "suppressions: []\n",
@@ -152,6 +247,107 @@ def init(path: Path = Path("."), force: bool = False) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         typer.echo(f"created {target}")
+
+
+@app.command("doctor")
+def doctor() -> None:
+    """Diagnose the local workspace: config, pack, registry, provenance, runtime."""
+    root = Path.cwd()
+    rows: list[tuple[str, str, str]] = []
+
+    config: ProjectConfig | None = None
+    config_path = root / "conformdag.yaml"
+    try:
+        if not config_path.is_file():
+            raise OSError(f"config file not found: {config_path}")
+        config = load_project_config(config_path)
+        rows.append(("config", "PASS", "conformdag.yaml parses"))
+    except (OSError, ValueError) as exc:
+        rows.append(("config", "FAIL", str(exc)))
+
+    pack: PolicyPack | None = None
+    try:
+        pack = select_policy_pack(None, root)
+        rows.append(("pack", "PASS", f"{pack.id} {pack.version} ({len(pack.policies)} policies)"))
+    except PolicyValidationError as exc:
+        rows.append(("pack", "FAIL", str(exc)))
+
+    if pack is not None and config is not None:
+        unknown = sorted(
+            {
+                check
+                for policy in pack.policies
+                if policy.enforcement.type is EnforcementType.DETERMINISTIC
+                for check in policy.enforcement.deterministic_checks
+                if check not in CHECK_EVALUATORS
+            }
+        )
+        rows.append(
+            (
+                "registry",
+                "PASS" if not unknown else "FAIL",
+                "every deterministic check is registered" if not unknown else f"unknown kinds: {', '.join(unknown)}",
+            )
+        )
+        try:
+            pack_path = resolve_configured_policy_pack(config.scan.policy_pack, scan_root=root, from_cli=False)
+            provenance = validate_policy_provenance(pack, pack_path=pack_path, repository_root=root)
+            rows.append(
+                (
+                    "provenance",
+                    "PASS" if not provenance else "FAIL",
+                    "; ".join(provenance) if provenance else "all policy provenance resolves",
+                )
+            )
+        except (OSError, ValueError) as exc:
+            rows.append(("provenance", "FAIL", str(exc)))
+        gate_issues = validate_quality_gates(pack)
+        rows.append(
+            (
+                "gates",
+                "PASS" if not gate_issues else "FAIL",
+                "; ".join(gate_issues) if gate_issues else "quality gates are well-formed",
+            )
+        )
+
+    docker = shutil.which("docker")
+    rows.append(
+        (
+            "docker",
+            "PASS" if docker else "WARN",
+            "docker binary found" if docker else "docker not found; runtime checks unavailable",
+        )
+    )
+
+    dsn = os.environ.get("CONFORMDAG_PLATFORM_DSN")
+    if not dsn:
+        rows.append(("platform-dsn", "WARN", "CONFORMDAG_PLATFORM_DSN is not set; platform reachability not checked"))
+    else:
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.engine import Engine
+            from sqlalchemy.exc import SQLAlchemyError
+        except ImportError as exc:  # pragma: no cover - exercised without the platform extra
+            rows.append(("platform-dsn", "FAIL", f"platform extra is not installed: {exc}"))
+        else:
+            engine: Engine | None = None
+            try:
+                engine = create_engine(dsn)
+                with engine.connect():
+                    pass
+            except (ImportError, OSError, SQLAlchemyError, ValueError) as exc:
+                rows.append(("platform-dsn", "FAIL", f"cannot reach configured DSN: {exc}"))
+            else:
+                rows.append(("platform-dsn", "PASS", "configured platform DSN is reachable"))
+            finally:
+                if engine is not None:
+                    engine.dispose()
+
+    for label, status, detail in rows:
+        style = {"PASS": "green", "WARN": "yellow", "FAIL": "red"}[status]
+        console.print(f"[{style}]{status}[/] {label}: {detail}")
+    if any(status == "FAIL" for _, status, _ in rows):
+        raise typer.Exit(code=1)
 
 
 @app.command("validate-policies")
@@ -304,6 +500,60 @@ def policy_reference(
         for entry in entries:
             table.add_row(entry.key, entry.meaning, entry.behavior)
         console.print(table)
+
+
+@policy_app.command("hash")
+def policy_hash(document: str) -> None:
+    """Print the SHA-256 provenance hash of a standards document."""
+    path = Path(document)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        _fail(ValueError(f"cannot read document {document}: {exc}"))
+    typer.echo(hashlib.sha256(text.encode("utf-8")).hexdigest())
+
+
+@policy_app.command("new")
+def policy_new(
+    policy_id: str,
+    kind: str = typer.Option(..., "--kind", help="Check kind for the policy configuration."),
+    document: str = typer.Option("standards/dag-authoring.md", "--document", help="Standards document for provenance."),
+) -> None:
+    """Print a valid policy block scaffold for a check kind."""
+    if kind not in CHECK_EVALUATORS:
+        _fail(ValueError(f"unknown check kind {kind!r}; known kinds: {', '.join(sorted(CHECK_EVALUATORS))}"))
+    doc_path = Path(document)
+    try:
+        text = doc_path.read_text(encoding="utf-8")
+        section = _source_section(text)
+        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    except OSError as exc:
+        _fail(ValueError(f"cannot read document {document}: {exc}"))
+    except ValueError as exc:
+        _fail(exc)
+    block: dict[str, object] = {
+        "id": policy_id,
+        "title": "TBD - describe the invariant in one line",
+        "version": "1.0.0",
+        "status": "ACTIVE",
+        "severity": "medium",
+        "airflow_profiles": ["3.3.0"],
+        "ownership": {"owner": "platform"},
+        "source": {"document": document, "section": section, "version": "1", "content_hash": content_hash},
+        "invariant": "TBD",
+        "safe_path": "TBD",
+        "enforcement": {"type": "deterministic", "deterministic_checks": [kind], "blocking": True},
+        "configuration": _policy_configuration(kind),
+    }
+    try:
+        Policy.model_validate(block)
+    except ValueError as exc:
+        _fail(ValueError(f"scaffolded policy is invalid for kind {kind!r}: {exc}"))
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = False
+    buffer = io.StringIO()
+    yaml.dump(block, buffer)  # pyright: ignore[reportUnknownMemberType]
+    typer.echo(buffer.getvalue(), nl=False)
 
 
 @app.command()
@@ -692,6 +942,37 @@ def _platform_session_factory():
 
     settings = load_settings()
     return settings, create_session_factory(settings.dsn)
+
+
+@baseline_app.command("set")
+def baseline_set(scan_id: str) -> None:
+    """Mark one platform scan as its repository's baseline."""
+    try:
+        from sqlalchemy.exc import SQLAlchemyError
+
+        from conformdag.platform.db import RepositoryRow, ScanRow
+    except ImportError as exc:  # pragma: no cover - guarded by the platform extra
+        _fail(ValueError(f"platform extra is not installed: {exc}"))
+    try:
+        settings, session_factory = _platform_session_factory()
+    except (OSError, RuntimeError, ValueError) as exc:
+        _fail(exc)
+    if not settings.admin_token:
+        _fail(ValueError("platform admin token is not configured; mutations are disabled"))
+    try:
+        with session_factory() as session:
+            scan = session.get(ScanRow, scan_id)
+            if scan is None:
+                _fail(ValueError(f"scan not found: {scan_id}"))
+            repository = session.get(RepositoryRow, scan.repository_id)
+            if repository is None:
+                _fail(ValueError(f"repository not found for scan: {scan_id}"))
+            repository.baseline_scan_id = scan_id
+            session.commit()
+            repository_id = repository.id
+    except (OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:
+        _fail(exc)
+    typer.echo(f"baseline set: {scan_id} (repository {repository_id})")
 
 
 @app.command("serve")
