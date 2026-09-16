@@ -534,6 +534,7 @@
               "required-owner": "#/$defs/RequiredOwnerConfig",
               "required-tags": "#/$defs/RequiredTagsConfig",
               "retry-bounds": "#/$defs/RetryBoundsConfig",
+              "ruff-air": "#/$defs/RuffAirConfig",
               "sensitive-logging": "#/$defs/SensitiveLoggingConfig",
               "start-date-freshness": "#/$defs/StartDateFreshnessConfig",
               "top-level-io": "#/$defs/TopLevelIOConfig"
@@ -582,6 +583,9 @@
             },
             {
               "$ref": "#/$defs/DynamicDagFactoryConfig"
+            },
+            {
+              "$ref": "#/$defs/RuffAirConfig"
             }
           ],
           "title": "Configuration"
@@ -873,6 +877,30 @@
         "max_retries"
       ],
       "title": "RetryBoundsConfig",
+      "type": "object"
+    },
+    "RuffAirConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "ruff-air",
+          "default": "ruff-air",
+          "title": "Kind",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "title": "RuffAirConfig",
       "type": "object"
     },
     "SensitiveLoggingConfig": {

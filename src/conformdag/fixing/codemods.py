@@ -21,6 +21,7 @@ MANUAL_KINDS: Final[frozenset[str]] = frozenset(
         "orchestration-boundary",
         "sensitive-logging",
         "approved-abstractions",
+        "ruff-air",
     }
 )
 

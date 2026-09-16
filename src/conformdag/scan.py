@@ -6,18 +6,19 @@ import hashlib
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 from conformdag import __version__
 from conformdag.analysis import ParseCache, SourceModel, analyze_source, discover_python_files
 from conformdag.config import load_project_config
-from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic
+from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic, policy_applies
 from conformdag.models import (
     AirflowProfile,
     EnforcementType,
     Finding,
     PolicyPack,
     ProjectConfig,
+    RuffAirConfig,
     RunIssue,
     RunMetadata,
     ScanReport,
@@ -27,6 +28,7 @@ from conformdag.models import (
 )
 from conformdag.policy import load_suppressions, resolve_configured_policy_pack, select_policy_pack
 from conformdag.reporting import apply_suppressions, normalize_report
+from conformdag.ruff_adapter import ruff_binary, run_ruff
 from conformdag.semantic import SemanticContext, SemanticProviderError, build_context
 from conformdag.semantic_evaluator import build_semantic_request, semantic_finding
 
@@ -102,11 +104,51 @@ def scan_repository(
         elif model:
             models.append(model)
 
+    selected_airflow_profile = airflow_profile or config.runtime.airflow_version
+    ruff_policies = [
+        policy
+        for policy in pack.policies
+        if policy.status.value == "ACTIVE"
+        and policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
+        and policy_applies(policy, selected_airflow_profile)
+        and ("ruff-air" in policy.enforcement.deterministic_checks or policy.id == "AIR-DET-012")
+    ]
+    ruff_violations: list[dict[str, Any]] | None = None
+    if ruff_policies:
+        ruff_violations = []
+        if ruff_binary() is None:
+            issues.append(
+                RunIssue(
+                    code="RUFF_UNAVAILABLE",
+                    message="ruff binary not found; the ruff-air check was skipped",
+                    phase="deterministic",
+                    fatal=False,
+                )
+            )
+        else:
+            rules = sorted(
+                {rule for policy in ruff_policies for rule in cast(RuffAirConfig, policy.configuration).rules}
+            )
+            result = run_ruff(root, rules)
+            if result is None:
+                issues.append(
+                    RunIssue(
+                        code="RUFF_UNAVAILABLE",
+                        message="ruff invocation failed; the ruff-air check was skipped",
+                        phase="deterministic",
+                        fatal=False,
+                    )
+                )
+            else:
+                ruff_violations = result
+
     try:
         findings, evaluated, skipped = evaluate_deterministic(
             pack.policies,
             models,
-            airflow_profile or config.runtime.airflow_version,
+            selected_airflow_profile,
+            repository_root=root,
+            ruff_violations=ruff_violations,
         )
     except EvaluationPhaseError as exc:
         issues.append(RunIssue(code="EVALUATOR_ERROR", message=str(exc), phase="evaluation", fatal=True))

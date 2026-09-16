@@ -202,6 +202,11 @@ class DynamicDagFactoryConfig(ConformModel):
     allow: bool = False
 
 
+class RuffAirConfig(ConformModel):
+    kind: Literal["ruff-air"] = "ruff-air"
+    rules: list[str] = Field(min_length=1)
+
+
 class ApprovedAbstractionsConfig(ConformModel):
     kind: Literal["approved-abstractions"] = "approved-abstractions"
     abstractions: dict[str, str] = Field(default_factory=lambda: {})
@@ -221,7 +226,8 @@ PolicyConfiguration = Annotated[
     | StartDateFreshnessConfig
     | CatchupPolicyConfig
     | ModuleScopeVariablesConfig
-    | DynamicDagFactoryConfig,
+    | DynamicDagFactoryConfig
+    | RuffAirConfig,
     Field(discriminator="kind"),
 ]
 
