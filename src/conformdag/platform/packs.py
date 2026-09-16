@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -128,10 +131,13 @@ def _write_pack(pack: PolicyPack, path: Path) -> None:
     yaml = YAML()
     yaml.default_flow_style = False
     yaml.preserve_quotes = True
-    data = pack.model_dump(mode="json")
-    with path.open("w", encoding="utf-8") as stream:
-        yaml.dump(data, stream)  # pyright: ignore[reportUnknownMemberType]
-
-
-def compute_content_hash(source_text: str) -> str:
-    return hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    tmp_path = path.with_name(path.name + ".tmp")
+    try:
+        data = pack.model_dump(mode="json")
+        buffer = io.StringIO()
+        yaml.dump(data, buffer)  # pyright: ignore[reportUnknownMemberType]
+        tmp_path.write_text(buffer.getvalue(), encoding="utf-8")
+        os.replace(tmp_path, path)
+    finally:
+        with suppress(OSError):
+            tmp_path.unlink(missing_ok=True)

@@ -16,12 +16,14 @@ from ruamel.yaml import YAML
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+import conformdag.platform.packs as packs_module
 from conformdag.evaluator import CHECK_EVALUATORS
 from conformdag.models import (
     AirflowProfile,
     EnforcementConfig,
     EnforcementType,
     Ownership,
+    PolicyPack,
     PolicySource,
     RunMetadata,
     ScanReport,
@@ -39,6 +41,7 @@ from conformdag.platform.db import (
     stale_running_cutoff,
 )
 from conformdag.platform.worker import WorkerSettings, run_worker_once
+from conformdag.policy import load_policy_pack
 
 
 def _as_httpx(client: TestClient) -> httpx.Client:
@@ -76,6 +79,9 @@ def _platform_state(client: TestClient) -> tuple[sessionmaker[Session], Platform
 def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         YAML(typ="safe").dump(payload, handle)  # pyright: ignore[reportUnknownMemberType]
+
+
+_write_pack = cast("Callable[[PolicyPack, Path], None]", packs_module.__dict__["_write_pack"])
 
 
 @pytest.fixture(name="platform_env")
@@ -897,6 +903,76 @@ def test_pack_crud_endpoints(client: TestClient, tmp_path: Path) -> None:
     )
     _ = scan_resp
     _ = listed
+
+
+def test_write_pack_is_atomic_on_replace_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pack_path = tmp_path / "pack.yaml"
+    pack_path.write_text("original content\n", encoding="utf-8")
+    pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
+
+    def boom(source: Path, target: Path) -> None:
+        raise OSError("simulated crash mid-write")
+
+    monkeypatch.setattr(packs_module.os, "replace", boom)
+
+    with pytest.raises(OSError):
+        _write_pack(pack, pack_path)
+
+    assert pack_path.read_text(encoding="utf-8") == "original content\n"
+    assert not (tmp_path / "pack.yaml.tmp").exists()
+
+
+def test_write_pack_replaces_atomically_and_leaves_no_tmp(tmp_path: Path) -> None:
+    pack_path = tmp_path / "pack.yaml"
+    pack_path.write_text("stale\n", encoding="utf-8")
+    pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
+
+    _write_pack(pack, pack_path)
+
+    assert not (tmp_path / "pack.yaml.tmp").exists()
+    reloaded = load_policy_pack(pack_path, tmp_path)
+    assert reloaded.id == "x"
+
+
+def test_write_pack_cleans_tmp_on_validation_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pack_path = tmp_path / "pack.yaml"
+    tmp_pack_path = tmp_path / "pack.yaml.tmp"
+    pack_path.write_text("original content\n", encoding="utf-8")
+    tmp_pack_path.write_text("stale temporary content\n", encoding="utf-8")
+    pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
+
+    def invalid_dump(self: PolicyPack, **kwargs: Any) -> dict[str, Any]:
+        raise ValueError("simulated validation failure")
+
+    monkeypatch.setattr(PolicyPack, "model_dump", invalid_dump)
+
+    with pytest.raises(ValueError, match="validation failure"):
+        _write_pack(pack, pack_path)
+
+    assert pack_path.read_text(encoding="utf-8") == "original content\n"
+    assert not tmp_pack_path.exists()
+
+
+def test_write_pack_cleans_tmp_on_write_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pack_path = tmp_path / "pack.yaml"
+    tmp_pack_path = tmp_path / "pack.yaml.tmp"
+    pack_path.write_text("original content\n", encoding="utf-8")
+    pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
+    original_write_text = Path.write_text
+
+    def partial_write(target: Path, data: str, **kwargs: Any) -> int:
+        if target == tmp_pack_path:
+            original_write_text(target, "partial temporary content\n", encoding="utf-8")
+            raise OSError("simulated temporary write failure")
+        return original_write_text(target, data, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", partial_write)
+
+    with pytest.raises(OSError, match="temporary write failure"):
+        _write_pack(pack, pack_path)
+
+    assert pack_path.read_text(encoding="utf-8") == "original content\n"
+    assert not tmp_pack_path.exists()
 
 
 def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
