@@ -89,3 +89,68 @@ The only warning is the pre-existing Starlette deprecation warning about its
 - `tests/test_analysis.py`
 - `tests/test_check_pack.py`
 - `.superpowers/sdd/2026-09-05-p1-foundation/task-16-report.md`
+
+## Round 1 Fix Evidence
+
+### Findings Addressed
+
+- `visit_With` now assigns each visited DAG context's alias to its matching
+  `DagRecord.variable_name`, allowing `_dag_defaults` to match TaskFlow
+  `dag_name` values and inherit `default_args`.
+- The context stack preserves `None` for unnamed `with DAG(...):` statements
+  instead of converting it to an empty string.
+
+Round 1 implementation commit: `1f5db38` (`fix: preserve TaskFlow DAG context defaults (B11)`).
+
+### TDD Evidence
+
+#### Red
+
+Added an evaluator-level regression for TaskFlow retry inheritance from
+`default_args`, plus a regression for unnamed DAG context names.
+
+Commands:
+
+```text
+mise exec -- uv run pytest tests/test_check_pack.py::test_taskflow_tasks_inherit_with_dag_default_args tests/test_analysis.py::test_taskflow_task_inside_unnamed_with_dag_has_no_dag_name -x --tb=short
+```
+
+The default-args test failed because the effective retry status was `PASS`
+instead of `FAIL`; the unnamed-context test failed because `dag_name` was `""`
+instead of `None`.
+
+#### Green
+
+The two regression tests passed after the visitor fix:
+
+```text
+2 passed in 0.93s
+```
+
+The complete analysis and check-pack modules passed:
+
+```text
+17 passed in 1.41s
+```
+
+### Round 1 Validation
+
+`mise run check` completed successfully:
+
+```text
+format-check: 118 files already formatted
+lint: All checks passed!
+typecheck: 0 errors, 0 warnings, 0 informations
+test: 254 passed, 13 deselected, 1 warning
+validate:packs: both policy packs valid
+```
+
+`mise run test:coverage` completed successfully:
+
+```text
+254 passed, 13 deselected, 1 warning in 242.44s
+Required test coverage of 90% reached. Total coverage: 90.96%
+```
+
+The only warning remains the pre-existing Starlette deprecation warning about
+its `httpx` TestClient compatibility layer.
