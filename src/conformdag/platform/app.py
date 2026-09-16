@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -256,12 +256,21 @@ def scan_status(request: Request, scan_id: str) -> dict[str, object]:
         }
 
 
-def scan_history(request: Request, repository_id: str) -> list[dict[str, object]]:
+def scan_history(
+    request: Request,
+    repository_id: str,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[dict[str, object]]:
     """Return the scan history of one repository, newest first."""
     factory = _factory(request)
     with factory() as session:
         rows = session.scalars(
-            select(ScanRow).where(ScanRow.repository_id == repository_id).order_by(ScanRow.created_at.desc())
+            select(ScanRow)
+            .where(ScanRow.repository_id == repository_id)
+            .order_by(ScanRow.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         ).all()
         return [
             {
@@ -295,15 +304,41 @@ def scan_report(request: Request, scan_id: str) -> dict[str, Any]:
     return _load_report(_factory(request), scan_id).model_dump(mode="json")
 
 
-def scan_findings(request: Request, scan_id: str, status: str | None = None) -> list[dict[str, object]]:
-    """List normalized findings for one scan, optionally filtered by status."""
+def scan_findings(
+    request: Request,
+    scan_id: str,
+    status: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[dict[str, object]]:
+    """List normalized findings and optional baseline labels for one scan.
+
+    ``baseline_status`` is ``"existing"`` or ``"new"`` when the repository
+    has a same-repository successful baseline scan. It is ``None`` when no
+    usable baseline is configured; that state is not treated as ``existing``.
+    """
     factory = _factory(request)
     with factory() as session:
         query = select(FindingRow).where(FindingRow.scan_id == scan_id)
         if status:
             query = query.where(FindingRow.status == status.upper())
-        rows = session.scalars(query.order_by(FindingRow.policy_id, FindingRow.file_path)).all()
-        return [_finding_payload(row) for row in rows]
+        rows = session.scalars(
+            query.order_by(FindingRow.policy_id, FindingRow.file_path).limit(limit).offset(offset)
+        ).all()
+        baseline_fingerprints: set[str] | None = None
+        scan = session.get(ScanRow, scan_id)
+        if scan is not None:
+            repository = session.get(RepositoryRow, scan.repository_id)
+            baseline = (
+                session.get(ScanRow, repository.baseline_scan_id)
+                if repository and repository.baseline_scan_id
+                else None
+            )
+            if baseline is not None and baseline.repository_id == scan.repository_id and baseline.status == "succeeded":
+                baseline_fingerprints = set(
+                    session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline.id)).all()
+                )
+        return [_finding_payload(row, baseline_fingerprints) for row in rows]
 
 
 def export_scan(request: Request, scan_id: str, scan_format: str) -> Response:
@@ -503,7 +538,10 @@ def _load_report(session_factory: sessionmaker[Session], scan_id: str) -> ScanRe
         return ScanReport.model_validate(scan.report_json)
 
 
-def _finding_payload(row: FindingRow) -> dict[str, object]:
+def _finding_payload(row: FindingRow, baseline_fingerprints: set[str] | None = None) -> dict[str, object]:
+    baseline_status: str | None = None
+    if baseline_fingerprints is not None:
+        baseline_status = "existing" if row.fingerprint in baseline_fingerprints else "new"
     return {
         "policy_id": row.policy_id,
         "policy_version": row.policy_version,
@@ -516,6 +554,7 @@ def _finding_payload(row: FindingRow) -> dict[str, object]:
         "remediation": row.remediation,
         "fix": row.fix_json,
         "suppressed": row.suppressed,
+        "baseline_status": baseline_status,
     }
 
 

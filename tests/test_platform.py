@@ -506,6 +506,166 @@ def test_findings_endpoint_filters_by_status(client: TestClient, tmp_path: Path)
     assert passing.json() == []
 
 
+def test_findings_endpoint_paginates(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="scan1", repository_id=repository_id, status="succeeded", result_fingerprint="f" * 64))
+        for index in range(3):
+            session.add(
+                FindingRow(
+                    scan_id="scan1",
+                    repository_id=repository_id,
+                    policy_id="AIR-DET-001",
+                    policy_version="1.0.0",
+                    status="FAIL",
+                    severity="high",
+                    file_path=f"dags/f{index}.py",
+                    start_line=index + 1,
+                    fingerprint=f"{index:064d}",
+                    suppressed=False,
+                )
+            )
+        session.commit()
+
+    page_one = _get(client, "/api/v1/scans/scan1/findings?limit=2").json()
+    page_two = _get(client, "/api/v1/scans/scan1/findings?limit=2&offset=2").json()
+
+    assert len(page_one) == 2
+    assert len(page_two) == 1
+    assert page_one[0]["file_path"] == "dags/f0.py"
+    assert page_two[0]["file_path"] == "dags/f2.py"
+
+
+def test_findings_endpoint_rejects_bad_limit(client: TestClient) -> None:
+    response = _get(client, "/api/v1/scans/anything/findings?limit=0")
+    assert response.status_code == 422
+
+
+def test_scan_history_endpoint_paginates(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        for index in range(3):
+            session.add(
+                ScanRow(
+                    id=f"scan{index}",
+                    repository_id=repository_id,
+                    status="succeeded",
+                    created_at=datetime(2026, 1, index + 1, tzinfo=UTC),
+                )
+            )
+        session.commit()
+
+    page_one = _get(client, f"/api/v1/repos/{repository_id}/scans?limit=2").json()
+    page_two = _get(client, f"/api/v1/repos/{repository_id}/scans?limit=2&offset=2").json()
+
+    assert [row["scan_id"] for row in page_one] == ["scan2", "scan1"]
+    assert [row["scan_id"] for row in page_two] == ["scan0"]
+
+
+def test_findings_endpoint_labels_findings_against_repository_baseline(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(
+                id="baseline-scan",
+                repository_id=repository_id,
+                status="succeeded",
+                result_fingerprint="b" * 64,
+            )
+        )
+        session.add(
+            ScanRow(
+                id="current-scan",
+                repository_id=repository_id,
+                status="succeeded",
+                result_fingerprint="c" * 64,
+            )
+        )
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.baseline_scan_id = "baseline-scan"
+        session.add(
+            FindingRow(
+                scan_id="baseline-scan",
+                repository_id=repository_id,
+                policy_id="AIR-DET-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/existing.py",
+                start_line=1,
+                fingerprint="e" * 64,
+                suppressed=False,
+            )
+        )
+        session.add_all(
+            [
+                FindingRow(
+                    scan_id="current-scan",
+                    repository_id=repository_id,
+                    policy_id="AIR-DET-001",
+                    policy_version="1.0.0",
+                    status="FAIL",
+                    severity="high",
+                    file_path="dags/existing.py",
+                    start_line=1,
+                    fingerprint="e" * 64,
+                    suppressed=False,
+                ),
+                FindingRow(
+                    scan_id="current-scan",
+                    repository_id=repository_id,
+                    policy_id="AIR-DET-001",
+                    policy_version="1.0.0",
+                    status="FAIL",
+                    severity="high",
+                    file_path="dags/new.py",
+                    start_line=1,
+                    fingerprint="n" * 64,
+                    suppressed=False,
+                ),
+            ]
+        )
+        session.commit()
+
+    findings = _get(client, "/api/v1/scans/current-scan/findings").json()
+
+    assert {row["fingerprint"]: row["baseline_status"] for row in findings} == {
+        "e" * 64: "existing",
+        "n" * 64: "new",
+    }
+
+
+def test_findings_endpoint_uses_null_baseline_status_without_usable_baseline(
+    client: TestClient, tmp_path: Path
+) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="current-scan", repository_id=repository_id, status="succeeded"))
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.baseline_scan_id = "missing-baseline"
+        session.add(
+            FindingRow(
+                scan_id="current-scan",
+                repository_id=repository_id,
+                policy_id="AIR-DET-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/finding.py",
+                start_line=1,
+                fingerprint="e" * 64,
+                suppressed=False,
+            )
+        )
+        session.commit()
+
+    findings = _get(client, "/api/v1/scans/current-scan/findings").json()
+
+    assert findings[0]["baseline_status"] is None
+
+
 def test_export_json_is_byte_compatible_with_stored_report(client: TestClient, tmp_path: Path) -> None:
     repository_id = _register(client, tmp_path)
     scan_id = _post(
