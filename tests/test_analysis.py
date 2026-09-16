@@ -96,3 +96,28 @@ def test_taskflow_task_inside_with_dag_gets_dag_name() -> None:
     taskflow = [task for task in model.tasks if task.taskflow]
     assert len(taskflow) == 1
     assert taskflow[0].dag_name == "dag"
+
+
+def test_taskflow_task_inside_unnamed_with_dag_has_no_dag_name() -> None:
+    source = (
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n\n"
+        "with DAG(dag_id='x'):\n"
+        "    @task\n"
+        "    def extract():\n"
+        "        return 1\n"
+    )
+    source_file = SourceFile(
+        path=Path("dags/x.py"),
+        relative_path="dags/x.py",
+        content=source,
+        content_hash="d" * 64,
+    )
+
+    model, issue = analyze_source(source_file)
+
+    assert model is not None
+    assert issue is None
+    taskflow = [task for task in model.tasks if task.taskflow]
+    assert len(taskflow) == 1
+    assert taskflow[0].dag_name is None

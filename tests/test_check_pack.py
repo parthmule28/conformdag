@@ -19,6 +19,7 @@ from conformdag.models import (
     PolicyConfiguration,
     PolicySource,
     RemediationAction,
+    RetryBoundsConfig,
     SensitiveLoggingConfig,
     Severity,
     StartDateFreshnessConfig,
@@ -121,6 +122,23 @@ def test_taskflow_tasks_are_visible_to_the_analyzer() -> None:
     extract = next(task for task in taskflow_tasks if task.task_id == "extract")
     assert extract.values.get("retries") == 99
     assert all(task.dag_name == "dag" for task in taskflow_tasks)
+
+
+def test_taskflow_tasks_inherit_with_dag_default_args() -> None:
+    source = (
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n\n"
+        "with DAG(dag_id='x', default_args={'retries': 3}) as dag:\n"
+        "    @task\n"
+        "    def extract():\n"
+        "        return 1\n"
+    )
+
+    findings, model = _evaluate(RetryBoundsConfig(max_retries=1), "retry-bounds", source)
+
+    assert findings[0].status is FindingStatus.FAIL
+    assert findings[0].explanation == "task extract effective retries=3 retry_delay=0 seconds"
+    assert model.dags[0].variable_name == "dag"
 
 
 def test_taskflow_retry_bounds_are_enforced(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:

@@ -204,7 +204,7 @@ class _ModelVisitor(ast.NodeVisitor):
     def __init__(self, source: SourceFile) -> None:
         self.model = SourceModel(source)
         self._function_depth = 0
-        self._with_dag_stack: list[str] = []
+        self._with_dag_stack: list[str | None] = []
 
     def visit_Import(self, node: ast.Import) -> None:
         for item in node.names:
@@ -234,17 +234,24 @@ class _ModelVisitor(ast.NodeVisitor):
                     break
 
     def visit_With(self, node: ast.With) -> None:
-        entered: list[str] = []
+        entered: list[str | None] = []
         for item in node.items:
             context = item.context_expr
-            name = None
-            qualified_name = _qualified_name(context.func) if isinstance(context, ast.Call) else None
-            if qualified_name is not None and qualified_name.rsplit(".", 1)[-1] == "DAG":
+            is_dag = isinstance(context, ast.Call) and self._is_dag_call(context)
+            dag_count = len(self.model.dags)
+            self.visit(context)
+            if is_dag:
+                name: str | None = None
                 if item.optional_vars is not None and isinstance(item.optional_vars, ast.Name):
                     name = item.optional_vars.id
-                self._with_dag_stack.append(name or "")
-                entered.append(name or "")
-        self.generic_visit(node)
+                if len(self.model.dags) > dag_count:
+                    self.model.dags[dag_count].variable_name = name
+                self._with_dag_stack.append(name)
+                entered.append(name)
+            if item.optional_vars is not None:
+                self.visit(item.optional_vars)
+        for statement in node.body:
+            self.visit(statement)
         for _ in entered:
             self._with_dag_stack.pop()
 
