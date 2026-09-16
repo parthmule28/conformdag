@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -43,6 +44,7 @@ class PlatformSettings(BaseModel):
     dsn: str
     admin_token: str | None = None
     retention_keep: int = 50
+    cors_origins: list[str] = ["http://localhost:5173"]
 
 
 def load_settings() -> PlatformSettings:
@@ -52,7 +54,9 @@ def load_settings() -> PlatformSettings:
         raise RuntimeError("platform requires CONFORMDAG_PLATFORM_DSN")
     token = os.environ.get("CONFORMDAG_PLATFORM_TOKEN")
     retention = int(os.environ.get("CONFORMDAG_PLATFORM_RETENTION_KEEP", "50"))
-    return PlatformSettings(dsn=dsn, admin_token=token, retention_keep=retention)
+    cors_raw = os.environ.get("CONFORMDAG_PLATFORM_CORS_ORIGINS", "http://localhost:5173")
+    origins = [origin.strip() for origin in cors_raw.split(",") if origin.strip()]
+    return PlatformSettings(dsn=dsn, admin_token=token, retention_keep=retention, cors_origins=origins)
 
 
 class RepositoryCreate(BaseModel):
@@ -403,6 +407,13 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     app = FastAPI(title="ConformDAG Platform", version="1")
     app.state.session_factory = session_factory
     app.state.settings = settings
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.pack_service = PackService()
     try:
         workspace, _ = load_workspace()

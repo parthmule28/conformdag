@@ -178,6 +178,45 @@ def test_health_is_open_and_reads_need_no_token(client: TestClient) -> None:
     assert _get(client, "/api/v1/repos").status_code == 200
 
 
+def test_cors_preflight_allows_configured_origin(client: TestClient) -> None:
+    response = _as_httpx(client).options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+def test_cors_rejects_unknown_origin(client: TestClient) -> None:
+    response = _as_httpx(client).options(
+        "/api/v1/health",
+        headers={
+            "Origin": "http://evil.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_load_settings_reads_configured_cors_origins(monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform.app import load_settings
+
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", "sqlite:///platform.db")
+    monkeypatch.setenv(
+        "CONFORMDAG_PLATFORM_CORS_ORIGINS",
+        " https://dashboard.example , http://localhost:5173 ,,",
+    )
+
+    settings = load_settings()
+
+    assert settings.cors_origins == ["https://dashboard.example", "http://localhost:5173"]
+
+
 def test_json_formatter_emits_single_line_json() -> None:
     from conformdag.platform import logging as platform_logging
 
