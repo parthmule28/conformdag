@@ -24,7 +24,7 @@ from conformdag.platform.db import (
     utcnow,
 )
 from conformdag.platform.packs import PackError, PackService
-from conformdag.platform.workspace import load_workspace
+from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
 from conformdag.reporting import render_html, render_sarif
 
 API_PREFIX = "/api/v1"
@@ -120,6 +120,15 @@ def _factory(request: Request) -> sessionmaker[Session]:
     return factory
 
 
+def _register_workspace_packs(service: PackService, workspace: WorkspaceFile) -> None:
+    """Register every workspace pack (and per-repo pack) with the pack service."""
+    for pack in workspace.policy_packs:
+        service.register(pack.name, pack.path)
+    for repository in workspace.repositories:
+        if repository.policy_pack is not None:
+            service.register(f"repo/{repository.name}", repository.policy_pack)
+
+
 def _health() -> dict[str, str]:
     """Return the liveness payload."""
     return {"status": "ok"}
@@ -149,6 +158,7 @@ def register_repository(request: Request, payload: RepositoryCreate) -> dict[str
 def load_workspace_file(request: Request, payload: WorkspaceLoadRequest) -> dict[str, int]:
     """Register every workspace repository that is not already present."""
     workspace, _ = load_workspace(Path(payload.path).resolve() if payload.path else None)
+    _register_workspace_packs(request.app.state.pack_service, workspace)
     factory = _factory(request)
     registered = 0
     with factory() as session:
@@ -352,6 +362,12 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     app.state.session_factory = session_factory
     app.state.settings = settings
     app.state.pack_service = PackService()
+    try:
+        workspace, _ = load_workspace()
+    except WorkspaceError:
+        pass
+    else:
+        _register_workspace_packs(app.state.pack_service, workspace)
 
     app.get(API_PREFIX + "/health")(_health)
     app.post(API_PREFIX + "/repos", dependencies=[Depends(require_admin)])(register_repository)

@@ -214,6 +214,27 @@ def test_workspace_load_registers_repositories(client: TestClient, platform_env:
     assert "ws-repo" in names
 
 
+def test_create_app_registers_workspace_packs_at_startup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    packs_dir = tmp_path / "packs"
+    packs_dir.mkdir()
+    (packs_dir / "org.yaml").write_text("schema_version: '1'\nid: org\nversion: '1'\npolicies: []\n", encoding="utf-8")
+    (tmp_path / "conformdag-workspace.yaml").write_text(
+        f"schema_version: '1'\nrepositories: []\npolicy_packs:\n  - name: org\n    path: {packs_dir / 'org.yaml'}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    factory = create_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    app = create_app(factory, PlatformSettings(dsn="sqlite:///unused", admin_token="secret-token"))
+    client = TestClient(app)
+
+    response = _get(client, "/api/v1/packs")
+
+    assert response.status_code == 200
+    entries = response.json()
+    assert any(entry["name"] == "org" and entry["id"] == "org" for entry in entries)
+
+
 def test_abandoned_running_scan_is_reclaimed_within_attempt_budget(platform_env: str) -> None:
     factory = create_session_factory(platform_env)
     with factory() as session:
