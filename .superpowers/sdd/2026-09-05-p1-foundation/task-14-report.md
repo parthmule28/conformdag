@@ -12,7 +12,7 @@
 
 - Base before Task 14: `cef3a92` (`fix: preserve framework error propagation for request logging (B7)`)
 - Implementation commit: `6af332c` (`feat: pagination on scan findings and history (F5)`)
-- Report commit: follows this report.
+- Evidence report commit: `713674c` (`docs: record Task 14 validation evidence`)
 
 ## API Semantics
 

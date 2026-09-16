@@ -14,7 +14,7 @@
 
 - Base before Task 15: `713674c` (`docs: record Task 14 validation evidence`)
 - Implementation commit: `e187729` (`feat: configurable CORS origins (B14)`)
-- Report commit: follows this report.
+- Evidence report commit: `dd977a5` (`docs: record Task 15 validation evidence`)
 
 ## API and Configuration Semantics
 
