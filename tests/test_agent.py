@@ -94,6 +94,25 @@ def test_pr_client_sets_a_120s_timeout() -> None:
     assert client.timeout == httpx.Timeout(120.0)
 
 
+def test_branch_name_truncates_long_paths_with_hash_suffix() -> None:
+    from conformdag.agent import pipeline as pipeline_module
+
+    long_file = "/".join(["segment"] * 40) + ".py"
+    branch = pipeline_module._branch_name("conformdag/fix", long_file)
+
+    assert len(branch) <= 240
+    assert branch.startswith("conformdag/fix")
+    assert branch[-9] == "-"
+
+
+def test_branch_name_keeps_short_paths_unchanged() -> None:
+    from conformdag.agent import pipeline as pipeline_module
+
+    branch = pipeline_module._branch_name("conformdag/fix", "dags/reporting.py")
+
+    assert branch == "conformdag/fixdags-reporting.py"
+
+
 def test_triage_splits_fixable_from_manual(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
     root = build_repository(tmp_path)
     report = scan_repository(root, root / "policies/pack.yaml")

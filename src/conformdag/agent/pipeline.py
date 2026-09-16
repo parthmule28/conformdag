@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,6 +13,16 @@ from conformdag.fixing import run_fix
 from conformdag.models import ScanReport
 
 BRANCH_PREFIX = "conformdag/fix"
+BRANCH_MAX_LENGTH = 240
+
+
+def _branch_name(branch_prefix: str, applied_file: str) -> str:
+    """Build a git-legal branch name, truncating long paths with a hash suffix."""
+    raw = f"{branch_prefix}{applied_file.replace('/', '-')}"
+    if len(raw) <= BRANCH_MAX_LENGTH:
+        return raw
+    suffix = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+    return f"{raw[: BRANCH_MAX_LENGTH - 9]}-{suffix}"
 
 
 def _empty_files() -> list[str]:
@@ -96,7 +107,7 @@ def run_agent_pipeline(
             pipeline.blocked = True
             return pipeline
     if pull_requests is not None:
-        branch = f"{branch_prefix}{pipeline.applied_files[0].replace('/', '-')}"
+        branch = _branch_name(branch_prefix, pipeline.applied_files[0])
         pipeline.pull_request_url = pull_requests.open_pull_request(
             root,
             branch,
