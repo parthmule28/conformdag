@@ -45,7 +45,7 @@ class PlatformSettings(BaseModel):
 
     dsn: str
     admin_token: str | None = None
-    retention_keep: int = 50
+    retention_keep: int = Field(default=50, ge=1)
     cors_origins: list[str] = ["http://localhost:5173"]
 
 

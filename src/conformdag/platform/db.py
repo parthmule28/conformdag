@@ -5,9 +5,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 from sqlalchemy import (
     JSON,
+    CursorResult,
     DateTime,
     ForeignKey,
     Index,
@@ -16,6 +18,7 @@ from sqlalchemy import (
     create_engine,
     func,
     select,
+    update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -191,6 +194,30 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
     return queued_scan
 
 
+def transition_running_scan(
+    session: Session, scan_id: str, status: str, error: str | None = None, *, requeue: bool = False
+) -> bool:
+    """Conditionally transition a running scan to ``status``.
+
+    Returns True when the transition was applied. The conditional UPDATE makes
+    cancellation win over any concurrent worker or runner outcome: a scan that
+    was cancelled after the caller's last explicit status check is never
+    overwritten, and the caller's pending changes are rolled back instead.
+    Requeueing clears the claim timestamp so the scan re-enters the queue;
+    terminal transitions stamp ``finished_at``.
+    """
+    statement = (
+        update(ScanRow).where(ScanRow.id == scan_id, ScanRow.status == "running").values(status=status, error=error)
+    )
+    statement = statement.values(claimed_at=None) if requeue else statement.values(finished_at=utcnow())
+    applied = cast("CursorResult[Any]", session.execute(statement))
+    if applied.rowcount:
+        session.commit()
+        return True
+    session.rollback()
+    return False
+
+
 def eligible_baseline(session: Session, repository_id: str, scan_id: str) -> ScanRow | None:
     """Return the scan row when it may serve as one repository's baseline.
 
@@ -214,12 +241,16 @@ def count_scans(session: Session, repository_id: str) -> int:
 
 
 def retention_target_scan_ids(session: Session, repository_id: str, keep: int) -> list[str]:
-    """Return scan ids beyond the newest ``keep`` for one repository."""
+    """Return scan ids beyond the newest ``keep`` for one repository.
+
+    At least the single newest artifact is always protected, so a misconfigured
+    ``keep`` below one can never prune the latest report.
+    """
     newest = (
         select(ScanRow.id)
         .where(ScanRow.repository_id == repository_id)
         .order_by(ScanRow.created_at.desc())
-        .limit(keep)
+        .limit(max(keep, 1))
         .subquery()
     )
     older = select(ScanRow.id).where(

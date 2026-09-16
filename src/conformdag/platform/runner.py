@@ -22,6 +22,7 @@ from conformdag.platform.db import (
     SuppressionRow,
     create_session_factory,
     eligible_baseline,
+    transition_running_scan,
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
@@ -94,10 +95,8 @@ def _incomplete_error(report: ScanReport) -> str:
 
 
 def _was_cancelled(session: Session, scan_id: str) -> bool:
-    """Re-read the scan row so cancellation wins over any runner outcome."""
-    session.expire_all()
-    refreshed = session.get(ScanRow, scan_id)
-    return refreshed is not None and refreshed.status == "cancelled"
+    """Re-read the scan status with a fresh query so cancellation wins over any runner outcome."""
+    return session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id)) == "cancelled"
 
 
 def execute_scan(scan_id: str, dsn: str) -> int:
@@ -112,10 +111,7 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             return 2
         repository = session.get(RepositoryRow, scan.repository_id)
         if repository is None:
-            scan.status = "failed"
-            scan.error = "repository row disappeared"
-            scan.finished_at = utcnow()
-            session.commit()
+            transition_running_scan(session, scan_id, "failed", "repository row disappeared")
             return 2
         pack = repository.policy_pack
         try:
@@ -125,10 +121,9 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             )
         except PERSISTENT_FAILURES as exc:
             logger.info("scan_completed", extra={"scan_id": scan_id, "error": str(exc)})
-            scan.status = "failed"
-            scan.error = str(exc)
-            scan.finished_at = utcnow()
-            session.commit()
+            if not transition_running_scan(session, scan_id, "failed", str(exc)):
+                print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
+                return 0
             return 1
         logger.info("scan_completed", extra={"scan_id": scan_id})
         report = _apply_platform_suppressions(session, report)
@@ -138,10 +133,9 @@ def execute_scan(scan_id: str, dsn: str) -> int:
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             _ingest(session, scan, normalized)
-            scan.status = "failed"
-            scan.error = _incomplete_error(normalized)
-            scan.finished_at = utcnow()
-            session.commit()
+            if not transition_running_scan(session, scan_id, "failed", _incomplete_error(normalized)):
+                print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
+                return 0
             return 1
         gate_result: GateResult | None = None
         loaded_pack: PolicyPack | None = None
@@ -189,9 +183,9 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0
         _ingest(session, scan, normalized)
-        scan.status = "succeeded"
-        scan.finished_at = utcnow()
-        session.commit()
+        if not transition_running_scan(session, scan_id, "succeeded"):
+            print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
+            return 0
         return 0
 
 

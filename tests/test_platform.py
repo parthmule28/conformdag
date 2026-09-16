@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -18,6 +19,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from ruamel.yaml import YAML
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -47,6 +49,7 @@ from conformdag.platform.db import (
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
+    utcnow,
 )
 from conformdag.platform.worker import WorkerSettings, run_worker_once
 from conformdag.policy import load_policy_pack
@@ -167,6 +170,49 @@ def load_scan(platform_env: str, scan_id: str) -> ScanRow:
         scan = session.get(ScanRow, scan_id)
         assert scan is not None
         return scan
+
+
+def factory(dsn: str) -> sessionmaker[Session]:
+    """Return a session factory bound to the given platform DSN."""
+    return create_session_factory(dsn)
+
+
+def settings(**overrides: Any) -> WorkerSettings:
+    """Return worker settings with test defaults and optional overrides."""
+    values: dict[str, Any] = {"retention_keep": 50}
+    values.update(overrides)
+    return WorkerSettings(**values)
+
+
+def seed_stale_running_scan(dsn: str, *, attempts: int = 1) -> str:
+    """Seed one repository with a stale running scan and return its id."""
+    with factory(dsn)() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(
+            ScanRow(
+                id="scan1",
+                repository_id="repo1",
+                status="running",
+                claimed_at=datetime.now(UTC) - timedelta(hours=2),
+                attempts=attempts,
+            )
+        )
+        session.commit()
+        return "scan1"
+
+
+def only_scan(dsn: str) -> ScanRow:
+    """Return the single persisted scan row."""
+    with factory(dsn)() as session:
+        return session.scalars(select(ScanRow)).one()
+
+
+def _install_sleeper_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Point the worker's runner argv at a stub child that sleeps past any timeout."""
+    sleeper = tmp_path / "sleeper-runner"
+    sleeper.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8")
+    sleeper.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(sleeper))
 
 
 def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
@@ -1528,6 +1574,229 @@ def test_worker_reports_runner_failure_outcome(platform_env: str, tmp_path: Path
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "failed"
         assert scan.error is not None and "cannot read" in scan.error
+
+
+def test_exhausted_abandoned_scan_is_committed_failed(platform_env: str) -> None:
+    seed_stale_running_scan(platform_env, attempts=3)
+
+    assert run_worker_once(factory(platform_env), platform_env, settings(max_attempts=3)) is None
+
+    assert only_scan(platform_env).status == "failed"
+
+
+def test_timeout_requeues_scan_with_attempts_left(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_sleeper_runner(monkeypatch, tmp_path)
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
+        session.commit()
+
+    assert run_worker_once(factory(platform_env), platform_env, settings(timeout_seconds=1)) == "scan1"
+
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "queued"
+    assert scan.attempts == 1
+    assert scan.error is not None and "timeout" in scan.error
+    assert scan.finished_at is None
+
+
+def test_timeout_at_attempt_budget_commits_failed(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_sleeper_runner(monkeypatch, tmp_path)
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="queued", attempts=2))
+        session.commit()
+
+    assert run_worker_once(factory(platform_env), platform_env, settings(timeout_seconds=1, max_attempts=3)) == "scan1"
+
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "failed"
+    assert scan.error is not None and "timeout" in scan.error
+    assert scan.finished_at is not None
+
+
+def test_cancellation_terminates_child_during_execution(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_sleeper_runner(monkeypatch, tmp_path)
+    session_factory = factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
+        session.commit()
+
+    def cancel_during_execution() -> None:
+        time.sleep(0.3)
+        with session_factory() as session:
+            scan = session.get(ScanRow, "scan1")
+            assert scan is not None
+            scan.status = "cancelled"
+            scan.finished_at = utcnow()
+            session.commit()
+
+    canceller = threading.Thread(target=cancel_during_execution)
+    canceller.start()
+    started = time.monotonic()
+    handled = run_worker_once(session_factory, platform_env, settings(timeout_seconds=6, poll_seconds=0.05))
+    elapsed = time.monotonic() - started
+    canceller.join(timeout=5)
+
+    assert handled == "scan1"
+    assert elapsed < 3.0, f"worker blocked for {elapsed:.1f}s instead of terminating the cancelled child"
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "cancelled"
+    assert scan.finished_at is not None
+
+
+def test_worker_requeues_scan_when_runner_cannot_launch(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "missing-python"))
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
+        session.commit()
+
+    assert run_worker_once(factory(platform_env), platform_env, settings()) == "scan1"
+
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "queued"
+    assert scan.error is not None and "launch" in scan.error
+
+
+def test_execute_claimed_scan_kills_child_that_ignores_termination(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import conformdag.platform.worker as worker_module
+    from conformdag.platform.worker import RunnerOutcome, execute_claimed_scan
+
+    stubborn = tmp_path / "stubborn-runner"
+    stubborn.write_text("#!/bin/sh\ntrap '' TERM\nexec sleep 300\n", encoding="utf-8")
+    stubborn.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(stubborn))
+    monkeypatch.setattr(worker_module, "_CANCEL_GRACE_SECONDS", 0.2)
+    session_factory = factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="cancelled"))
+        session.commit()
+
+    result: dict[str, RunnerOutcome] = {}
+
+    def run() -> None:
+        result["outcome"] = execute_claimed_scan(session_factory, platform_env, "scan1", settings(poll_seconds=0.05))
+
+    thread = threading.Thread(target=run, daemon=True)
+    started = time.monotonic()
+    thread.start()
+    thread.join(timeout=30)
+    elapsed = time.monotonic() - started
+
+    assert not thread.is_alive(), "child that ignores SIGTERM was not killed after the grace period"
+    assert elapsed < 25.0, f"killing the stubborn child took {elapsed:.1f}s"
+    assert result["outcome"].cancelled is True
+    assert result["outcome"].error == ""
+
+
+def test_retention_zero_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        PlatformSettings(dsn="sqlite:///x", retention_keep=0)
+
+
+def test_worker_settings_reject_zero_retention_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_RETENTION_KEEP", "0")
+
+    with pytest.raises(ValueError, match="at least one"):
+        WorkerSettings.from_environment()
+
+
+def test_retention_target_scan_ids_protect_newest_with_zero_keep(platform_env: str) -> None:
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        for index in range(3):
+            session.add(
+                ScanRow(
+                    id=f"scan{index}", repository_id="repo1", status="succeeded", report_json={"report_version": "2"}
+                )
+            )
+        session.commit()
+
+        targets = retention_target_scan_ids(session, "repo1", keep=0)
+
+    assert targets == ["scan0", "scan1"]
+
+
+def test_runner_persistent_failure_after_cancel_keeps_cancelled_status(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.platform.runner import execute_scan
+
+    session_factory = factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    def cancel_then_fail(root: Path, pack: Path | None, **kwargs: Any) -> ScanReport:
+        with session_factory() as session:
+            scan = session.get(ScanRow, "scan1")
+            assert scan is not None
+            scan.status = "cancelled"
+            scan.finished_at = utcnow()
+            session.commit()
+        raise OSError("cannot read repository after cancellation")
+
+    monkeypatch.setattr(runner_module, "scan_repository", cancel_then_fail)
+
+    assert execute_scan("scan1", platform_env) == 0
+
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "cancelled"
+
+
+def test_runner_completion_after_cancel_keeps_cancelled_status(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.platform.runner import execute_scan
+
+    (tmp_path / "standards").mkdir()
+    copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "dags/dag.py").write_text("from airflow import DAG\ndag = DAG(dag_id='x')\n", encoding="utf-8")
+    copyfile("policies/pack.yaml", tmp_path / "pack.yaml")
+    (tmp_path / "conformdag.yaml").write_text(
+        'config_version: "1"\nscan:\n  include: ["dags/**/*.py"]\n', encoding="utf-8"
+    )
+
+    session_factory = factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    real_ingest = cast("Callable[[Session, ScanRow, ScanReport], None]", runner_module.__dict__["_ingest"])
+
+    def cancel_during_ingest(session: Session, scan: ScanRow, report: ScanReport) -> None:
+        with session_factory() as other:
+            row = other.get(ScanRow, scan.id)
+            assert row is not None
+            row.status = "cancelled"
+            row.finished_at = utcnow()
+            other.commit()
+        real_ingest(session, scan, report)
+
+    monkeypatch.setattr(runner_module, "_ingest", cancel_during_ingest)
+
+    assert execute_scan("scan1", platform_env) == 0
+
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "cancelled"
 
 
 def test_unknown_api_paths_return_json_404(client: TestClient) -> None:
