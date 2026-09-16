@@ -81,6 +81,19 @@ def _pr_transport_never_called() -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
+def test_pr_client_sets_a_120s_timeout() -> None:
+    from conformdag.agent import pr as pr_module
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201, json={"html_url": "https://github.com/x/pull/1"})
+
+    client = pr_module._build_client(
+        "https://api.github.com", "token", transport=httpx.MockTransport(handler)
+    )
+
+    assert client.timeout == httpx.Timeout(120.0)
+
+
 def test_triage_splits_fixable_from_manual(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
     root = build_repository(tmp_path)
     report = scan_repository(root, root / "policies/pack.yaml")

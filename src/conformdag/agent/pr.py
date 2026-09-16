@@ -10,15 +10,30 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 import httpx
 
 API_URL = "https://api.github.com"
 API_VERSION = "2022-11-28"
+REQUEST_TIMEOUT: Final[float] = 120.0
 
 
 class PrError(RuntimeError):
     """Raised when branch publication or PR creation fails."""
+
+
+def _build_client(api_url: str, token: str, transport: httpx.BaseTransport | None = None) -> httpx.Client:
+    return httpx.Client(
+        base_url=api_url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": API_VERSION,
+        },
+        transport=transport,
+        timeout=httpx.Timeout(REQUEST_TIMEOUT),
+    )
 
 
 def _git(root: Path, arguments: list[str], tolerate: str | None = None) -> str:
@@ -63,15 +78,7 @@ class PrClient:
         _git(root, ["add", "-A"])
         _git(root, ["commit", "-m", title], tolerate="nothing to commit")
         _git(root, ["push", "-u", "origin", head_branch])
-        with httpx.Client(
-            base_url=self.api_url,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": API_VERSION,
-            },
-            transport=self.transport,
-        ) as client:
+        with _build_client(self.api_url, self.token, transport=self.transport) as client:
             response = client.post(
                 f"/repos/{self.repo}/pulls",
                 json={
