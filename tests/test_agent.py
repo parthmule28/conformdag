@@ -5,6 +5,7 @@ import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -87,7 +88,8 @@ def test_pr_client_sets_a_120s_timeout() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(201, json={"html_url": "https://github.com/x/pull/1"})
 
-    client = pr_module._build_client("https://api.github.com", "token", transport=httpx.MockTransport(handler))
+    build_client = cast("Callable[..., httpx.Client]", pr_module.__dict__["_build_client"])
+    client = build_client("https://api.github.com", "token", transport=httpx.MockTransport(handler))
 
     assert client.timeout == httpx.Timeout(120.0)
 
@@ -96,7 +98,8 @@ def test_branch_name_truncates_long_paths_with_hash_suffix() -> None:
     from conformdag.agent import pipeline as pipeline_module
 
     long_file = "/".join(["segment"] * 40) + ".py"
-    branch = pipeline_module._branch_name("conformdag/fix", long_file)
+    branch_name = cast("Callable[[str, str], str]", pipeline_module.__dict__["_branch_name"])
+    branch = branch_name("conformdag/fix", long_file)
 
     assert len(branch) <= 240
     assert branch.startswith("conformdag/fix")
@@ -106,7 +109,8 @@ def test_branch_name_truncates_long_paths_with_hash_suffix() -> None:
 def test_branch_name_keeps_short_paths_unchanged() -> None:
     from conformdag.agent import pipeline as pipeline_module
 
-    branch = pipeline_module._branch_name("conformdag/fix", "dags/reporting.py")
+    branch_name = cast("Callable[[str, str], str]", pipeline_module.__dict__["_branch_name"])
+    branch = branch_name("conformdag/fix", "dags/reporting.py")
 
     assert branch == "conformdag/fixdags-reporting.py"
 
