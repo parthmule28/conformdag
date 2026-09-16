@@ -52,7 +52,7 @@ def run_ruff(repository_root: Path, rules: list[str]) -> list[dict[str, Any]] | 
     if process.returncode not in (0, 1):
         return None
     try:
-        parsed: object = json.loads(process.stdout or "[]")
+        parsed: object = json.loads(process.stdout)
     except json.JSONDecodeError:
         return None
     if not isinstance(parsed, list):

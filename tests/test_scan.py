@@ -329,3 +329,39 @@ def test_ruff_air_integration_catches_air002(tmp_path: Path) -> None:
 
     ruff_findings = [finding for finding in report.findings if finding.policy_id == "AIR-TST-002"]
     assert any("AIR002" in (finding.explanation or "") for finding in ruff_findings)
+
+
+@pytest.mark.skipif(which("ruff") is None, reason="ruff binary not installed")
+def test_real_ruff_air_finding_is_suppressible(tmp_path: Path) -> None:
+    pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
+    _ruff_source(tmp_path)
+
+    first = scan_repository(tmp_path, pack_path)
+
+    finding = next(item for item in first.findings if item.policy_id == "AIR-TST-002")
+    assert finding.suppressed is False
+    assert "AIR002" in (finding.explanation or "")
+    suppressions = tmp_path / ".conformdag/suppressions.yaml"
+    suppressions.parent.mkdir()
+    _write_yaml(
+        suppressions,
+        {
+            "suppressions": [
+                {
+                    "fingerprint": finding.fingerprint,
+                    "policy_id": finding.policy_id,
+                    "reason": "known until the DAG is updated",
+                    "owner": "platform",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "expires_at": "2099-01-01T00:00:00Z",
+                }
+            ]
+        },
+    )
+
+    second = scan_repository(tmp_path, pack_path)
+
+    suppressed = next(item for item in second.findings if item.policy_id == "AIR-TST-002")
+    assert suppressed.suppressed is True
+    assert suppressed.suppression is not None
+    assert not any(issue.code == "SUPPRESSION_UNMATCHED" for issue in second.issues)

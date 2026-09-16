@@ -182,6 +182,18 @@ def test_run_ruff_returns_none_on_invocation_failure(tmp_path: Path, monkeypatch
     assert run_ruff(tmp_path, ["AIR002"]) is None
 
 
+def test_run_ruff_rejects_empty_json_on_violation_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.ruff_adapter import run_ruff
+
+    def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(arguments, 1, stdout="", stderr="")
+
+    monkeypatch.setattr("conformdag.ruff_adapter.ruff_binary", lambda: "/usr/bin/ruff")
+    monkeypatch.setattr("conformdag.ruff_adapter.subprocess.run", fake_run)
+
+    assert run_ruff(tmp_path, ["AIR002"]) is None
+
+
 def test_owner_evaluator_handles_valid_and_invalid_values() -> None:
     pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
     policy = next(item for item in pack.policies if item.id == "AIR-DET-001")
