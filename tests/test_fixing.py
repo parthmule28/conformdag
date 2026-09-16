@@ -48,10 +48,50 @@ from conftest import VIOLATIONS_PY
 
 
 def test_fixability_matrix_is_explicit_for_every_known_kind() -> None:
-    assert frozenset({"required-owner", "required-tags", "execution-timeout", "retry-bounds"}) == AUTOFIX_KINDS
+    assert (
+        frozenset({"required-owner", "required-tags", "execution-timeout", "retry-bounds", "catchup-policy"})
+        == AUTOFIX_KINDS
+    )
     assert frozenset({"top-level-io"}) == PROPOSED_ONLY_KINDS
+    assert (
+        frozenset(
+            {
+                "forbidden-operators",
+                "idempotence",
+                "orchestration-boundary",
+                "sensitive-logging",
+                "approved-abstractions",
+                "ruff-air",
+                "start-date-freshness",
+                "module-scope-variables",
+                "dynamic-dag-factory",
+            }
+        )
+        == MANUAL_KINDS
+    )
     assert not AUTOFIX_KINDS & PROPOSED_ONLY_KINDS
     assert not AUTOFIX_KINDS & MANUAL_KINDS
+
+
+def test_catchup_policy_codemod_replaces_catchup_kwarg() -> None:
+    source = "from airflow import DAG\ndag = DAG(dag_id='x', catchup=True)\n"
+    payload = RemediationPayload(
+        fix_kind="catchup-policy",
+        action=RemediationAction.SET_KWARG,
+        kwarg="catchup",
+        target=RemediationTarget(line=2, column=0, enclosing="dag", node="dag-call"),
+        value="False",
+    )
+
+    generated = generate_spans(source, payload)
+
+    assert generated is not None
+    spans, needs_import = generated
+    assert len(spans) == 1
+    assert needs_import is False
+    updated = apply_spans(source, spans)
+    assert "catchup=False" in updated
+    assert "catchup=True" not in updated
 
 
 def test_findings_carry_remediation_payloads(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:

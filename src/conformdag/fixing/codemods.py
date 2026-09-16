@@ -11,7 +11,7 @@ from conformdag.fixing.specs import EditSpan
 from conformdag.models import RemediationAction, RemediationPayload
 
 AUTOFIX_KINDS: Final[frozenset[str]] = frozenset(
-    {"required-owner", "required-tags", "execution-timeout", "retry-bounds"}
+    {"required-owner", "required-tags", "execution-timeout", "retry-bounds", "catchup-policy"}
 )
 PROPOSED_ONLY_KINDS: Final[frozenset[str]] = frozenset({"top-level-io"})
 MANUAL_KINDS: Final[frozenset[str]] = frozenset(
@@ -22,6 +22,9 @@ MANUAL_KINDS: Final[frozenset[str]] = frozenset(
         "sensitive-logging",
         "approved-abstractions",
         "ruff-air",
+        "start-date-freshness",
+        "module-scope-variables",
+        "dynamic-dag-factory",
     }
 )
 
@@ -207,6 +210,10 @@ def fix_retry_bounds(source: str, payload: RemediationPayload, tree: ast.Module 
     return None
 
 
+def fix_catchup(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
+    return _fix_dag_kwarg(source, payload, "catchup", "False", tree)
+
+
 def _needs_timedelta_import(tree: ast.Module) -> bool:
     for node in ast.walk(tree):
         if (
@@ -292,6 +299,7 @@ FIXERS: Final[dict[str, Codemod]] = {
     "required-tags": fix_tags,
     "execution-timeout": fix_execution_timeout,
     "retry-bounds": fix_retry_bounds,
+    "catchup-policy": fix_catchup,
     "top-level-io": fix_move_statement,
 }
 
