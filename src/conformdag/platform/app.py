@@ -32,6 +32,7 @@ from conformdag.platform.db import (
 from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackError, PackService
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
+from conformdag.policy import PolicyValidationError
 from conformdag.reporting import render_html, render_sarif
 
 API_PREFIX = "/api/v1"
@@ -519,7 +520,7 @@ def _pack_upsert_policy(
     service: PackService = request.app.state.pack_service
     try:
         service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json"))
-    except PackError as exc:
+    except (PackError, PolicyValidationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "saved", "policy_id": policy_id}
 
@@ -530,6 +531,8 @@ def _pack_delete_policy(request: Request, pack_name: str, policy_id: str) -> dic
         service.delete_policy(pack_name, policy_id)
     except PackError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PolicyValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "deleted", "policy_id": policy_id}
 
 

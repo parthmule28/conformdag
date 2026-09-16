@@ -1648,6 +1648,55 @@ def test_workspace_registration_surfaces_unknown_check(client: TestClient, tmp_p
     assert "unknown deterministic check" in entry["error"]
 
 
+def _mutation_client(platform_env: str) -> TestClient:
+    """Build a client that surfaces server errors as 500 responses instead of raising."""
+    factory = create_session_factory(platform_env)
+    settings = PlatformSettings(dsn=platform_env, admin_token="secret-token")
+    return TestClient(create_app(factory, settings), raise_server_exceptions=False)
+
+
+_UPSERT_PAYLOAD: dict[str, Any] = {
+    "title": "Owner policy",
+    "version": "2.0.0",
+    "status": "ACTIVE",
+    "severity": "high",
+    "check_kind": "required-owner",
+    "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+    "source_document": "standards/dag-authoring.md",
+    "source_section": "Ownership and metadata",
+    "invariant": "Every DAG declares an owner.",
+}
+
+
+def test_pack_policy_save_returns_422_for_malformed_pack(platform_env: str, tmp_path: Path) -> None:
+    client = _mutation_client(platform_env)
+    pack_path = _write_unknown_check_pack(tmp_path / "packs")
+    cast("FastAPI", client.app).state.pack_service.register("bad", pack_path)
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/bad/policies/AIR-DET-001",
+        json=_UPSERT_PAYLOAD,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert "unknown deterministic check" in response.text
+
+
+def test_pack_policy_delete_returns_422_for_malformed_pack(platform_env: str, tmp_path: Path) -> None:
+    client = _mutation_client(platform_env)
+    pack_path = _write_unknown_check_pack(tmp_path / "packs")
+    cast("FastAPI", client.app).state.pack_service.register("bad", pack_path)
+
+    response = _as_httpx(client).delete(
+        "/api/v1/packs/bad/policies/AIR-DET-001",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert "unknown deterministic check" in response.text
+
+
 def test_pack_validate_reports_gate_errors(tmp_path: Path) -> None:
     from conformdag.platform.packs import PackService
 
