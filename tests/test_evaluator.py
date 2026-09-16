@@ -260,6 +260,10 @@ def test_deterministic_policy_suite_evaluates_tags_defaults_io_and_operators() -
         "AIR-DET-004",
         "AIR-DET-005",
         "AIR-DET-006",
+        "AIR-DET-007",
+        "AIR-DET-008",
+        "AIR-DET-009",
+        "AIR-DET-011",
     ]
     assert skipped == ["AIR-SEM-001", "AIR-SEM-002", "AIR-SEM-003", "AIR-SEM-004"]
     by_policy: dict[str, list[FindingStatus]] = {}

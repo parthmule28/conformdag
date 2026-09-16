@@ -23,6 +23,7 @@ from conformdag.models import (
     Severity,
     StartDateFreshnessConfig,
 )
+from conformdag.policy import load_policy_pack
 from conformdag.scan import scan_repository
 
 TASKFLOW_DAG = '''\
@@ -211,3 +212,19 @@ def test_new_checks_flow_through_the_full_scan(build_repository: Callable[[Path]
     }
     assert "AIR-DET-001" in flagged_policies
     assert report.complete
+
+
+def test_org_pack_includes_the_new_check_kinds() -> None:
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path("."))
+    kinds = {policy.configuration.kind for policy in pack.policies}
+    required_kinds = {
+        "start-date-freshness",
+        "catchup-policy",
+        "module-scope-variables",
+        "dynamic-dag-factory",
+    }
+
+    assert required_kinds <= kinds
+    for policy in pack.policies:
+        if policy.configuration.kind in required_kinds:
+            assert policy.status.value == "ACTIVE"
