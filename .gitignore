@@ -35,4 +35,6 @@ build/
 
 # Platform dashboard build artifacts
 frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
 src/conformdag/platform/static/
