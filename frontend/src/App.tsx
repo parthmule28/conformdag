@@ -18,6 +18,7 @@ import {
   validatePack,
   type Finding,
   type PackSummary,
+  type Page,
   type PolicyInfo,
   type Repository,
   type ScanSummary,
@@ -25,10 +26,10 @@ import {
 
 const queryClient = new QueryClient();
 
-type Page = "repos" | "policies" | "suppressions";
+type PageName = "repos" | "policies" | "suppressions";
 
 function App() {
-  const [page, setPage] = useState<Page>("repos");
+  const [page, setPage] = useState<PageName>("repos");
   const [token, setToken] = useState(adminToken() ?? "");
   return (
     <QueryClientProvider client={queryClient}>
@@ -37,7 +38,7 @@ function App() {
           <div className="mx-auto flex max-w-6xl items-center justify-between">
             <h1 className="text-lg font-semibold text-gray-100">ConformDAG Platform</h1>
             <nav className="flex items-center gap-1">
-              {(["repos", "policies", "suppressions"] as Page[]).map((item) => (
+              {(["repos", "policies", "suppressions"] as PageName[]).map((item) => (
                 <button
                   key={item}
                   className={`rounded px-3 py-1.5 text-sm capitalize ${
@@ -117,14 +118,15 @@ function RepositoryCard({ repository }: { repository: Repository }) {
     queryKey: ["scans", repository.id],
     queryFn: () => scanHistory(repository.id),
     refetchInterval: (query) => {
-      const scans = query.state.data ?? [];
+      const scans = query.state.data?.items ?? [];
       return scans.some((s) => s.status === "queued" || s.status === "running") ? 2000 : false;
     },
   });
-  const latest = history.data?.[0];
+  const latest = history.data?.items[0];
   const latestFindings = useQuery({
     queryKey: ["findings", latest?.scan_id],
-    queryFn: () => (latest ? findings(latest.scan_id, "fail") : Promise.resolve([])),
+    queryFn: () =>
+      latest ? findings(latest.scan_id, { status: "fail" }) : Promise.resolve({ items: [], total: 0 }),
     enabled: latest?.status === "succeeded",
   });
   const trigger = useMutation({
@@ -159,7 +161,7 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           )}
         </p>
       )}
-      <ScanHistoryList scans={history.data ?? []} />
+      <ScanHistoryList scans={history.data?.items ?? []} />
       {latest?.status === "succeeded" && <ExportButtons scanId={latest.scan_id} />}
       <FindingsList scanId={latest?.scan_id ?? null} state={latestFindings} />
     </section>
@@ -217,7 +219,7 @@ function ExportButtons({ scanId }: { scanId: string }) {
 }
 
 interface FindingsState {
-  data?: Finding[];
+  data?: Page<Finding>;
   isLoading: boolean;
   isError: boolean;
 }
@@ -227,7 +229,7 @@ function FindingsList({ scanId, state }: { scanId: string | null; state: Finding
   if (scanId === null || state.isLoading) {
     return null;
   }
-  const rows = state.data ?? [];
+  const rows = state.data?.items ?? [];
   return (
     <div className="mt-3">
       <h4 className="text-sm font-medium text-gray-300">Failing findings ({rows.length})</h4>
