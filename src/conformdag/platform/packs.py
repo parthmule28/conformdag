@@ -202,8 +202,8 @@ def _write_pack(pack: PolicyPack, path: Path) -> None:
             mode="w",
             encoding="utf-8",
         ) as handle:
-            handle.write(buffer.getvalue())
             tmp_path = Path(handle.name)
+            handle.write(buffer.getvalue())
         os.replace(tmp_path, path)
     finally:
         if tmp_path is not None:

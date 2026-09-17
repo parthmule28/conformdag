@@ -2082,6 +2082,33 @@ def test_write_pack_uses_unique_same_directory_temp_files(tmp_path: Path, monkey
     assert not list(tmp_path.glob(".pack.yaml.*"))
 
 
+def test_write_pack_cleans_temp_when_temp_write_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pack_path = tmp_path / "pack.yaml"
+    pack_path.write_text("original content\n", encoding="utf-8")
+    pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
+    created: list[Path] = []
+    real_temp_file = cast("Callable[..., Any]", packs_module.tempfile.NamedTemporaryFile)
+
+    def failing_temp_file(*args: Any, **kwargs: Any) -> Any:
+        handle = real_temp_file(*args, **kwargs)
+        created.append(Path(cast(str, handle.name)))
+
+        def broken_write(data: str) -> int:
+            raise OSError("simulated temporary write failure")
+
+        handle.write = broken_write
+        return handle
+
+    monkeypatch.setattr(packs_module.tempfile, "NamedTemporaryFile", failing_temp_file)
+
+    with pytest.raises(OSError, match="simulated temporary write failure"):
+        _write_pack(pack, pack_path)
+
+    assert pack_path.read_text(encoding="utf-8") == "original content\n"
+    assert all(entry.parent == tmp_path for entry in created)
+    assert not list(tmp_path.glob(".pack.yaml.*"))
+
+
 def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
     from shutil import copyfile
 
