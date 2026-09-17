@@ -73,10 +73,6 @@ def _post(client: TestClient, url: str, **kwargs: Any) -> httpx.Response:
     return _as_httpx(client).post(url, **kwargs)
 
 
-def _delete_helper(client: TestClient, url: str) -> httpx.Response:
-    return _as_httpx(client).delete(url)
-
-
 def _get(client: TestClient, url: str) -> httpx.Response:
     """Call a platform endpoint and return a typed response."""
     return _as_httpx(client).get(url)
@@ -3818,6 +3814,46 @@ def test_pack_policy_delete_returns_422_for_malformed_pack(platform_env: str, tm
     assert "unknown deterministic check" in response.text
 
 
+def test_pack_policy_delete_returns_422_when_resulting_pack_is_invalid(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _write_gate_pack(
+        tmp_path,
+        [{"id": "release", "rules": [{"type": "always-block", "policy_ids": ["AIR-TST-001"]}]}],
+    )
+    cast("FastAPI", client.app).state.pack_service.register("org", pack_path)
+    before = pack_path.read_bytes()
+
+    response = _as_httpx(client).delete(
+        "/api/v1/packs/org/policies/AIR-TST-001",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert "references unknown policy ids" in response.text
+    assert pack_path.read_bytes() == before
+
+
+def test_pack_gate_delete_maps_pack_validation_to_422(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.platform.packs import PackService
+
+    pack_path = _write_gate_pack(tmp_path, [{"id": "release", "rules": [{"type": "no-new-findings"}]}])
+    service = cast("PackService", cast("FastAPI", client.app).state.pack_service)
+    service.register("org", pack_path)
+
+    def reject_delete(pack_name: str, gate_id: str) -> None:
+        raise packs_module.PackError("gate validation failed")
+
+    monkeypatch.setattr(service, "delete_gate", reject_delete)
+    response = _as_httpx(client).delete(
+        "/api/v1/packs/org/gates/release",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "gate validation failed"
+
+
 def test_pack_policy_list_returns_422_for_malformed_pack(client: TestClient, tmp_path: Path) -> None:
     pack_path = _write_unknown_check_pack(tmp_path / "packs")
     cast("FastAPI", client.app).state.pack_service.register("bad", pack_path)
@@ -3864,18 +3900,30 @@ def test_pack_list_endpoint_returns_empty_when_no_packs(client: TestClient) -> N
 
 def test_pack_delete_endpoint_returns_404_for_unknown(client: TestClient) -> None:
     """Verify the delete endpoint returns 404 for a nonexistent policy."""
-    result = _delete_helper(client, "/api/v1/packs/nonexistent/policies/AIR-DET-001")
-    assert result.status_code in {404, 401}
+    result = _as_httpx(client).delete(
+        "/api/v1/packs/nonexistent/policies/AIR-DET-001",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert result.status_code == 404
 
 
-def test_pack_validate_endpoint_on_clean_pack(client: TestClient) -> None:
-    """Verify the validate endpoint returns valid for a well-formed pack."""
+def test_pack_validate_endpoint_returns_404_for_unknown_pack(client: TestClient) -> None:
     result = _post(
         client,
         "/api/v1/packs/nonexistent/validate",
-        headers={"Authorization": "Bearer soak-demo-token"},
+        headers={"Authorization": "Bearer secret-token"},
     )
-    assert result.status_code in {200, 404, 401, 422}
+    assert result.status_code == 404
+
+
+def test_pack_policy_delete_endpoint_returns_404_for_unknown_policy(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    result = _as_httpx(client).delete(
+        "/api/v1/packs/org/policies/AIR-NOPE-001",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert result.status_code == 404
+    assert pack_path.is_file()
 
 
 def test_sensitive_logging_evaluator_detects_api_key_pattern() -> None:

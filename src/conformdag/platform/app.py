@@ -41,7 +41,7 @@ from conformdag.platform.db import (
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
-from conformdag.platform.packs import PackError, PackService
+from conformdag.platform.packs import PackError, PackNotFoundError, PackService
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
 from conformdag.policy import PolicyValidationError
 from conformdag.reporting import render_html, render_sarif
@@ -645,6 +645,8 @@ def _pack_upsert_policy(
     service: PackService = request.app.state.pack_service
     try:
         service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json"))
+    except PackNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (PackError, PolicyValidationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "saved", "policy_id": policy_id}
@@ -654,8 +656,10 @@ def _pack_delete_policy(request: Request, pack_name: str, policy_id: str) -> dic
     service: PackService = request.app.state.pack_service
     try:
         service.delete_policy(pack_name, policy_id)
-    except PackError as exc:
+    except PackNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PackError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except PolicyValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "deleted", "policy_id": policy_id}
@@ -663,7 +667,10 @@ def _pack_delete_policy(request: Request, pack_name: str, policy_id: str) -> dic
 
 def _pack_validate(request: Request, pack_name: str) -> dict[str, Any]:
     service: PackService = request.app.state.pack_service
-    return service.validate_pack(pack_name)
+    try:
+        return service.validate_pack(pack_name)
+    except PackNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _pack_gates(request: Request, pack_name: str) -> list[GateResponse]:
@@ -680,9 +687,9 @@ def _pack_upsert_gate(request: Request, pack_name: str, gate_id: str, payload: G
     service: PackService = request.app.state.pack_service
     try:
         service.upsert_gate(pack_name, gate_id, payload.model_dump(mode="json"))
+    except PackNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PackError as exc:
-        if pack_name not in service.pack_paths:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except PolicyValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -693,8 +700,10 @@ def _pack_delete_gate(request: Request, pack_name: str, gate_id: str) -> dict[st
     service: PackService = request.app.state.pack_service
     try:
         service.delete_gate(pack_name, gate_id)
-    except PackError as exc:
+    except PackNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PackError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except PolicyValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "deleted", "gate_id": gate_id}

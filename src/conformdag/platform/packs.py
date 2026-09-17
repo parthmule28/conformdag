@@ -21,6 +21,10 @@ class PackError(ValueError):
     """Raised when a pack cannot be read, written, or validated."""
 
 
+class PackNotFoundError(PackError):
+    """Raised when a registered pack or requested pack member does not exist."""
+
+
 class PackService:
     """Discovers, reads, validates, and writes policy packs in the workspace."""
 
@@ -112,7 +116,7 @@ class PackService:
             before = len(pack.policies)
             pack.policies = [p for p in pack.policies if p.id != policy_id]
             if len(pack.policies) == before:
-                raise PackError(f"policy {policy_id} not found in {pack_name}")
+                raise PackNotFoundError(f"policy {policy_id} not found in {pack_name}")
             issues = validate_policy_pack(pack)
             if issues:
                 raise PackError("; ".join(issues))
@@ -153,7 +157,7 @@ class PackService:
             before = len(pack.quality_gates)
             pack.quality_gates = [gate for gate in pack.quality_gates if gate.id != gate_id]
             if len(pack.quality_gates) == before:
-                raise PackError(f"gate {gate_id} not found in {pack_name}")
+                raise PackNotFoundError(f"gate {gate_id} not found in {pack_name}")
             issues = validate_policy_pack(pack)
             if issues:
                 raise PackError("; ".join(issues))
@@ -170,7 +174,7 @@ class PackService:
     def _require_pack(self, pack_name: str) -> Path:
         path = self.pack_paths.get(pack_name)
         if path is None:
-            raise PackError(f"pack {pack_name!r} not registered")
+            raise PackNotFoundError(f"pack {pack_name!r} not registered")
         return path
 
     def _resolve_source(self, pack_path: Path, document: str) -> Path:
