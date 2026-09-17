@@ -703,7 +703,7 @@ def test_patch_candidates_deduplicates_identical_spans(
     assert candidates["dags/a.py"].count("owner='platform'") == 1
 
 
-def test_patch_candidates_merges_distinct_insertions_at_same_offset(
+def test_patch_candidates_converts_distinct_insertions_at_same_offset_into_residuals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from conformdag.fixing import engine as engine_module
@@ -744,8 +744,101 @@ def test_patch_candidates_merges_distinct_insertions_at_same_offset(
     )
     candidates, residuals = patch_candidates(original, {}, {"dags/a.py": [finding]}, 1)
 
+    assert candidates == {}
+    assert len(residuals) == 1
+    assert "conflicting edit spans" in residuals[0].reason
+
+
+def test_patch_candidates_applies_findings_sequentially_with_distinct_anchors() -> None:
+    from conformdag.fixing import engine as engine_module
+
+    original = {"dags/a.py": "from airflow import DAG\ndag = DAG(dag_id='x')\n"}
+    owner_finding = Finding(
+        policy_id="AIR-TST-001",
+        policy_version="1.0.0",
+        status=FindingStatus.FAIL,
+        severity=Severity.HIGH,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(file=Path("dags/a.py"), start_line=2),
+        fingerprint="f" * 64,
+        fix=RemediationPayload(
+            fix_kind="required-owner",
+            action=RemediationAction.ADD_OWNER,
+            kwarg="owner",
+            target=RemediationTarget(line=2, column=0, enclosing="dag", node="dag-call"),
+            value="platform",
+        ),
+    )
+    tags_finding = Finding(
+        policy_id="AIR-TST-002",
+        policy_version="1.0.0",
+        status=FindingStatus.FAIL,
+        severity=Severity.HIGH,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(file=Path("dags/a.py"), start_line=2),
+        fingerprint="e" * 64,
+        fix=RemediationPayload(
+            fix_kind="required-tags",
+            action=RemediationAction.ADD_TAGS,
+            kwarg="tags",
+            target=RemediationTarget(line=2, column=0, enclosing="dag", node="dag-call"),
+            value='["domain:data"]',
+        ),
+    )
+
+    patch_candidates = cast(
+        "Callable[[dict[str, str], dict[str, str], dict[str, list[Finding]], int], tuple[dict[str, str], list[ResidualFailure]]]",
+        engine_module.__dict__["_patch_candidates"],
+    )
+    candidates, residuals = patch_candidates(original, {}, {"dags/a.py": [owner_finding, tags_finding]}, 1)
+
     assert not residuals
-    assert candidates == {"dags/a.py": "from airflow import DAG\ndag = DAG(, owner='platform', tags=['domain:data'])\n"}
+    assert candidates == {
+        "dags/a.py": "from airflow import DAG\ndag = DAG(dag_id='x', owner='platform', tags=['domain:data'])\n"
+    }
+
+
+def test_patch_candidates_converts_codemod_parse_failures_into_residuals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from conformdag.fixing import engine as engine_module
+
+    original = {"dags/a.py": "from airflow import DAG\ndag = DAG()\n"}
+    finding = Finding(
+        policy_id="AIR-TST-001",
+        policy_version="1.0.0",
+        status=FindingStatus.FAIL,
+        severity=Severity.HIGH,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(file=Path("dags/a.py"), start_line=2),
+        fingerprint="f" * 64,
+        fix=RemediationPayload(
+            fix_kind="x",
+            action=RemediationAction.ADD_OWNER,
+            target=RemediationTarget(line=2, column=0, enclosing="dag", node="dag-call"),
+            value="platform",
+        ),
+    )
+
+    def generate_parse_error(_source: str, _payload: RemediationPayload) -> tuple[list[EditSpan], bool]:
+        raise SyntaxError("invalid syntax")
+
+    monkeypatch.setattr(engine_module, "generate_spans", generate_parse_error)
+
+    def import_span(_source: str) -> EditSpan:
+        return EditSpan(1, 0, 1, 0, "")
+
+    monkeypatch.setattr(engine_module, "timedelta_import_span", import_span)
+
+    patch_candidates = cast(
+        "Callable[[dict[str, str], dict[str, str], dict[str, list[Finding]], int], tuple[dict[str, str], list[ResidualFailure]]]",
+        engine_module.__dict__["_patch_candidates"],
+    )
+    candidates, residuals = patch_candidates(original, {}, {"dags/a.py": [finding]}, 1)
+
+    assert candidates == {}
+    assert len(residuals) == 1
+    assert "could not parse" in residuals[0].reason
 
 
 def test_patch_candidates_converts_equal_coordinate_replacements_into_residuals(

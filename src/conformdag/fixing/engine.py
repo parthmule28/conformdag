@@ -196,18 +196,29 @@ def _patch_candidates(
     open_targets: dict[str, list[Finding]],
     iteration: int,
 ) -> tuple[dict[str, str], list[ResidualFailure]]:
-    """Generate patched content for every open target file from its current text."""
+    """Generate patched content for every open target file from its current text.
+
+    Findings are applied one at a time against the accumulated file text, so
+    each codemod anchors on the content produced by the previous edit and
+    generated spans never collide across findings. Any conflicting span set
+    discards the whole file candidate into a residual.
+    """
     candidates: dict[str, str] = {}
     residuals: list[ResidualFailure] = []
     for relative, findings in sorted(open_targets.items()):
         source = patched.get(relative, original.get(relative))
         if source is None:
             continue
-        spans: list[EditSpan] = []
-        needs_import = False
+        current = source
+        candidate: str | None = None
         for finding in findings:
             payload = finding.fix
-            result = generate_spans(source, payload) if payload is not None else None
+            parse_error = ""
+            result = None
+            try:
+                result = generate_spans(current, payload) if payload is not None else None
+            except SyntaxError as exc:
+                parse_error = f"codemod could not parse the current source: {exc}"
             if result is None:
                 residuals.append(
                     ResidualFailure(
@@ -215,30 +226,32 @@ def _patch_candidates(
                         path=relative,
                         fix_kind=payload.fix_kind if payload else "unknown",
                         iterations=iteration,
+                        reason=parse_error,
                     )
                 )
                 continue
             finding_spans, import_needed = result
-            spans.extend(finding_spans)
-            needs_import = needs_import or import_needed
-        if not spans:
-            continue
-        if needs_import:
-            import_span = timedelta_import_span(source)
-            if import_span not in spans:
-                spans.append(import_span)
-        try:
-            candidates[relative] = apply_spans(source, _merge_spans(spans))
-        except ValueError as exc:
-            residuals.append(
-                ResidualFailure(
-                    policy_id=",".join(sorted({finding.policy_id for finding in findings})),
-                    path=relative,
-                    fix_kind=",".join(sorted({finding.fix.fix_kind for finding in findings if finding.fix})),
-                    iterations=iteration,
-                    reason=str(exc),
+            if import_needed:
+                import_span = timedelta_import_span(current)
+                if import_span not in finding_spans:
+                    finding_spans = [*finding_spans, import_span]
+            try:
+                current = apply_spans(current, _dedup_spans(finding_spans))
+            except ValueError as exc:
+                residuals.append(
+                    ResidualFailure(
+                        policy_id=",".join(sorted({finding.policy_id for finding in findings})),
+                        path=relative,
+                        fix_kind=",".join(sorted({finding.fix.fix_kind for finding in findings if finding.fix})),
+                        iterations=iteration,
+                        reason=str(exc),
+                    )
                 )
-            )
+                candidate = None
+                break
+            candidate = current
+        if candidate is not None:
+            candidates[relative] = candidate
     return candidates, residuals
 
 
@@ -302,42 +315,21 @@ def _record_unverified_residuals(
             )
 
 
-def _merge_spans(spans: list[EditSpan]) -> list[EditSpan]:
-    """Deduplicate identical spans and merge zero-width insertions at a shared offset.
-
-    Distinct insertions at one coordinate are concatenated in sorted order,
-    which is byte-identical to sequential reversed-order application, while
-    every other distinct span stays subject to ``apply_spans`` conflict checks.
+def _dedup_spans(spans: list[EditSpan]) -> list[EditSpan]:
+    """Deduplicate identical spans so a repeated edit is applied exactly once.
 
     Args:
         spans: Edit spans generated for one file.
 
     Returns:
-        Deduplicated spans with shared-offset insertions merged.
+        The spans with identical duplicates removed; every distinct span is
+        kept and stays subject to ``apply_spans`` conflict checks.
     """
-    merged: list[EditSpan] = []
-    for span in sorted(spans):
-        if merged:
-            previous = merged[-1]
-            same_coordinates = (
-                previous.start_line,
-                previous.start_col,
-                previous.end_line,
-                previous.end_col,
-            ) == (span.start_line, span.start_col, span.end_line, span.end_col)
-            zero_width = previous.start_line == previous.end_line and previous.start_col == previous.end_col
-            if same_coordinates and zero_width:
-                if span.replacement != previous.replacement:
-                    merged[-1] = EditSpan(
-                        previous.start_line,
-                        previous.start_col,
-                        previous.end_line,
-                        previous.end_col,
-                        previous.replacement + span.replacement,
-                    )
-                continue
-        merged.append(span)
-    return merged
+    unique: list[EditSpan] = []
+    for span in spans:
+        if span not in unique:
+            unique.append(span)
+    return unique
 
 
 def _incomplete_verification_residuals(
@@ -471,7 +463,7 @@ def _record_proposed_moves(outcome: FixOutcome, contents: dict[str, str]) -> Non
             )
             continue
         spans, _ = result
-        updated = apply_spans(contents[relative], _merge_spans(spans))
+        updated = apply_spans(contents[relative], _dedup_spans(spans))
         outcome.proposed_moves.append(
             ProposedMove(
                 path=relative,
