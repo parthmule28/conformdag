@@ -5,10 +5,12 @@
 - Remediation merge base: `849c840` (plan commit)
 - Source HEAD verified at final acceptance: `dff158f` (`fix: validate reconstructed packs and gate only complete reports`)
 - Working tree: clean except the pre-existing untracked `.serena/`
-- Requirements consumed: `.superpowers/sdd/2026-09-05-p1-foundation/p1-readiness-audit.md`,
+- Requirements consumed: the canonical P1 readiness audit,
   `docs/superpowers/specs/2026-09-16-p1-remediation-design.md`,
-  `docs/superpowers/plans/2026-09-16-p1-remediation.md`,
-  task briefs/reports/reviews for Tasks 1-7, `.superpowers/sdd/2026-09-16-p1-remediation/progress.md`.
+  `docs/superpowers/plans/2026-09-16-p1-remediation.md`, and the committed
+  acceptance/final-review records in this directory. Disposable task briefs,
+  reports, and review packages were removed after acceptance; their evidence is
+  summarized in this report and the progress ledger.
 
 ## Step 1 — Requirement-to-Evidence Matrix
 
@@ -205,14 +207,14 @@ reconstructed `Policy`, not the reconstructed `PolicyPack`, so a dashboard
 mutation could persist an unrunnable pack and block recovery) and one
 same-wave Minor (M-1: incomplete CLI reports could embed a passing
 `gate_result`). No Critical findings. Full evidence:
-`final-review.md` and `review-849c840..46c6824.diff`.
+`final-review.md`.
 
 Both findings were fixed in the one consolidated final fix wave (TDD, red at
 `46c6824` then green; full gates re-run: `mise run check` 342 passed /
 pyright 0 errors, coverage 91.56%, schema check, runtime suite, frontend
 build — all exit 0). Evidence: `final-fix-report.md`. The scoped re-review at
 `dff158f` marked both findings addressed with no new findings. Evidence:
-`final-re-review.md` and `review-46c6824..dff158f.diff`.
+`final-re-review.md`.
 
 ## Spec acceptance criteria cross-check
 
