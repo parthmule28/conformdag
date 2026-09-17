@@ -21,7 +21,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import PlainTextResponse
 
 from conformdag.models import ScanReport
-from conformdag.platform.contracts import FindingResponse, ScanSummaryResponse
+from conformdag.platform.aggregates import build_overview, build_repository_trends
+from conformdag.platform.contracts import (
+    FindingResponse,
+    OverviewResponse,
+    RepositoryTrendsResponse,
+    ScanSummaryResponse,
+)
 from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
@@ -472,6 +478,24 @@ def update_suppression(request: Request, suppression_id: str, payload: Suppressi
         return _suppression_payload(row)
 
 
+def overview(request: Request, days: Annotated[int, Query(ge=1, le=365)] = 30) -> OverviewResponse:
+    """Return read-only overview aggregates across registered repositories."""
+    factory = _factory(request)
+    with factory() as session:
+        return build_overview(session, utcnow(), days)
+
+
+def repository_trends(
+    request: Request, repository_id: str, days: Annotated[int, Query(ge=1, le=365)] = 30
+) -> RepositoryTrendsResponse:
+    """Return read-only daily trend aggregates for one repository."""
+    factory = _factory(request)
+    with factory() as session:
+        if session.get(RepositoryRow, repository_id) is None:
+            raise HTTPException(status_code=404, detail="repository not registered")
+        return build_repository_trends(session, repository_id, utcnow(), days)
+
+
 def create_app(
     session_factory: sessionmaker[Session], settings: PlatformSettings, workspace_path: Path | None = None
 ) -> FastAPI:
@@ -571,6 +595,8 @@ def create_app(
     app.get(API_PREFIX + "/suppressions")(list_suppressions)
     app.post(API_PREFIX + "/suppressions", dependencies=[Depends(require_admin)])(create_suppression)
     app.patch(API_PREFIX + "/suppressions/{suppression_id}", dependencies=[Depends(require_admin)])(update_suppression)
+    app.get(API_PREFIX + "/overview")(overview)
+    app.get(API_PREFIX + "/repos/{repository_id}/trends")(repository_trends)
 
     app.get(API_PREFIX + "/packs")(_pack_list)
     app.get(API_PREFIX + "/packs/{pack_name}/policies")(_pack_policies)

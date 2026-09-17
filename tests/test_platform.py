@@ -1071,6 +1071,407 @@ def test_findings_endpoint_uses_null_baseline_status_without_usable_baseline(
     assert findings[0]["baseline_status"] is None
 
 
+def _register_named(client: TestClient, tmp_path: Path, name: str) -> str:
+    """Register one more repository by name and return its id."""
+    response = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": name, "path": str(tmp_path / "repo"), "policy_pack": None},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert response.status_code == 200
+    return response.json()["id"]
+
+
+def _seed_scan(
+    session: Session,
+    scan_id: str,
+    repository_id: str,
+    *,
+    status: str,
+    complete: bool | None = None,
+    created_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    gate_passed: bool | None = None,
+) -> None:
+    """Insert one scan row with explicit lifecycle columns."""
+    session.add(
+        ScanRow(
+            id=scan_id,
+            repository_id=repository_id,
+            status=status,
+            complete=complete,
+            created_at=created_at,
+            finished_at=finished_at,
+            report_json={"gate_result": {"passed": gate_passed}} if gate_passed is not None else None,
+        )
+    )
+
+
+def _seed_finding(
+    session: Session,
+    scan_id: str,
+    repository_id: str,
+    fingerprint: str,
+    *,
+    status: str = "FAIL",
+    suppressed: bool = False,
+) -> None:
+    """Insert one normalized finding row for the given scan."""
+    session.add(
+        FindingRow(
+            scan_id=scan_id,
+            repository_id=repository_id,
+            policy_id="AIR-TST-001",
+            policy_version="1.0.0",
+            status=status,
+            severity="high",
+            file_path="dags/example.py",
+            start_line=1,
+            end_line=2,
+            fingerprint=fingerprint,
+            suppressed=suppressed,
+        )
+    )
+
+
+def test_overview_endpoint_aggregates_counts_current_findings_and_trends(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    other_id = _register_named(client, tmp_path, "side-dags")
+    now = utcnow()
+    day_current = now - timedelta(days=2)
+    current_finished = day_current + timedelta(minutes=10)
+    with _platform_state(client)[0]() as session:
+        _seed_scan(
+            session,
+            "baseline-1",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=now - timedelta(days=5),
+            finished_at=now - timedelta(days=5),
+        )
+        _seed_finding(session, "baseline-1", repository_id, "e" * 64)
+        _seed_finding(session, "baseline-1", repository_id, "s" * 64, suppressed=True)
+        _seed_scan(
+            session,
+            "current-1",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=day_current + timedelta(minutes=7),
+            finished_at=current_finished,
+            gate_passed=True,
+        )
+        _seed_finding(session, "current-1", repository_id, "e" * 64)
+        _seed_finding(session, "current-1", repository_id, "1" * 64)
+        _seed_finding(session, "current-1", repository_id, "2" * 64, status="ERROR")
+        _seed_finding(session, "current-1", repository_id, "3" * 64, suppressed=True)
+        _seed_finding(session, "current-1", repository_id, "4" * 64, status="ERROR", suppressed=True)
+        _seed_finding(session, "current-1", repository_id, "s" * 64, suppressed=True)
+        _seed_scan(session, "queued-1", repository_id, status="queued", created_at=day_current + timedelta(minutes=6))
+        _seed_scan(session, "running-1", repository_id, status="running", created_at=day_current + timedelta(minutes=5))
+        _seed_scan(
+            session,
+            "failed-1",
+            repository_id,
+            status="failed",
+            created_at=day_current + timedelta(minutes=4),
+            finished_at=current_finished,
+        )
+        _seed_finding(session, "failed-1", repository_id, "f" * 64)
+        _seed_scan(
+            session,
+            "cancelled-1",
+            repository_id,
+            status="cancelled",
+            created_at=day_current + timedelta(minutes=3),
+            finished_at=current_finished,
+        )
+        _seed_scan(
+            session,
+            "incomplete-1",
+            repository_id,
+            status="succeeded",
+            complete=False,
+            created_at=day_current + timedelta(minutes=2),
+            finished_at=current_finished,
+        )
+        _seed_finding(session, "incomplete-1", repository_id, "i" * 64)
+        _seed_scan(
+            session,
+            "old-1",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=now - timedelta(days=40),
+            finished_at=now - timedelta(days=40),
+        )
+        _seed_finding(session, "old-1", repository_id, "o" * 64)
+        _seed_scan(session, "queued-baseline", other_id, status="queued", created_at=day_current)
+        _seed_scan(
+            session,
+            "current-b",
+            other_id,
+            status="succeeded",
+            complete=True,
+            created_at=day_current + timedelta(minutes=1),
+            finished_at=current_finished,
+        )
+        _seed_finding(session, "current-b", other_id, "z" * 64)
+        core = session.get(RepositoryRow, repository_id)
+        side = session.get(RepositoryRow, other_id)
+        assert core is not None and side is not None
+        core.baseline_scan_id = "baseline-1"
+        side.baseline_scan_id = "queued-baseline"
+        session.commit()
+
+    response = _get(client, "/api/v1/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {
+        "repository_count",
+        "completed_scan_count",
+        "active_scan_count",
+        "current_failure_count",
+        "current_error_count",
+        "current_new_finding_count",
+        "trends",
+        "recent_scans",
+    }
+    assert payload["repository_count"] == 2
+    assert payload["completed_scan_count"] == 4
+    assert payload["active_scan_count"] == 3
+    assert payload["current_failure_count"] == 3
+    assert payload["current_error_count"] == 1
+    assert payload["current_new_finding_count"] == 4
+    baseline_date = (now - timedelta(days=5)).date().isoformat()
+    current_date = current_finished.date().isoformat()
+    assert {point["date"] for point in payload["trends"]} == {baseline_date, current_date}
+    points = {point["date"]: point for point in payload["trends"]}
+    assert points[baseline_date] == {
+        "date": baseline_date,
+        "completed_scan_count": 1,
+        "fail_finding_count": 1,
+        "error_finding_count": 0,
+        "suppressed_finding_count": 1,
+        "new_finding_count": 0,
+    }
+    assert points[current_date] == {
+        "date": current_date,
+        "completed_scan_count": 2,
+        "fail_finding_count": 3,
+        "error_finding_count": 1,
+        "suppressed_finding_count": 3,
+        "new_finding_count": 4,
+    }
+    assert [row["scan_id"] for row in payload["recent_scans"]] == [
+        "current-1",
+        "queued-1",
+        "running-1",
+        "failed-1",
+        "cancelled-1",
+        "incomplete-1",
+        "current-b",
+        "queued-baseline",
+        "baseline-1",
+        "old-1",
+    ]
+    newest = payload["recent_scans"][0]
+    assert newest["repository_id"] == repository_id
+    assert newest["repository_name"] == "core-dags"
+    assert newest["status"] == "succeeded"
+    assert newest["complete"] is True
+    assert newest["gate_passed"] is True
+    queued = next(row for row in payload["recent_scans"] if row["scan_id"] == "queued-1")
+    assert queued["repository_name"] == "core-dags"
+    assert queued["complete"] is None
+    assert queued["gate_passed"] is None
+    assert queued["finished_at"] is None
+    side_row = next(row for row in payload["recent_scans"] if row["scan_id"] == "current-b")
+    assert side_row["repository_name"] == "side-dags"
+
+
+def test_overview_recent_scans_limit_to_ten_newest_scans(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    now = utcnow()
+    with _platform_state(client)[0]() as session:
+        for index in range(12):
+            _seed_scan(
+                session,
+                f"scan-{index:02d}",
+                repository_id,
+                status="succeeded",
+                complete=True,
+                created_at=now - timedelta(hours=index),
+            )
+        session.commit()
+
+    payload = _get(client, "/api/v1/overview").json()
+
+    assert payload["completed_scan_count"] == 12
+    assert [row["scan_id"] for row in payload["recent_scans"]] == [f"scan-{index:02d}" for index in range(10)]
+
+
+@pytest.mark.parametrize("query", ["days=0", "days=366", "days=-1"])
+def test_overview_endpoint_rejects_out_of_range_days(client: TestClient, query: str) -> None:
+    response = _get(client, f"/api/v1/overview?{query}")
+
+    assert response.status_code == 422
+
+
+def test_repository_trends_group_by_utc_date_and_omit_missing_dates(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    now = utcnow()
+    late = (now - timedelta(days=2)).replace(hour=23, minute=50, second=0, microsecond=0)
+    early = late + timedelta(minutes=20)
+    with _platform_state(client)[0]() as session:
+        _seed_scan(
+            session,
+            "late-scan",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=late,
+            finished_at=late,
+        )
+        _seed_finding(session, "late-scan", repository_id, "a" * 64)
+        _seed_scan(
+            session,
+            "early-scan",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=early,
+            finished_at=early,
+        )
+        _seed_finding(session, "early-scan", repository_id, "b" * 64, status="ERROR")
+        session.commit()
+
+    response = _get(client, f"/api/v1/repos/{repository_id}/trends?days=30")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {"repository_id", "points"}
+    assert payload["repository_id"] == repository_id
+    assert [point["date"] for point in payload["points"]] == [late.date().isoformat(), early.date().isoformat()]
+    assert payload["points"][0] == {
+        "date": late.date().isoformat(),
+        "completed_scan_count": 1,
+        "fail_finding_count": 1,
+        "error_finding_count": 0,
+        "suppressed_finding_count": 0,
+        "new_finding_count": 0,
+    }
+    assert payload["points"][1] == {
+        "date": early.date().isoformat(),
+        "completed_scan_count": 1,
+        "fail_finding_count": 0,
+        "error_finding_count": 1,
+        "suppressed_finding_count": 0,
+        "new_finding_count": 0,
+    }
+
+
+def test_repository_trends_scoped_to_one_repository(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    other_id = _register_named(client, tmp_path, "side-dags")
+    now = utcnow()
+    mine = now - timedelta(days=2)
+    theirs = now - timedelta(days=3)
+    with _platform_state(client)[0]() as session:
+        _seed_scan(
+            session,
+            "mine-scan",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=mine,
+            finished_at=mine,
+        )
+        _seed_finding(session, "mine-scan", repository_id, "m" * 64)
+        _seed_scan(
+            session,
+            "theirs-scan",
+            other_id,
+            status="succeeded",
+            complete=True,
+            created_at=theirs,
+            finished_at=theirs,
+        )
+        _seed_finding(session, "theirs-scan", other_id, "t" * 64)
+        session.commit()
+
+    payload = _get(client, f"/api/v1/repos/{repository_id}/trends?days=30").json()
+
+    assert [point["date"] for point in payload["points"]] == [mine.date().isoformat()]
+    assert payload["points"][0]["completed_scan_count"] == 1
+    assert payload["points"][0]["fail_finding_count"] == 1
+
+
+def test_repository_trends_without_eligible_scans_return_no_points(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    finished = utcnow() - timedelta(days=1)
+    with _platform_state(client)[0]() as session:
+        _seed_scan(session, "queued-1", repository_id, status="queued", created_at=finished)
+        _seed_scan(
+            session,
+            "failed-1",
+            repository_id,
+            status="failed",
+            created_at=finished,
+            finished_at=finished,
+        )
+        _seed_finding(session, "failed-1", repository_id, "f" * 64)
+        _seed_scan(
+            session,
+            "incomplete-1",
+            repository_id,
+            status="succeeded",
+            complete=False,
+            created_at=finished,
+            finished_at=finished,
+        )
+        _seed_finding(session, "incomplete-1", repository_id, "i" * 64)
+        session.commit()
+
+    trends = _get(client, f"/api/v1/repos/{repository_id}/trends?days=30").json()
+    overview = _get(client, "/api/v1/overview").json()
+
+    assert trends["points"] == []
+    assert overview["completed_scan_count"] == 0
+    assert overview["active_scan_count"] == 1
+    assert overview["current_failure_count"] == 0
+    assert overview["current_error_count"] == 0
+    assert overview["current_new_finding_count"] == 0
+    assert overview["trends"] == []
+
+
+def test_repository_trends_unknown_repository_returns_404(client: TestClient) -> None:
+    response = _get(client, "/api/v1/repos/unknown/trends?days=30")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("query", ["days=0", "days=366", "days=-1"])
+def test_repository_trends_reject_out_of_range_days(client: TestClient, query: str) -> None:
+    response = _get(client, f"/api/v1/repos/repo1/trends?{query}")
+
+    assert response.status_code == 422
+
+
+def test_aggregate_functions_reject_non_positive_days(platform_env: str) -> None:
+    from conformdag.platform.aggregates import build_overview, build_repository_trends
+
+    now = utcnow()
+    with initialize_session_factory(platform_env)() as session:
+        with pytest.raises(ValueError, match="days"):
+            build_overview(session, now, 0)
+        with pytest.raises(ValueError, match="days"):
+            build_repository_trends(session, "repo1", now, 0)
+
+
 def test_findings_migration_adds_nullable_end_line(platform_env: str) -> None:
     factory = initialize_session_factory(platform_env)
     with factory() as session:
