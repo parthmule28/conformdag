@@ -15,6 +15,7 @@ export interface Repository {
   path: string;
   policy_pack: string | null;
   airflow_profile: string | null;
+  baseline_scan_id: string | null;
 }
 
 export interface ScanSummary {
