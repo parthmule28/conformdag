@@ -121,6 +121,32 @@ export interface PackSummary {
   error: string | null;
 }
 
+export interface PolicyOwnership {
+  owner: string;
+  approvers: string[];
+  approved_at: string | null;
+  review_before: string | null;
+  expires_at: string | null;
+}
+
+export interface PolicyScope {
+  files: string[];
+  operators: string[];
+}
+
+export interface PolicyExceptions {
+  require_reason: boolean;
+  require_expiry: boolean;
+}
+
+export interface PolicyEnforcement {
+  type: string;
+  deterministic_checks: string[];
+  model_check: boolean;
+  allow_abstention: boolean;
+  blocking: boolean;
+}
+
 export interface PolicyInfo {
   id: string;
   title: string;
@@ -131,6 +157,31 @@ export interface PolicyInfo {
   check_config: Record<string, unknown>;
   source_document: string;
   source_section: string;
+  source_version: string | null;
+  invariant: string;
+  safe_path: string | null;
+  ownership: PolicyOwnership;
+  scope: PolicyScope;
+  exceptions: PolicyExceptions;
+  enforcement: PolicyEnforcement;
+}
+
+export interface PolicyUpsertRequest {
+  title: string;
+  version: string;
+  status: string;
+  severity: string;
+  check_kind: string;
+  check_config: Record<string, unknown>;
+  source_document: string;
+  source_section: string;
+  invariant: string;
+  safe_path?: string | null;
+  source_version?: string | null;
+  ownership?: PolicyOwnership;
+  scope?: PolicyScope;
+  exceptions?: PolicyExceptions;
+  enforcement?: PolicyEnforcement;
 }
 
 export function listPacks(): Promise<PackSummary[]> {
@@ -144,7 +195,7 @@ export function listPackPolicies(packName: string): Promise<PolicyInfo[]> {
 export function upsertPolicy(
   packName: string,
   policyId: string,
-  payload: Record<string, unknown>,
+  payload: PolicyUpsertRequest,
 ): Promise<{ status: string }> {
   return request(`/packs/${packName}/policies/${policyId}`, {
     method: "PUT",
@@ -159,7 +210,7 @@ export function deletePolicy(packName: string, policyId: string): Promise<{ stat
 export function updatePolicy(
   packName: string,
   policyId: string,
-  payload: Record<string, unknown>,
+  payload: PolicyUpsertRequest,
 ): Promise<{ status: string }> {
   return upsertPolicy(packName, policyId, payload);
 }

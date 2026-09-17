@@ -388,7 +388,13 @@ function PolicyEditor({ packName, policy }: { packName: string; policy: PolicyIn
         check_config: draft.check_config,
         source_document: draft.source_document,
         source_section: draft.source_section,
-        invariant: draft.check_config?.invariant as string | undefined ?? "No invariant set",
+        source_version: draft.source_version,
+        invariant: draft.invariant,
+        safe_path: draft.safe_path,
+        ownership: draft.ownership,
+        scope: draft.scope,
+        exceptions: draft.exceptions,
+        enforcement: draft.enforcement,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["policies", packName] });
@@ -404,6 +410,7 @@ function PolicyEditor({ packName, policy }: { packName: string; policy: PolicyIn
     return (
       <div className="mt-2 rounded border border-blue-800 bg-blue-950 p-3 text-sm">
         <input className="mb-2 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+        <input className="mb-2 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200" value={draft.invariant} onChange={(e) => setDraft({ ...draft, invariant: e.target.value })} placeholder="Invariant" />
         <textarea className="mb-2 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1 font-mono text-xs text-gray-200" rows={3} value={JSON.stringify(draft.check_config, null, 2)} onChange={(e) => { try { setDraft({ ...draft, check_config: JSON.parse(e.target.value) }); } catch { /* keep raw while editing */ } }} />
         <div className="flex gap-2">
           <button className="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50" disabled={save.isPending} onClick={() => save.mutate()}>

@@ -2026,7 +2026,7 @@ def test_write_pack_is_atomic_on_replace_failure(tmp_path: Path, monkeypatch: py
         _write_pack(pack, pack_path)
 
     assert pack_path.read_text(encoding="utf-8") == "original content\n"
-    assert not (tmp_path / "pack.yaml.tmp").exists()
+    assert not list(tmp_path.glob(".pack.yaml.*"))
 
 
 def test_write_pack_replaces_atomically_and_leaves_no_tmp(tmp_path: Path) -> None:
@@ -2036,16 +2036,16 @@ def test_write_pack_replaces_atomically_and_leaves_no_tmp(tmp_path: Path) -> Non
 
     _write_pack(pack, pack_path)
 
-    assert not (tmp_path / "pack.yaml.tmp").exists()
+    assert not list(tmp_path.glob(".pack.yaml.*"))
     reloaded = load_policy_pack(pack_path, tmp_path)
     assert reloaded.id == "x"
 
 
 def test_write_pack_cleans_tmp_on_validation_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pack_path = tmp_path / "pack.yaml"
-    tmp_pack_path = tmp_path / "pack.yaml.tmp"
+    unrelated = tmp_path / "pack.yaml.tmp"
     pack_path.write_text("original content\n", encoding="utf-8")
-    tmp_pack_path.write_text("stale temporary content\n", encoding="utf-8")
+    unrelated.write_text("unrelated pre-existing file\n", encoding="utf-8")
     pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
 
     def invalid_dump(self: PolicyPack, **kwargs: Any) -> dict[str, Any]:
@@ -2057,29 +2057,29 @@ def test_write_pack_cleans_tmp_on_validation_failure(tmp_path: Path, monkeypatch
         _write_pack(pack, pack_path)
 
     assert pack_path.read_text(encoding="utf-8") == "original content\n"
-    assert not tmp_pack_path.exists()
+    assert unrelated.exists()
+    assert not list(tmp_path.glob(".pack.yaml.*"))
 
 
-def test_write_pack_cleans_tmp_on_write_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_pack_uses_unique_same_directory_temp_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pack_path = tmp_path / "pack.yaml"
-    tmp_pack_path = tmp_path / "pack.yaml.tmp"
-    pack_path.write_text("original content\n", encoding="utf-8")
     pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
-    original_write_text = Path.write_text
+    seen: list[Path] = []
+    real_replace = os.replace
 
-    def partial_write(target: Path, data: str, **kwargs: Any) -> int:
-        if target == tmp_pack_path:
-            original_write_text(target, "partial temporary content\n", encoding="utf-8")
-            raise OSError("simulated temporary write failure")
-        return original_write_text(target, data, **kwargs)
+    def spy_replace(src: Path, dst: Path) -> None:
+        seen.append(Path(src))
+        real_replace(src, dst)
 
-    monkeypatch.setattr(Path, "write_text", partial_write)
+    monkeypatch.setattr(packs_module.os, "replace", spy_replace)
 
-    with pytest.raises(OSError, match="temporary write failure"):
-        _write_pack(pack, pack_path)
+    _write_pack(pack, pack_path)
+    _write_pack(pack, pack_path)
 
-    assert pack_path.read_text(encoding="utf-8") == "original content\n"
-    assert not tmp_pack_path.exists()
+    assert len({entry.name for entry in seen}) == 2
+    assert all(entry.parent == tmp_path for entry in seen)
+    assert all(entry.name.startswith(".pack.yaml.") for entry in seen)
+    assert not list(tmp_path.glob(".pack.yaml.*"))
 
 
 def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
@@ -2170,6 +2170,194 @@ def test_pack_policy_save_endpoint_persists_dashboard_check_fields(client: TestC
     assert policy.title == "Updated owner policy"
     assert policy.configuration.kind == "required-owner"
     assert policy.configuration.allowed_values == ["platform"]
+
+
+def _register_org_pack(client: TestClient, tmp_path: Path) -> Path:
+    """Register the bundled pack plus its standards document under the name ``org``."""
+    from conformdag.platform.packs import PackService
+
+    (tmp_path / "standards").mkdir(parents=True, exist_ok=True)
+    pack_path = tmp_path / "pack.yaml"
+    copyfile("policies/pack.yaml", pack_path)
+    copyfile("standards/dag-authoring.md", tmp_path / "standards" / "dag-authoring.md")
+    service = cast("PackService", cast("FastAPI", client.app).state.pack_service)
+    service.register("org", pack_path)
+    return pack_path
+
+
+def _load_dashboard_policy(client: TestClient, pack_name: str, policy_id: str) -> dict[str, Any]:
+    """Return one policy row as the dashboard policy listing exposes it."""
+    response = _get(client, f"/api/v1/packs/{pack_name}/policies")
+    assert response.status_code == 200
+    policies = cast("list[dict[str, Any]]", response.json())
+    return next(policy for policy in policies if policy["id"] == policy_id)
+
+
+def test_dashboard_policy_update_preserves_contract_metadata(client: TestClient, tmp_path: Path) -> None:
+    _register_org_pack(client, tmp_path)
+    before = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    for key in ("invariant", "safe_path", "source_version", "ownership", "scope", "exceptions", "enforcement"):
+        assert key in before, f"policy listing is missing contract field {key!r}"
+
+    edit = {
+        "title": "Updated title",
+        "version": before["version"],
+        "status": before["status"],
+        "severity": before["severity"],
+        "check_kind": before["check_kind"],
+        "check_config": before["check_config"],
+        "source_document": before["source_document"],
+        "source_section": before["source_section"],
+        "invariant": before["invariant"],
+    }
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json=edit,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert response.status_code == 200
+
+    after = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert after["title"] == "Updated title"
+    assert after["source_version"] == before["source_version"]
+    assert after["ownership"] == before["ownership"]
+    assert after["scope"] == before["scope"]
+    assert after["exceptions"] == before["exceptions"]
+    assert after["enforcement"] == before["enforcement"]
+    assert after["invariant"] == before["invariant"]
+    assert after["safe_path"] == before["safe_path"]
+
+
+def test_concurrent_policy_updates_do_not_lose_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform.packs import PackService
+
+    (tmp_path / "standards").mkdir()
+    pack_path = tmp_path / "pack.yaml"
+    copyfile("policies/pack.yaml", pack_path)
+    copyfile("standards/dag-authoring.md", tmp_path / "standards" / "dag-authoring.md")
+    service = PackService({"test": pack_path})
+    entered_write = threading.Event()
+    release_write = threading.Event()
+    real_write = _write_pack
+
+    def slow_write(pack: PolicyPack, path: Path) -> None:
+        entered_write.set()
+        release_write.wait(timeout=10)
+        real_write(pack, path)
+
+    monkeypatch.setattr(packs_module, "_write_pack", slow_write)
+    payloads: dict[str, dict[str, Any]] = {
+        "AIR-DET-001": {
+            "title": "Updated owner policy",
+            "version": "2.0.0",
+            "status": "ACTIVE",
+            "severity": "high",
+            "check_kind": "required-owner",
+            "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+            "source_document": "standards/dag-authoring.md",
+            "source_section": "Ownership and metadata",
+        },
+        "AIR-DET-002": {
+            "title": "Updated tags policy",
+            "version": "2.0.0",
+            "status": "ACTIVE",
+            "severity": "medium",
+            "check_kind": "required-tags",
+            "check_config": {
+                "kind": "required-tags",
+                "required_keys": ["domain", "owner"],
+                "allowed_values": {"domain": ["data", "analytics", "platform"]},
+            },
+            "source_document": "standards/dag-authoring.md",
+            "source_section": "Ownership and metadata",
+        },
+    }
+    invariants = {"AIR-DET-001": "Owner invariant updated", "AIR-DET-002": "Tags invariant updated"}
+
+    def apply_distinct_update(policy_id: str) -> None:
+        service.upsert_policy("test", policy_id, {**payloads[policy_id], "invariant": invariants[policy_id]})
+
+    first = threading.Thread(target=apply_distinct_update, args=("AIR-DET-001",))
+    second = threading.Thread(target=apply_distinct_update, args=("AIR-DET-002",))
+    first.start()
+    assert entered_write.wait(timeout=10)
+    second.start()
+    time.sleep(0.3)
+    release_write.set()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    reloaded = load_policy_pack(pack_path, tmp_path)
+    saved = {policy.id: policy.invariant for policy in reloaded.policies}
+    assert saved["AIR-DET-001"] == "Owner invariant updated"
+    assert saved["AIR-DET-002"] == "Tags invariant updated"
+
+
+def test_pack_policy_save_rejects_invalid_source_section_before_write(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    before_text = pack_path.read_text(encoding="utf-8")
+    payload = {
+        "title": "Updated title",
+        "version": "1.0.0",
+        "status": "ACTIVE",
+        "severity": "high",
+        "check_kind": "required-owner",
+        "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+        "source_document": "standards/dag-authoring.md",
+        "source_section": "No Such Section",
+        "invariant": "Every DAG declares an approved owner.",
+    }
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json=payload,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert "No Such Section" in response.text
+    assert pack_path.read_text(encoding="utf-8") == before_text
+
+
+def test_pack_policy_upsert_requires_complete_data_for_new_policy(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    base = {
+        "title": "Fresh policy",
+        "version": "1.0.0",
+        "status": "ACTIVE",
+        "severity": "medium",
+        "check_kind": "required-owner",
+        "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+        "source_document": "standards/dag-authoring.md",
+        "source_section": "Ownership and metadata",
+        "invariant": "Fresh policies carry complete contracts.",
+        "ownership": {"owner": "platform"},
+        "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"]},
+    }
+
+    incomplete = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-NEW-001",
+        json=base,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert incomplete.status_code == 422
+
+    complete = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-NEW-001",
+        json={
+            **base,
+            "scope": {"files": ["dags/**/*.py"], "operators": []},
+            "exceptions": {"require_reason": True, "require_expiry": True},
+        },
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert complete.status_code == 200
+
+    saved = load_policy_pack(pack_path, tmp_path)
+    fresh = next(policy for policy in saved.policies if policy.id == "AIR-NEW-001")
+    assert fresh.ownership.owner == "platform"
+    assert fresh.scope.files == ["dags/**/*.py"]
+    assert fresh.exceptions.require_reason is True
 
 
 def test_pack_service_validate(tmp_path: Path) -> None:

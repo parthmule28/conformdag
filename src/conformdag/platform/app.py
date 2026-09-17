@@ -82,7 +82,13 @@ class WorkspaceLoadRequest(BaseModel):
 
 
 class PolicyUpsertRequest(BaseModel):
-    """Payload for creating or updating a policy in a pack."""
+    """Payload for creating or updating a policy in a pack.
+
+    Editable fields are required. Contract metadata fields (``source_version``,
+    ``ownership``, ``scope``, ``exceptions``, ``enforcement``, ``safe_path``)
+    are optional: an existing policy keeps its persisted value when the request
+    omits them, while a new policy must carry them completely.
+    """
 
     title: str
     version: str
@@ -94,6 +100,11 @@ class PolicyUpsertRequest(BaseModel):
     source_section: str
     invariant: str
     safe_path: str | None = None
+    source_version: str | None = None
+    ownership: dict[str, Any] | None = None
+    scope: dict[str, Any] | None = None
+    exceptions: dict[str, Any] | None = None
+    enforcement: dict[str, Any] | None = None
 
 
 class SuppressionCreate(BaseModel):

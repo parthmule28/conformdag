@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import tempfile
+import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,7 @@ class PackService:
 
     def __init__(self, pack_paths: dict[str, Path] | None = None) -> None:
         self.pack_paths: dict[str, Path] = dict(pack_paths or {})
+        self._lock = threading.RLock()
 
     def register(self, name: str, path: Path) -> None:
         self.pack_paths[name] = path
@@ -63,64 +66,50 @@ class PackService:
                 "check_config": policy.configuration.model_dump(mode="json"),
                 "source_document": str(policy.source.document),
                 "source_section": policy.source.section,
+                "source_version": policy.source.version,
+                "invariant": policy.invariant,
+                "safe_path": policy.safe_path,
+                "ownership": policy.ownership.model_dump(mode="json"),
+                "scope": policy.scope.model_dump(mode="json"),
+                "exceptions": policy.exceptions.model_dump(mode="json"),
+                "enforcement": policy.enforcement.model_dump(mode="json"),
             }
             for policy in pack.policies
         ]
 
     def upsert_policy(self, pack_name: str, policy_id: str, policy_data: dict[str, Any]) -> None:
-        pack_path = self._require_pack(pack_name)
-        pack = load_policy_pack(pack_path, pack_path.parent)
-        existing = next((policy for policy in pack.policies if policy.id == policy_id), None)
-        clean = existing.model_dump(mode="json") if existing is not None else dict(policy_data)
-        clean.update(
-            {
-                "title": policy_data["title"],
-                "version": policy_data["version"],
-                "status": policy_data["status"],
-                "severity": policy_data["severity"],
-                "invariant": policy_data["invariant"],
-            }
-        )
-        if policy_data.get("safe_path") is not None:
-            clean["safe_path"] = policy_data["safe_path"]
-        source_doc = self._resolve_source(pack_path, policy_data.get("source_document", "standards/dag-authoring.md"))
-        source_text = source_doc.read_text(encoding="utf-8")
-        content_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+        with self._lock:
+            pack_path = self._require_pack(pack_name)
+            pack = load_policy_pack(pack_path, pack_path.parent)
+            existing = next((policy for policy in pack.policies if policy.id == policy_id), None)
+            source_doc = self._resolve_source(pack_path, policy_data["source_document"])
+            source_text = source_doc.read_text(encoding="utf-8")
+            section = policy_data["source_section"]
+            if section not in source_text:
+                raise PackError(f"source section {section!r} was not found in {source_doc}")
+            content_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
 
-        clean["source"] = {
-            "document": policy_data.get("source_document", "standards/dag-authoring.md"),
-            "section": policy_data.get("source_section", "Standards"),
-            "content_hash": content_hash,
-        }
-        clean["id"] = policy_id
-        if "check_config" in policy_data or "check_kind" in policy_data:
-            configuration = dict(policy_data["check_config"])
-            configuration["kind"] = policy_data["check_kind"]
-            clean["configuration"] = configuration
-        elif "configuration" in policy_data:
-            clean["configuration"] = policy_data["configuration"]
-        for key in ("source_document", "source_section", "check_kind", "check_config"):
-            clean.pop(key, None)
-
-        try:
-            validated = Policy.model_validate(clean)
-        except ValueError as exc:
-            raise PackError(str(exc)) from exc
-        idx = next((i for i, p in enumerate(pack.policies) if p.id == policy_id), None)
-        if idx is not None:
-            pack.policies[idx] = validated
-        else:
-            pack.policies.append(validated)
-        _write_pack(pack, pack_path)
+            clean = _merge_policy_data(policy_id, policy_data, existing, content_hash)
+            try:
+                validated = Policy.model_validate(clean)
+            except ValueError as exc:
+                raise PackError(str(exc)) from exc
+            idx = next((i for i, p in enumerate(pack.policies) if p.id == policy_id), None)
+            if idx is not None:
+                pack.policies[idx] = validated
+            else:
+                pack.policies.append(validated)
+            _write_pack(pack, pack_path)
 
     def delete_policy(self, pack_name: str, policy_id: str) -> None:
-        pack_path = self._require_pack(pack_name)
-        pack = load_policy_pack(pack_path, pack_path.parent)
-        before = len(pack.policies)
-        pack.policies = [p for p in pack.policies if p.id != policy_id]
-        if len(pack.policies) == before:
-            raise PackError(f"policy {policy_id} not found in {pack_name}")
-        _write_pack(pack, pack_path)
+        with self._lock:
+            pack_path = self._require_pack(pack_name)
+            pack = load_policy_pack(pack_path, pack_path.parent)
+            before = len(pack.policies)
+            pack.policies = [p for p in pack.policies if p.id != policy_id]
+            if len(pack.policies) == before:
+                raise PackError(f"policy {policy_id} not found in {pack_name}")
+            _write_pack(pack, pack_path)
 
     def validate_pack(self, pack_name: str) -> dict[str, Any]:
         pack_path = self._require_pack(pack_name)
@@ -145,17 +134,78 @@ class PackService:
         return resolved
 
 
+def _merge_policy_data(
+    policy_id: str,
+    policy_data: dict[str, Any],
+    existing: Policy | None,
+    content_hash: str,
+) -> dict[str, Any]:
+    """Rebuild one policy payload, preserving contract fields the request omits."""
+    if existing is None:
+        missing = [key for key in ("ownership", "scope", "exceptions", "enforcement") if policy_data.get(key) is None]
+        if missing:
+            raise PackError(
+                f"new policy {policy_id} requires complete contract metadata; missing: {', '.join(missing)}"
+            )
+        clean = dict(policy_data)
+    else:
+        clean = existing.model_dump(mode="json")
+    clean.update(
+        {
+            "id": policy_id,
+            "title": policy_data["title"],
+            "version": policy_data["version"],
+            "status": policy_data["status"],
+            "severity": policy_data["severity"],
+            "invariant": policy_data["invariant"],
+        }
+    )
+    for key in ("ownership", "scope", "exceptions", "enforcement"):
+        if policy_data.get(key) is not None:
+            clean[key] = policy_data[key]
+    if policy_data.get("safe_path") is not None:
+        clean["safe_path"] = policy_data["safe_path"]
+    if "check_config" in policy_data or "check_kind" in policy_data:
+        configuration = dict(policy_data["check_config"])
+        configuration["kind"] = policy_data["check_kind"]
+        clean["configuration"] = configuration
+    elif "configuration" in policy_data:
+        clean["configuration"] = policy_data["configuration"]
+    source: dict[str, Any] = {
+        "document": policy_data["source_document"],
+        "section": policy_data["source_section"],
+        "content_hash": content_hash,
+    }
+    if policy_data.get("source_version") is not None:
+        source["version"] = policy_data["source_version"]
+    elif existing is not None:
+        source["version"] = existing.source.version
+    clean["source"] = source
+    for key in ("source_document", "source_section", "source_version", "check_kind", "check_config"):
+        clean.pop(key, None)
+    return clean
+
+
 def _write_pack(pack: PolicyPack, path: Path) -> None:
     yaml = YAML()
     yaml.default_flow_style = False
     yaml.preserve_quotes = True
-    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path: Path | None = None
     try:
         data = pack.model_dump(mode="json")
         buffer = io.StringIO()
         yaml.dump(data, buffer)  # pyright: ignore[reportUnknownMemberType]
-        tmp_path.write_text(buffer.getvalue(), encoding="utf-8")
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+            mode="w",
+            encoding="utf-8",
+        ) as handle:
+            handle.write(buffer.getvalue())
+            tmp_path = Path(handle.name)
         os.replace(tmp_path, path)
     finally:
-        with suppress(OSError):
-            tmp_path.unlink(missing_ok=True)
+        if tmp_path is not None:
+            with suppress(OSError):
+                tmp_path.unlink(missing_ok=True)
