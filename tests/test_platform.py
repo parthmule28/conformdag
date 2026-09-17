@@ -3167,6 +3167,200 @@ def test_pack_service_delete_rejects_gate_reference_and_preserves_bytes(tmp_path
     assert pack_path.read_bytes() == before
 
 
+def _write_gate_pack(tmp_path: Path, gates: list[dict[str, Any]]) -> Path:
+    """Write a valid one-policy pack with the given quality gates and return its path."""
+    (tmp_path / "standards").mkdir(parents=True, exist_ok=True)
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "gates",
+        "version": "1",
+        "quality_gates": gates,
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "Owner policy",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"]},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    pack_path = tmp_path / "pack.yaml"
+    _write_yaml(pack_path, pack)
+    return pack_path
+
+
+def test_pack_service_gate_crud_preserves_order_and_round_trips(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackError, PackService
+
+    pack_path = _write_gate_pack(
+        tmp_path,
+        [
+            {
+                "id": "release",
+                "rules": [
+                    {"type": "no-new-findings"},
+                    {"type": "max-severity", "severity": "high"},
+                ],
+            },
+            {"id": "sandbox", "rules": [{"type": "failure-rate", "max_percent": 50.0}]},
+        ],
+    )
+    service = PackService({"test": pack_path})
+    assert [gate["id"] for gate in service.list_gates("test")] == ["release", "sandbox"]
+
+    service.upsert_gate(
+        "test",
+        "release",
+        {
+            "rules": [
+                {"type": "always-block", "policy_ids": ["AIR-TST-001"]},
+                {"type": "max-findings", "count": 5},
+                {"type": "max-severity", "severity": "critical"},
+            ]
+        },
+    )
+    service.upsert_gate("test", "audit", {"rules": [{"type": "no-new-findings"}]})
+
+    reloaded = load_policy_pack(pack_path, tmp_path)
+    assert [gate.id for gate in reloaded.quality_gates] == ["release", "sandbox", "audit"]
+    assert reloaded.quality_gates[0].model_dump(mode="json")["rules"] == [
+        {"type": "always-block", "policy_ids": ["AIR-TST-001"]},
+        {"type": "max-findings", "count": 5},
+        {"type": "max-severity", "severity": "critical"},
+    ]
+    assert reloaded.quality_gates[1].model_dump(mode="json")["rules"] == [{"type": "failure-rate", "max_percent": 50.0}]
+
+    service.delete_gate("test", "sandbox")
+
+    final = load_policy_pack(pack_path, tmp_path)
+    assert [gate.id for gate in final.quality_gates] == ["release", "audit"]
+    assert [gate["id"] for gate in service.list_gates("test")] == ["release", "audit"]
+
+    with pytest.raises(PackError):
+        service.list_gates("missing")
+    with pytest.raises(PackError):
+        service.delete_gate("test", "no-such-gate")
+
+
+def test_gate_mutation_rejects_invalid_reconstructed_pack_and_preserves_bytes(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackError, PackService
+
+    pack_path = _write_gate_pack(
+        tmp_path,
+        [
+            {"id": "release", "rules": [{"type": "always-block", "policy_ids": ["AIR-TST-001"]}]},
+            {"id": "audit", "rules": [{"type": "no-new-findings"}]},
+        ],
+    )
+    service = PackService({"test": pack_path})
+    before = pack_path.read_bytes()
+
+    with pytest.raises(PackError, match="references unknown policy ids"):
+        service.upsert_gate(
+            "test",
+            "release",
+            {"rules": [{"type": "always-block", "policy_ids": ["AIR-NOPE-001"]}]},
+        )
+    assert pack_path.read_bytes() == before
+
+    with pytest.raises(PackError, match="does not match"):
+        service.upsert_gate(
+            "test",
+            "release",
+            {"id": "audit", "rules": [{"type": "no-new-findings"}]},
+        )
+    assert pack_path.read_bytes() == before
+
+    with pytest.raises(PackError):
+        service.upsert_gate("test", "release", {"rules": [{"type": "max-findings"}]})
+    assert pack_path.read_bytes() == before
+
+
+def test_gate_routes_require_admin_and_return_validation_errors(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    before = pack_path.read_bytes()
+    admin = {"Authorization": "Bearer secret-token"}
+
+    unauth_get = _get(client, "/api/v1/packs/org/gates")
+    assert unauth_get.status_code == 200
+    assert unauth_get.json() == []
+
+    unauth_put = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/release",
+        json={"rules": [{"type": "no-new-findings"}]},
+    )
+    assert unauth_put.status_code == 401
+    unauth_delete = _as_httpx(client).delete("/api/v1/packs/org/gates/release")
+    assert unauth_delete.status_code == 401
+    assert pack_path.read_bytes() == before
+
+    bad_discriminator = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/broken",
+        json={"rules": [{"type": "no-such-rule"}]},
+        headers=admin,
+    )
+    assert bad_discriminator.status_code == 422
+    missing_field = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/broken",
+        json={"rules": [{"type": "max-findings"}]},
+        headers=admin,
+    )
+    assert missing_field.status_code == 422
+    empty_rules = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/broken",
+        json={"rules": []},
+        headers=admin,
+    )
+    assert empty_rules.status_code == 422
+    assert pack_path.read_bytes() == before
+    assert _get(client, "/api/v1/packs/org/gates").json() == []
+
+    saved = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/release",
+        json={"rules": [{"type": "max-severity", "severity": "critical"}]},
+        headers=admin,
+    )
+    assert saved.status_code == 200
+    appended = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/audit",
+        json={"rules": [{"type": "failure-rate", "max_percent": 25.0}]},
+        headers=admin,
+    )
+    assert appended.status_code == 200
+    assert [gate["id"] for gate in _get(client, "/api/v1/packs/org/gates").json()] == ["release", "audit"]
+
+    assert _get(client, "/api/v1/packs/missing/gates").status_code == 404
+    unknown_pack_put = _as_httpx(client).put(
+        "/api/v1/packs/missing/gates/release",
+        json={"rules": [{"type": "no-new-findings"}]},
+        headers=admin,
+    )
+    assert unknown_pack_put.status_code == 404
+    unknown_pack_delete = _as_httpx(client).delete("/api/v1/packs/missing/gates/release", headers=admin)
+    assert unknown_pack_delete.status_code == 404
+    unknown_gate_delete = _as_httpx(client).delete("/api/v1/packs/org/gates/no-such-gate", headers=admin)
+    assert unknown_gate_delete.status_code == 404
+
+    removed = _as_httpx(client).delete("/api/v1/packs/org/gates/release", headers=admin)
+    assert removed.status_code == 200
+    assert [gate["id"] for gate in _get(client, "/api/v1/packs/org/gates").json()] == ["audit"]
+
+
 def test_pack_policy_save_endpoint_persists_dashboard_check_fields(client: TestClient, tmp_path: Path) -> None:
     from conformdag.platform.packs import PackService
 

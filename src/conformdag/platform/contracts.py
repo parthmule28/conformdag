@@ -80,3 +80,16 @@ class RepositoryTrendsResponse(BaseModel):
 
     repository_id: str
     points: list[TrendPoint]
+
+
+class GateUpsertRequest(BaseModel):
+    """Payload for creating or replacing one quality gate in a pack."""
+
+    rules: list[dict[str, Any]]
+
+
+class GateResponse(BaseModel):
+    """One quality gate as exposed by the gates API."""
+
+    id: str
+    rules: list[dict[str, Any]]
