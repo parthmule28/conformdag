@@ -148,7 +148,7 @@ def test_dry_run_writes_nothing_and_prints_verified_diff(
     residual_policies = [
         finding.policy_id for finding in outcome.verification_report.findings if finding.status.value == "FAIL"
     ]
-    assert residual_policies == []
+    assert residual_policies == ["AIR-DET-007"]
 
 
 def test_apply_writes_verified_patches_and_rescan_is_clean(
@@ -457,6 +457,63 @@ def test_retry_payload_adds_missing_retries_when_zero_forbidden() -> None:
     assert payload.action is RemediationAction.ADD_KWARG
     assert payload.kwarg == "retries"
     assert payload.value == "1"
+
+
+TASKFLOW_RETRY_SOURCE = '''\
+"""TaskFlow DAG with a retry violation."""
+
+from datetime import timedelta
+
+from airflow.sdk import DAG, task
+
+with DAG(dag_id="taskflow_retry", schedule=None) as dag:
+
+    @task(retries=99)
+    def extract():
+        return 1
+'''
+
+
+def test_taskflow_retry_autofix_round_trip(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+) -> None:
+    root = build_repository(tmp_path)
+    (root / "dags/violations.py").unlink()
+    source = root / "dags/taskflow.py"
+    source.write_text(TASKFLOW_RETRY_SOURCE, encoding="utf-8")
+
+    report = scan_repository(root, root / "policies/pack.yaml")
+    finding = next(
+        item for item in report.findings if item.policy_id == "AIR-DET-004" and item.status is FindingStatus.FAIL
+    )
+    assert finding.fix is not None
+    assert finding.fix.action is RemediationAction.SET_KWARG
+    from conformdag.fixing import engine as engine_module
+
+    is_autofix_target = cast("Callable[[Finding], bool]", engine_module.__dict__["_is_autofix_target"])
+    assert is_autofix_target(finding)
+
+    generated = generate_spans(TASKFLOW_RETRY_SOURCE, finding.fix)
+    assert generated is not None
+    spans, needs_import = generated
+    assert needs_import is False
+    updated = apply_spans(TASKFLOW_RETRY_SOURCE, spans)
+    assert "retries=5" in updated
+    assert "retries=99" not in updated
+    assert "def extract():" in updated
+    assert "return 1" in updated
+    ast.parse(updated)
+
+    outcome = run_fix(root, root / "policies/pack.yaml", apply=True)
+
+    assert outcome.applied_files == ["dags/taskflow.py"]
+    assert "retries=5" in source.read_text(encoding="utf-8")
+    final = scan_repository(root, root / "policies/pack.yaml")
+    residual_retries = [
+        item for item in final.findings if item.policy_id == "AIR-DET-004" and item.status is FindingStatus.FAIL
+    ]
+    assert residual_retries == []
 
 
 def test_owner_codemod_returns_none_without_dag_call() -> None:

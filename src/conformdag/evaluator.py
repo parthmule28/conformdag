@@ -269,6 +269,10 @@ class TagEvaluator:
 
 
 def _dag_defaults(model: SourceModel, task: TaskRecord) -> dict[str, object]:
+    if task.dag_line is not None:
+        for dag in model.dags:
+            if dag.line == task.dag_line:
+                return dag.defaults
     for dag in model.dags:
         if task.dag_name is None or task.dag_name == dag.variable_name:
             return dag.defaults
@@ -358,6 +362,10 @@ class RetryEvaluator:
         findings: list[Finding] = []
         for model in context.models:
             for task in model.tasks:
+                unresolved = sorted(name for name in ("retries", "retry_delay") if name in task.unresolved_kwargs)
+                if unresolved:
+                    findings.append(self._unresolved_finding(context, model, task, unresolved))
+                    continue
                 retries = _effective_value(model, task, "retries")
                 delay = _effective_value(model, task, "retry_delay")
                 retries = 0 if retries is None else retries
@@ -390,6 +398,30 @@ class RetryEvaluator:
                     )
                 )
         return findings
+
+    @staticmethod
+    def _unresolved_finding(
+        context: EvaluationContext,
+        model: SourceModel,
+        task: TaskRecord,
+        unresolved: list[str],
+    ) -> Finding:
+        task_label = task.task_id or task.qualified_name
+        names = ", ".join(unresolved)
+        return _finding(
+            context.policy,
+            model,
+            task.line,
+            FindingStatus.ERROR,
+            f"task {task_label} sets dynamic {names}; the effective value cannot be verified statically",
+            f"task:{task_label}:retry:unresolved:{'+'.join(unresolved)}",
+            fix_payload=RemediationPayload(
+                fix_kind="retry-bounds",
+                action=RemediationAction.MANUAL,
+                target=fix_target(task.line, task_label, "task-call"),
+                hint="replace the dynamic value with numeric literals within policy bounds",
+            ),
+        )
 
     @staticmethod
     def _payload(
@@ -582,6 +614,25 @@ class StartDateFreshnessEvaluator:
         for model in context.models:
             for dag in model.dags:
                 if dag.start_date is None:
+                    findings.append(
+                        _finding(
+                            context.policy,
+                            model,
+                            dag.line,
+                            FindingStatus.FAIL,
+                            "start_date is missing or could not be resolved statically; "
+                            f"set a recent timezone-aware start_date no older than "
+                            f"{configuration.max_age_years} year(s)",
+                            f"dag:{dag.variable_name or dag.line}:start_date:missing",
+                            fix_payload=RemediationPayload(
+                                fix_kind="start-date-freshness",
+                                action=RemediationAction.MANUAL,
+                                target=fix_target(dag.line, dag.variable_name, "dag-call"),
+                                hint="move start_date to a recent timezone-aware date "
+                                "(e.g. pendulum.datetime(..., tz='UTC'))",
+                            ),
+                        )
+                    )
                     continue
                 year, month, day = dag.start_date
                 naive = dag.start_date_tz is False

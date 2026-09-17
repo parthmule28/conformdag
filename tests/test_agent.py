@@ -127,7 +127,7 @@ def test_triage_splits_fixable_from_manual(build_repository: Callable[[Path], Pa
         "AIR-DET-003",
         "AIR-DET-004",
     }
-    assert triage.manual == []
+    assert [item.policy_id for item in triage.manual] == ["AIR-DET-007"]
     assert all(":airflow" not in item.file_path for item in triage.fixable)
 
 

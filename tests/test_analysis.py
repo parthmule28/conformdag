@@ -2,7 +2,62 @@
 
 from pathlib import Path
 
-from conformdag.analysis import SourceFile, analyze_source, discover_python_files, iter_module_scope_calls
+from conformdag.analysis import (
+    SourceFile,
+    SourceModel,
+    TaskRecord,
+    analyze_source,
+    discover_python_files,
+    iter_module_scope_calls,
+)
+
+
+def _source_file(source: str) -> SourceFile:
+    return SourceFile(
+        path=Path("dags/x.py"),
+        relative_path="dags/x.py",
+        content=source,
+        content_hash="e" * 64,
+    )
+
+
+def effective_retries(model: SourceModel, task: TaskRecord) -> object:
+    """Mirror the evaluator's retries resolution to expose analysis-layer linkage."""
+    if "retries" in task.values:
+        return task.values["retries"]
+    if task.dag_line is not None:
+        for dag in model.dags:
+            if dag.line == task.dag_line:
+                return dag.defaults.get("retries")
+    for dag in model.dags:
+        if task.dag_name is None or task.dag_name == dag.variable_name:
+            return dag.defaults.get("retries")
+    return None
+
+
+TWO_WITH_DAG_BLOCKS_REUSING_ALIAS = (
+    "from airflow.decorators import task\n"
+    "from airflow import DAG\n"
+    "\n"
+    "with DAG(dag_id='one', default_args={'retries': 1}) as dag:\n"
+    "    @task\n"
+    "    def first():\n"
+    "        return 1\n"
+    "\n"
+    "with DAG(dag_id='two', default_args={'retries': 5}) as dag:\n"
+    "    @task\n"
+    "    def second():\n"
+    "        return 2\n"
+)
+
+
+def test_reused_dag_alias_uses_nearest_concrete_dag_defaults() -> None:
+    model, issue = analyze_source(_source_file(TWO_WITH_DAG_BLOCKS_REUSING_ALIAS))
+
+    assert issue is None
+    assert model is not None
+    assert [task.dag_line for task in model.tasks] == [4, 9]
+    assert [effective_retries(model, task) for task in model.tasks] == [1, 5]
 
 
 def test_discovers_files_hashes_inputs_and_excludes_symlinks(tmp_path: Path) -> None:

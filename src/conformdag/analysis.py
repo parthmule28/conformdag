@@ -74,6 +74,8 @@ class TaskRecord:
     dag_name: str | None
     values: dict[str, object]
     taskflow: bool = False
+    dag_line: int | None = None
+    unresolved_kwargs: tuple[str, ...] = ()
 
 
 def _empty_secrets() -> list[SecretAssignment]:
@@ -204,7 +206,7 @@ class _ModelVisitor(ast.NodeVisitor):
     def __init__(self, source: SourceFile) -> None:
         self.model = SourceModel(source)
         self._function_depth = 0
-        self._with_dag_stack: list[str | None] = []
+        self._with_dag_stack: list[tuple[str | None, int | None]] = []
 
     def visit_Import(self, node: ast.Import) -> None:
         for item in node.names:
@@ -244,9 +246,12 @@ class _ModelVisitor(ast.NodeVisitor):
                 name: str | None = None
                 if item.optional_vars is not None and isinstance(item.optional_vars, ast.Name):
                     name = item.optional_vars.id
+                dag_line: int | None = None
                 if len(self.model.dags) > dag_count:
-                    self.model.dags[dag_count].variable_name = name
-                self._with_dag_stack.append(name)
+                    dag_record = self.model.dags[dag_count]
+                    dag_record.variable_name = name
+                    dag_line = dag_record.line
+                self._with_dag_stack.append((name, dag_line))
                 entered.append(name)
             if item.optional_vars is not None:
                 self.visit(item.optional_vars)
@@ -287,19 +292,31 @@ class _ModelVisitor(ast.NodeVisitor):
             if leaf != "task":
                 continue
             values: dict[str, object] = {}
+            unresolved: list[str] = []
             if isinstance(decorator, ast.Call):
                 for keyword in decorator.keywords:
-                    if keyword.arg:
-                        values[keyword.arg] = _literal_value(keyword.value)
+                    if not keyword.arg:
+                        continue
+                    value = _literal_value(keyword.value)
+                    if value is None:
+                        unresolved.append(keyword.arg)
+                    else:
+                        values[keyword.arg] = value
             task_id = values.get("task_id")
+            dag_name: str | None = None
+            dag_line: int | None = None
+            if self._with_dag_stack:
+                dag_name, dag_line = self._with_dag_stack[-1]
             self.model.tasks.append(
                 TaskRecord(
                     line=node.lineno,
                     qualified_name=node.name + " (taskflow)",
                     task_id=task_id if isinstance(task_id, str) else node.name,
-                    dag_name=self._with_dag_stack[-1] if self._with_dag_stack else None,
+                    dag_name=dag_name,
                     values=values,
                     taskflow=True,
+                    dag_line=dag_line,
+                    unresolved_kwargs=tuple(unresolved),
                 )
             )
 
@@ -386,12 +403,14 @@ class _ModelVisitor(ast.NodeVisitor):
                 values[keyword.arg] = self._resolve_value(keyword.value)
         task_id = values.get("task_id")
         dag_name = values.get("dag")
+        dag_line = self._with_dag_stack[-1][1] if self._with_dag_stack else None
         return TaskRecord(
             line=node.lineno,
             qualified_name=qualified_name,
             task_id=task_id if isinstance(task_id, str) else None,
             dag_name=dag_name if isinstance(dag_name, str) else None,
             values=values,
+            dag_line=dag_line,
         )
 
     def _resolve_value(self, node: ast.AST) -> object:
@@ -455,11 +474,16 @@ def datetime_parts(node: ast.AST) -> tuple[tuple[int, int, int] | None, bool | N
         return None, None
     if not isinstance(node, ast.Call):
         return None, None
-    args = [cast("int", _literal_value(arg)) for arg in node.args[:3]]
-    if len(args) < 3 or any(arg < 0 for arg in args):
+    components: list[int] = []
+    for arg in node.args[:3]:
+        value = _literal_value(arg)
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None, None
+        components.append(value)
+    if len(components) < 3 or any(part < 0 for part in components):
         return None, None
     has_tz = any(keyword.arg in {"tz", "tzinfo"} for keyword in node.keywords)
-    return (args[0], args[1], args[2]), has_tz
+    return (components[0], components[1], components[2]), has_tz
 
 
 def analyze_source(source: SourceFile, cache: ParseCache | None = None) -> tuple[SourceModel | None, ParseIssue | None]:

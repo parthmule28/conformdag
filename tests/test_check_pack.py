@@ -1,5 +1,6 @@
 """Tests for the expanded check vocabulary and TaskFlow analysis."""
 
+import textwrap
 from collections.abc import Callable
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from conformdag.models import (
     DynamicDagFactoryConfig,
     EnforcementConfig,
     EnforcementType,
+    Finding,
     FindingStatus,
     LifecycleStatus,
     ModuleScopeVariablesConfig,
@@ -20,6 +22,7 @@ from conformdag.models import (
     PolicySource,
     RemediationAction,
     RetryBoundsConfig,
+    ScanReport,
     SensitiveLoggingConfig,
     Severity,
     StartDateFreshnessConfig,
@@ -114,6 +117,27 @@ def _evaluate(config: PolicyConfiguration, check: str, source: str):
     return findings, model
 
 
+def scan_source(source: str, *, dag_retries: int | None = None, root: Path) -> ScanReport:
+    """Scan one source string inside a repository built by ``build_repository``."""
+    violations = root / "dags/violations.py"
+    if violations.is_file():
+        violations.unlink()
+    if dag_retries is not None:
+        source = (
+            "from airflow.decorators import task\n"
+            "from airflow import DAG\n"
+            "\n"
+            f"with DAG(dag_id='scan_source', default_args={{'retries': {dag_retries}}}):\n"
+            f"{textwrap.indent(source, '    ')}"
+        )
+    (root / "dags/scan_source.py").write_text(source, encoding="utf-8")
+    return scan_repository(root, root / "policies/pack.yaml")
+
+
+def retry_finding(report: ScanReport) -> Finding:
+    return next(finding for finding in report.findings if finding.policy_id == "AIR-DET-004")
+
+
 def test_taskflow_tasks_are_visible_to_the_analyzer() -> None:
     model = _source_model(TASKFLOW_DAG)
 
@@ -156,6 +180,42 @@ def test_taskflow_retry_bounds_are_enforced(build_repository: Callable[[Path], P
     assert retry_findings, "retry-bounds must catch TaskFlow retries=99"
     fix = retry_findings[0].fix
     assert fix is not None and fix.action == RemediationAction.SET_KWARG
+
+
+def test_unresolved_taskflow_retries_do_not_mask_dag_defaults(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    report = scan_source(
+        "@task(retries=RETRIES)\ndef work(): ...\n",
+        dag_retries=5,
+        root=build_repository(tmp_path),
+    )
+
+    assert retry_finding(report).status is FindingStatus.ERROR
+
+
+def test_missing_start_date_fails_the_dag() -> None:
+    findings, _ = _evaluate(StartDateFreshnessConfig(), "start-date-freshness", SECRETS_DAG)
+
+    assert len(findings) == 1
+    assert findings[0].status is FindingStatus.FAIL
+    assert "start_date" in (findings[0].explanation or "")
+
+
+def test_dynamic_datetime_start_date_does_not_crash() -> None:
+    source = (
+        "from datetime import datetime\n"
+        "YEAR = 2020\n"
+        "from airflow.sdk import DAG\n"
+        "\n"
+        "with DAG(dag_id='dynamic', start_date=datetime(YEAR, 1, 1)) as dag:\n"
+        "    pass\n"
+    )
+
+    findings, _ = _evaluate(StartDateFreshnessConfig(), "start-date-freshness", source)
+
+    assert len(findings) == 1
+    assert findings[0].status is FindingStatus.FAIL
 
 
 def test_start_date_freshness_catches_stale_and_naive_dates() -> None:
