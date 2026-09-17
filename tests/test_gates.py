@@ -134,6 +134,16 @@ def test_failure_rate_uses_failing_over_total() -> None:
     assert evaluate_gate(gate, _report(), None).passed
 
 
+def test_error_findings_block_like_failures() -> None:
+    error = _finding("AIR-DET-004", FindingStatus.ERROR, "f1")
+    suppressed = _finding("AIR-DET-004", FindingStatus.ERROR, "f2", suppressed=True)
+    report = _report(error, suppressed)
+
+    assert blocking_findings(report) == [error]
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "max-findings", "count": 1}]})
+    assert not evaluate_gate(gate, report, None).passed
+
+
 def test_suppressed_findings_never_block() -> None:
     gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "max-findings", "count": 0}]})
     report = _report(_finding("A", FindingStatus.FAIL, "f1", suppressed=True))

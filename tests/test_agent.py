@@ -131,6 +131,28 @@ def test_triage_splits_fixable_from_manual(build_repository: Callable[[Path], Pa
     assert all(":airflow" not in item.file_path for item in triage.fixable)
 
 
+def test_triage_surfaces_unresolved_evaluation_as_manual(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    root = build_repository(tmp_path)
+    (root / "dags/violations.py").unlink()
+    (root / "dags/dynamic.py").write_text(
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n"
+        "\n"
+        "with DAG(dag_id='dynamic'):\n"
+        "    @task(retries=RETRIES)\n"
+        "    def work(): ...\n",
+        encoding="utf-8",
+    )
+    report = scan_repository(root, root / "policies/pack.yaml")
+
+    triage = triage_report(report)
+
+    assert "AIR-DET-004" in {item.policy_id for item in triage.manual}
+    assert all(item.policy_id != "AIR-DET-004" for item in triage.fixable)
+
+
 def test_verifier_approves_and_caches(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
     root = build_repository(tmp_path)
     before = scan_repository(root, root / "policies/pack.yaml")

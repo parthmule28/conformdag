@@ -29,11 +29,11 @@ SEVERITY_ORDER: dict[Severity, int] = {
 
 
 def blocking_findings(report: ScanReport) -> list[Finding]:
-    """Return unsuppressed failing findings the legacy exit code blocks on."""
+    """Return unsuppressed failing or unresolved findings the legacy exit code blocks on."""
     return [
         finding
         for finding in report.findings
-        if finding.status is FindingStatus.FAIL
+        if finding.status in (FindingStatus.FAIL, FindingStatus.ERROR)
         and not finding.suppressed
         and (finding.enforcement.value == "deterministic" or finding.blocking)
     ]

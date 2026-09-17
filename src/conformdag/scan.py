@@ -16,6 +16,7 @@ from conformdag.models import (
     AirflowProfile,
     EnforcementType,
     Finding,
+    FindingStatus,
     PolicyPack,
     ProjectConfig,
     RuffAirConfig,
@@ -238,6 +239,19 @@ def scan_repository(
     suppressions = load_suppressions(suppression_path)
     findings, suppression_issues = apply_suppressions(findings, suppressions)
     issues.extend(suppression_issues)
+    unresolved = [finding for finding in findings if finding.status is FindingStatus.ERROR and not finding.suppressed]
+    if unresolved:
+        issues.append(
+            RunIssue(
+                code="EVALUATION_ERROR",
+                message=(
+                    f"{len(unresolved)} finding(s) could not be evaluated statically; "
+                    "the scan is incomplete until the dynamic values are resolved or suppressed"
+                ),
+                phase="evaluation",
+                fatal=True,
+            )
+        )
     report = ScanReport(
         complete=not any(issue.fatal for issue in issues),
         result_fingerprint="",

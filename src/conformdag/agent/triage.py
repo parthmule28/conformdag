@@ -46,14 +46,23 @@ def triage_report(report: ScanReport) -> Triage:
     """Split unsuppressed deterministic failures by fixability.
 
     The LLM never participates in triage: classification is a pure rule over
-    the remediation payload and the fixability matrix.
+    the remediation payload and the fixability matrix. ERROR findings mark
+    evaluations that could not be completed statically; they always surface as
+    manual work instead of being dropped.
     """
     triage = Triage()
     for index, finding in enumerate(report.findings):
-        if finding.status.value != "FAIL" or finding.suppressed or finding.enforcement.value != "deterministic":
+        if finding.status.value not in {"FAIL", "ERROR"} or finding.suppressed:
+            continue
+        if finding.enforcement.value != "deterministic":
             continue
         payload = finding.fix
-        is_fixable = payload is not None and payload.action.value != "manual" and payload.fix_kind in AUTOFIX_KINDS
+        is_fixable = (
+            finding.status.value == "FAIL"
+            and payload is not None
+            and payload.action.value != "manual"
+            and payload.fix_kind in AUTOFIX_KINDS
+        )
         if is_fixable:
             triage.fixable.append(_summary(report, index))
         else:

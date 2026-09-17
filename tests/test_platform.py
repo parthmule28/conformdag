@@ -163,6 +163,39 @@ def queue_repository_with_syntax_error(platform_env: str, tmp_path: Path) -> str
         return scan.id
 
 
+def queue_repository_with_unresolved_retry(platform_env: str, tmp_path: Path) -> str:
+    """Register one repository whose retry values cannot be resolved statically."""
+    root = tmp_path / "dynamic-repo"
+    (root / "policies").mkdir(parents=True)
+    (root / "standards").mkdir()
+    (root / "dags").mkdir()
+    copyfile("policies/pack.yaml", root / "policies/pack.yaml")
+    copyfile("standards/dag-authoring.md", root / "standards/dag-authoring.md")
+    (root / "dags/dynamic.py").write_text(
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n"
+        "\n"
+        "with DAG(dag_id='dynamic'):\n"
+        "    @task(retries=RETRIES)\n"
+        "    def work(): ...\n",
+        encoding="utf-8",
+    )
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        session.add(
+            RepositoryRow(
+                id="repo-dynamic",
+                name="dynamic",
+                path=str(root),
+                policy_pack=str(root / "policies/pack.yaml"),
+            )
+        )
+        scan = ScanRow(id="scan-dynamic", repository_id="repo-dynamic", status="running")
+        session.add(scan)
+        session.commit()
+        return scan.id
+
+
 def load_scan(platform_env: str, scan_id: str) -> ScanRow:
     """Return the persisted scan row for one scan id."""
     factory = initialize_session_factory(platform_env)
@@ -1165,6 +1198,20 @@ def test_runner_marks_incomplete_report_failed(platform_env: str, tmp_path: Path
     assert scan.status == "failed"
     assert scan.complete is False
     assert scan.error is not None and "PARSE_ERROR" in scan.error
+    assert scan.report_json is not None
+
+
+def test_runner_marks_unresolved_evaluation_failed(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    scan_id = queue_repository_with_unresolved_retry(platform_env, tmp_path)
+
+    assert execute_scan(scan_id, platform_env) == 1
+
+    scan = load_scan(platform_env, scan_id)
+    assert scan.status == "failed"
+    assert scan.complete is False
+    assert scan.error is not None and "EVALUATION_ERROR" in scan.error
     assert scan.report_json is not None
 
 

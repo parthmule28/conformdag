@@ -60,6 +60,26 @@ def test_reused_dag_alias_uses_nearest_concrete_dag_defaults() -> None:
     assert [effective_retries(model, task) for task in model.tasks] == [1, 5]
 
 
+def test_operator_unresolved_kwargs_are_tracked_and_bindings_resolved() -> None:
+    source = (
+        "from airflow import DAG\n"
+        "from airflow.providers.standard.operators.empty import EmptyOperator\n"
+        "KNOWN = 2\n"
+        "dag = DAG(dag_id='x')\n"
+        "task = EmptyOperator(task_id='t', dag=dag, retries=UNKNOWN, retry_delay=KNOWN)\n"
+    )
+
+    model, issue = analyze_source(_source_file(source))
+
+    assert issue is None
+    assert model is not None
+    task = model.tasks[0]
+    assert task.unresolved_kwargs == ("retries",)
+    assert "retries" not in task.values
+    assert task.values["retry_delay"] == 2
+    assert task.dag_line == 4
+
+
 def test_discovers_files_hashes_inputs_and_excludes_symlinks(tmp_path: Path) -> None:
     dags = tmp_path / "dags"
     dags.mkdir()

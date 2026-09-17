@@ -398,20 +398,48 @@ class _ModelVisitor(ast.NodeVisitor):
 
     def _task_record(self, node: ast.Call, qualified_name: str) -> TaskRecord:
         values: dict[str, object] = {}
+        unresolved: list[str] = []
+        dag_name: str | None = None
+        dag_line: int | None = None
         for keyword in node.keywords:
-            if keyword.arg:
-                values[keyword.arg] = self._resolve_value(keyword.value)
+            if not keyword.arg:
+                continue
+            if keyword.arg == "dag" and isinstance(keyword.value, ast.Name):
+                bound_line = self._resolve_dag_binding(keyword.value)
+                if bound_line is not None:
+                    dag_name = keyword.value.id
+                    dag_line = bound_line
+                    continue
+            value = self._resolve_value(keyword.value)
+            if value is None:
+                unresolved.append(keyword.arg)
+            else:
+                values[keyword.arg] = value
+        if dag_name is None:
+            raw_dag = values.get("dag")
+            if isinstance(raw_dag, str):
+                dag_name = raw_dag
+        if dag_line is None and self._with_dag_stack:
+            dag_line = self._with_dag_stack[-1][1]
         task_id = values.get("task_id")
-        dag_name = values.get("dag")
-        dag_line = self._with_dag_stack[-1][1] if self._with_dag_stack else None
         return TaskRecord(
             line=node.lineno,
             qualified_name=qualified_name,
             task_id=task_id if isinstance(task_id, str) else None,
-            dag_name=dag_name if isinstance(dag_name, str) else None,
+            dag_name=dag_name,
             values=values,
             dag_line=dag_line,
+            unresolved_kwargs=tuple(unresolved),
         )
+
+    def _resolve_dag_binding(self, node: ast.AST) -> int | None:
+        """Return the concrete DagRecord line when the node names a known DAG variable."""
+        if not isinstance(node, ast.Name):
+            return None
+        for dag in self.model.dags:
+            if dag.variable_name == node.id:
+                return dag.line
+        return None
 
     def _resolve_value(self, node: ast.AST) -> object:
         value = _literal_value(node)

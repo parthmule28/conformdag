@@ -117,6 +117,32 @@ def test_scan_marks_parse_failures_incomplete(tmp_path: Path) -> None:
     assert report.issues[0].code == "PARSE_ERROR"
 
 
+def test_scan_marks_unresolved_static_evaluation_incomplete(tmp_path: Path) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "standards").mkdir()
+    (tmp_path / "dags").mkdir()
+    copyfile("policies/pack.yaml", tmp_path / "policies/pack.yaml")
+    copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
+    (tmp_path / "dags" / "dynamic.py").write_text(
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n"
+        "\n"
+        "with DAG(dag_id='dynamic'):\n"
+        "    @task(retries=RETRIES)\n"
+        "    def work(): ...\n",
+        encoding="utf-8",
+    )
+
+    report = scan_repository(tmp_path)
+
+    retry = next(finding for finding in report.findings if finding.policy_id == "AIR-DET-004")
+    assert retry.status is FindingStatus.ERROR
+    assert report.complete is False
+    evaluation_issues = [issue for issue in report.issues if issue.code == "EVALUATION_ERROR"]
+    assert len(evaluation_issues) == 1
+    assert evaluation_issues[0].fatal is True
+
+
 class _SemanticProvider:
     def evaluate_many(
         self,

@@ -194,6 +194,50 @@ def test_unresolved_taskflow_retries_do_not_mask_dag_defaults(
     assert retry_finding(report).status is FindingStatus.ERROR
 
 
+def test_unresolved_operator_retries_do_not_silently_pass(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    report = scan_source(
+        "from airflow.providers.standard.operators.empty import EmptyOperator\n"
+        "task = EmptyOperator(task_id='t', retries=UNKNOWN_RETRIES)\n",
+        dag_retries=3,
+        root=build_repository(tmp_path),
+    )
+
+    assert retry_finding(report).status is FindingStatus.ERROR
+
+
+def test_explicit_operator_dag_binding_wins_over_enclosing_context() -> None:
+    source = (
+        "from airflow import DAG\n"
+        "from airflow.providers.standard.operators.empty import EmptyOperator\n"
+        "other = DAG(dag_id='other', default_args={'retries': 99})\n"
+        "with DAG(dag_id='context', default_args={'retries': 2}) as dag:\n"
+        "    task = EmptyOperator(task_id='t', dag=other)\n"
+    )
+
+    findings, _ = _evaluate(RetryBoundsConfig(max_retries=1), "retry-bounds", source)
+
+    assert [finding.status for finding in findings] == [FindingStatus.FAIL]
+    assert findings[0].explanation == "task t effective retries=99 retry_delay=0 seconds"
+
+
+def test_operator_tasks_resolve_defaults_by_enclosing_context_line() -> None:
+    source = (
+        "from airflow import DAG\n"
+        "from airflow.providers.standard.operators.empty import EmptyOperator\n"
+        "with DAG(dag_id='one', default_args={'retries': 1}):\n"
+        "    first = EmptyOperator(task_id='first')\n"
+        "with DAG(dag_id='two', default_args={'retries': 5}):\n"
+        "    second = EmptyOperator(task_id='second')\n"
+    )
+
+    findings, _ = _evaluate(RetryBoundsConfig(max_retries=1), "retry-bounds", source)
+
+    assert [finding.status for finding in findings] == [FindingStatus.PASS, FindingStatus.FAIL]
+    assert findings[1].explanation == "task second effective retries=5 retry_delay=0 seconds"
+
+
 def test_missing_start_date_fails_the_dag() -> None:
     findings, _ = _evaluate(StartDateFreshnessConfig(), "start-date-freshness", SECRETS_DAG)
 

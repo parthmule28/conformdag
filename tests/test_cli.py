@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from shutil import copyfile
 from typing import Any, NoReturn
 from unittest.mock import patch
 
@@ -476,6 +477,31 @@ def test_runtime_execution_failure_is_a_structured_incomplete_report() -> None:
     payload = json.loads(result.stdout)
     assert payload["complete"] is False
     assert payload["issues"][-1]["code"] == "RUNTIME_EXECUTION_ERROR"
+
+
+def test_scan_exits_three_when_static_evaluation_is_unresolved(tmp_path: Path) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "standards").mkdir()
+    (tmp_path / "dags").mkdir()
+    copyfile("policies/pack.yaml", tmp_path / "policies/pack.yaml")
+    copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
+    (tmp_path / "dags" / "dynamic.py").write_text(
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n"
+        "\n"
+        "with DAG(dag_id='dynamic'):\n"
+        "    @task(retries=RETRIES)\n"
+        "    def work(): ...\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(app, ["scan", "--path", str(tmp_path)])
+
+    assert result.exit_code == 3
+    payload = json.loads(result.stdout)
+    assert payload["complete"] is False
+    assert any(issue["code"] == "EVALUATION_ERROR" for issue in payload["issues"])
+    assert "scan incomplete" in result.stderr
 
 
 def test_custom_runtime_image_requires_digest() -> None:
