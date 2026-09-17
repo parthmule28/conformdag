@@ -112,6 +112,9 @@ class PackService:
             pack.policies = [p for p in pack.policies if p.id != policy_id]
             if len(pack.policies) == before:
                 raise PackError(f"policy {policy_id} not found in {pack_name}")
+            issues = validate_policy_pack(pack)
+            if issues:
+                raise PackError("; ".join(issues))
             _write_pack(pack, pack_path)
 
     def validate_pack(self, pack_name: str) -> dict[str, Any]:

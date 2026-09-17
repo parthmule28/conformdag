@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from conformdag.analysis import ParseCache
 from conformdag.config import load_project_config
 from conformdag.gates import evaluate_pack_gates
-from conformdag.models import GateResult, PolicyPack, ScanReport
+from conformdag.models import FindingStatus, GateResult, PolicyPack, ScanReport
 from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
@@ -72,7 +72,13 @@ def _ingest(session: Session, scan: ScanRow, report: ScanReport) -> None:
 
 
 def _apply_platform_suppressions(session: Session, report: ScanReport) -> ScanReport:
-    """Mark canonical findings matching an active platform suppression as suppressed."""
+    """Mark canonical findings matching an active platform suppression as suppressed.
+
+    Only active rows are applied. When the suppression waives every remaining
+    ``ERROR`` finding, the fatal ``EVALUATION_ERROR`` the scan attached solely
+    to those findings is removed and ``complete`` is recomputed from the
+    remaining fatal issues; unrelated parse and provider failures are preserved.
+    """
     active = session.scalars(select(SuppressionRow).where(SuppressionRow.expires_at > utcnow())).all()
     if not active:
         return report
@@ -83,7 +89,14 @@ def _apply_platform_suppressions(session: Session, report: ScanReport) -> ScanRe
         else finding.model_copy(update={"suppressed": True})
         for finding in report.findings
     ]
-    return report.model_copy(update={"findings": findings})
+    unresolved = [finding for finding in findings if finding.status is FindingStatus.ERROR and not finding.suppressed]
+    fatal_evaluation_errors = [issue for issue in report.issues if issue.code == "EVALUATION_ERROR" and issue.fatal]
+    if unresolved or not fatal_evaluation_errors:
+        return report.model_copy(update={"findings": findings})
+    issues = [issue for issue in report.issues if issue not in fatal_evaluation_errors]
+    return report.model_copy(
+        update={"findings": findings, "issues": issues, "complete": not any(issue.fatal for issue in issues)}
+    )
 
 
 def _incomplete_error(report: ScanReport) -> str:

@@ -1427,6 +1427,143 @@ def test_runner_applies_platform_suppression_before_gate_evaluation(platform_env
         assert gate["passed"] is True
 
 
+def _seed_error_scan(platform_env: str, tmp_path: Path) -> str:
+    """Seed one repository whose single task carries an unresolved retry value."""
+    (tmp_path / "standards").mkdir(parents=True)
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Execution safety\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "dags/dynamic.py").write_text(
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n"
+        "\n"
+        "with DAG(dag_id='dynamic'):\n"
+        "    @task(retries=RETRIES)\n"
+        "    def work(): ...\n",
+        encoding="utf-8",
+    )
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "unresolved",
+        "version": "1",
+        "quality_gates": [{"id": "default", "rules": [{"type": "max-findings", "count": 0}]}],
+        "policies": [
+            {
+                "id": "AIR-DET-004",
+                "title": "Task retries are bounded",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "medium",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Execution safety",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Retry count and delay remain within policy bounds.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["retry-bounds"]},
+                "configuration": {
+                    "kind": "retry-bounds",
+                    "min_retries": 0,
+                    "max_retries": 5,
+                    "min_delay_seconds": 0,
+                    "max_delay_seconds": 3600,
+                    "allow_zero_retries": True,
+                },
+            }
+        ],
+    }
+    _write_yaml(tmp_path / "pack.yaml", pack)
+    (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
+
+    session_factory = factory(platform_env)
+    with session_factory() as session:
+        session.add(
+            RepositoryRow(
+                id="repo-unresolved",
+                name="unresolved",
+                path=str(tmp_path),
+                policy_pack=str(tmp_path / "pack.yaml"),
+            )
+        )
+        scan = ScanRow(id="scan1", repository_id="repo-unresolved", status="running")
+        session.add(scan)
+        session.commit()
+        return scan.id
+
+
+def _add_platform_suppression(
+    platform_env: str, template_scan_id: str, follow_up_scan_id: str, *, expires_at: datetime
+) -> None:
+    """Suppress the error finding of one scan and queue a follow-up scan."""
+    with factory(platform_env)() as session:
+        finding = session.scalars(select(FindingRow).where(FindingRow.scan_id == template_scan_id)).one()
+        session.add(
+            SuppressionRow(
+                id=new_suppression_id(),
+                policy_id=finding.policy_id,
+                fingerprint=finding.fingerprint,
+                reason="dynamic retry remediation scheduled",
+                owner="platform",
+                expires_at=expires_at,
+            )
+        )
+        session.add(ScanRow(id=follow_up_scan_id, repository_id="repo-unresolved", status="running"))
+        session.commit()
+
+
+def test_platform_suppression_waives_error_before_gate_and_completion(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    scan_id = _seed_error_scan(platform_env, tmp_path)
+
+    assert execute_scan(scan_id, platform_env) == 1
+    first = load_scan(platform_env, scan_id)
+    assert first.error is not None and "EVALUATION_ERROR" in first.error
+
+    _add_platform_suppression(platform_env, scan_id, "scan2", expires_at=utcnow() + timedelta(days=1))
+
+    assert execute_scan("scan2", platform_env) == 0
+
+    with factory(platform_env)() as session:
+        suppressed = session.scalars(select(FindingRow).where(FindingRow.scan_id == "scan2")).one()
+        assert suppressed.suppressed is True
+        scan = session.get(ScanRow, "scan2")
+        assert scan is not None and scan.status == "succeeded"
+        assert scan.complete is True
+        assert scan.report_json is not None
+        assert scan.report_json["complete"] is True
+        issues = cast("list[dict[str, object]]", scan.report_json["issues"])
+        assert not any(issue["fatal"] for issue in issues)
+        gate = scan.report_json.get("gate_result")
+        assert isinstance(gate, dict)
+        assert gate["passed"] is True
+
+
+def test_expired_platform_suppression_does_not_waive_error(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    scan_id = _seed_error_scan(platform_env, tmp_path)
+
+    assert execute_scan(scan_id, platform_env) == 1
+
+    _add_platform_suppression(platform_env, scan_id, "scan3", expires_at=utcnow() - timedelta(days=1))
+
+    assert execute_scan("scan3", platform_env) == 1
+
+    with factory(platform_env)() as session:
+        scan = session.get(ScanRow, "scan3")
+        assert scan is not None and scan.status == "failed"
+        assert scan.complete is False
+        assert scan.report_json is not None
+        assert scan.report_json["complete"] is False
+        assert scan.report_json.get("gate_result") is None
+        issues = cast("list[dict[str, object]]", scan.report_json["issues"])
+        assert any(issue["code"] == "EVALUATION_ERROR" and issue["fatal"] for issue in issues)
+
+
 def test_runner_persists_gate_result(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "standards").mkdir()
     (tmp_path / "standards/dag-authoring.md").write_text(
@@ -1925,6 +2062,12 @@ def test_unknown_api_paths_return_json_404(client: TestClient) -> None:
     assert response.json()["detail"].startswith("unknown API path")
 
 
+def test_unknown_put_api_paths_return_json_404(client: TestClient) -> None:
+    response = _as_httpx(client).put("/api/v1/not-a-route")
+    assert response.status_code == 404
+    assert response.json()["detail"].startswith("unknown API path")
+
+
 @pytest.mark.skipif(
     not (Path(__file__).resolve().parents[1] / "src/conformdag/platform/static/index.html").is_file(),
     reason="dashboard static assets are not built",
@@ -2262,6 +2405,50 @@ def test_upsert_policy_rejects_unknown_evaluator_and_keeps_pack_usable(tmp_path:
     saved = load_policy_pack(pack_path, tmp_path)
     policy = next(item for item in saved.policies if item.id == "AIR-DET-001")
     assert policy.title == "Recovered owner policy"
+
+
+def test_pack_service_delete_rejects_gate_reference_and_preserves_bytes(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackError, PackService
+
+    (tmp_path / "standards").mkdir()
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "boundary",
+        "version": "1",
+        "quality_gates": [{"id": "always", "rules": [{"type": "always-block", "policy_ids": ["AIR-TST-001"]}]}],
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "Owner policy",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"]},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    pack_path = tmp_path / "pack.yaml"
+    _write_yaml(pack_path, pack)
+    service = PackService({"test": pack_path})
+    before = pack_path.read_bytes()
+
+    with pytest.raises(PackError, match="references unknown policy ids"):
+        service.delete_policy("test", "AIR-TST-001")
+
+    assert pack_path.read_bytes() == before
 
 
 def test_pack_policy_save_endpoint_persists_dashboard_check_fields(client: TestClient, tmp_path: Path) -> None:
@@ -2645,6 +2832,16 @@ def test_pack_policy_delete_returns_422_for_malformed_pack(platform_env: str, tm
         "/api/v1/packs/bad/policies/AIR-DET-001",
         headers={"Authorization": "Bearer secret-token"},
     )
+
+    assert response.status_code == 422
+    assert "unknown deterministic check" in response.text
+
+
+def test_pack_policy_list_returns_422_for_malformed_pack(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _write_unknown_check_pack(tmp_path / "packs")
+    cast("FastAPI", client.app).state.pack_service.register("bad", pack_path)
+
+    response = _get(client, "/api/v1/packs/bad/policies")
 
     assert response.status_code == 422
     assert "unknown deterministic check" in response.text

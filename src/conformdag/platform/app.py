@@ -533,7 +533,7 @@ def create_app(
     )
     app.post(API_PREFIX + "/packs/{pack_name}/validate", dependencies=[Depends(require_admin)])(_pack_validate)
 
-    app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "DELETE"])(_api_fallback)
+    app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
@@ -550,6 +550,8 @@ def _pack_policies(request: Request, pack_name: str) -> list[dict[str, Any]]:
         return service.list_policies(pack_name)
     except PackError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PolicyValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _pack_upsert_policy(
