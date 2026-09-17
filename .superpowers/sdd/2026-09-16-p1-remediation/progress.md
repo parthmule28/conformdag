@@ -173,3 +173,11 @@ test:coverage` (91.56%), `mise run schema --check`, `mise run test:runtime`
 (13 passed), `mise run ui-build` — all exit 0. Evidence:
 final-fix-report.md. Scoped re-review of the fix wave PENDING; verdict stays
 provisional until it returns.
+Task 8: scoped re-review of final fix wave complete — I-1 and M-1 addressed,
+no new Critical/Important/Minor findings. Evidence: final-re-review.md and
+review-46c6824..dff158f.diff.
+Task 8: minor (deferred): `delete_policy()` can persist a gate-invalid pack
+after removing a referenced policy; pre-existing and outside the final scoped
+findings, with fail-visible recovery impact.
+Task 8: complete (commits 849c840..dff158f, review clean; P1 Ready; deferred
+residuals recorded; no push, merge, publication, P2 start, or evidence deletion)

@@ -3,7 +3,7 @@
 - Date: 2026-09-17
 - Branch: `feat/policy-management`
 - Remediation merge base: `849c840` (plan commit)
-- HEAD at acceptance: `abbed9c` (`fix: make unresolved evaluations fail closed across consumers`)
+- Source HEAD verified at final acceptance: `dff158f` (`fix: validate reconstructed packs and gate only complete reports`)
 - Working tree: clean except the pre-existing untracked `.serena/`
 - Requirements consumed: `.superpowers/sdd/2026-09-05-p1-foundation/p1-readiness-audit.md`,
   `docs/superpowers/specs/2026-09-16-p1-remediation-design.md`,
@@ -68,8 +68,10 @@ tests/test_analysis.py::test_operator_unresolved_kwargs_are_tracked_and_bindings
 
 ## Step 1 — Exact commands and observed outputs
 
-All re-run at HEAD `abbed9c`, clean tree, mise-managed environment
-(`uv`-synced with `--all-extras`). Format: command → tail of output → exit code.
+Tasks 1-7 focused evidence was rerun at `abbed9c`; final fix regressions and
+all complete verification surfaces were rerun at `dff158f`, clean tree,
+mise-managed environment (`uv`-synced with `--all-extras`). Format: command →
+tail of output → exit code.
 
 | Task | Command | Result |
 |---|---|---|
@@ -91,11 +93,11 @@ All re-run at HEAD `abbed9c`, clean tree, mise-managed environment
 
 | Gate | Command | Result |
 |---|---|---|
-| Full local gate | `mise run check` | **exit 0** — format-check OK; lint OK; pyright strict `0 errors, 0 warnings, 0 informations`; `339 passed, 13 deselected, 1 warning in 31.15s`; `validate:packs` OK |
-| Coverage | `mise run test:coverage` | **exit 0** — `TOTAL 3465 198 984 160 92%`; `Required test coverage of 90% reached. Total coverage: 91.55%`; `339 passed, 13 deselected` (baseline at audit time: 271 passed / 90.98%) |
+| Full local gate | `mise run check` | **exit 0** — format-check OK; lint OK; pyright strict `0 errors, 0 warnings, 0 informations`; `342 passed, 13 deselected, 1 warning`; `validate:packs` OK |
+| Coverage | `mise run test:coverage` | **exit 0** — `TOTAL 3468 198 986 160 92%`; `Required test coverage of 90% reached. Total coverage: 91.56%`; `342 passed, 13 deselected` |
 | Schemas | `mise run schema --check` | **exit 0** — no diffs (no public Pydantic model changes in remediation) |
-| Runtime | `mise run test:runtime` | **exit 0** — `13 passed, 339 deselected, 1 warning in 0.70s` |
-| Frontend | `npm run build` (in `frontend/`) | **exit 0** — `tsc -b && vite build`: 75 modules transformed, built in 935ms, outputs emitted to `src/conformdag/platform/static/` |
+| Runtime | `mise run test:runtime` | **exit 0** — `13 passed, 342 deselected, 1 warning` |
+| Frontend | `npm run build` (in `frontend/`) | **exit 0** — `tsc -b && vite build`: 75 modules transformed, outputs emitted to `src/conformdag/platform/static/` |
 
 Runtime-suite honesty note: Docker is available in this environment and
 `mise run test:runtime` exits zero, but the 13 runtime-marked tests are the
@@ -123,6 +125,7 @@ around.
 | 5 | `a94e056` fix: preserve policy contracts on concurrent saves · `5f0afdf` fix: clean pack temp file when the temporary write fails (fix round 1) |
 | 6 | `80110f4` fix: prevent unsafe verified patches · `bc57827` fix: make fix-engine spans dedup-only and apply findings sequentially (fix round 1) |
 | 7 | `8b62798` fix: resolve TaskFlow context and fixability safely · `abbed9c` fix: make unresolved evaluations fail closed across consumers (fix round 1) |
+| 8 | `46c6824` docs: record P1 remediation acceptance evidence · `dff158f` fix: validate reconstructed packs and gate only complete reports (final fix wave) |
 
 ## Recorded rulings and cost if wrong
 
@@ -183,9 +186,16 @@ around.
   `retries=None` wording; mirrored analysis test helper; `default_args`
   start_date; line-based decorator targeting in pathological layouts; dynamic
   operator `execution_timeout` SET fixability loss (payload flips to ADD);
-  platform suppressions cannot waive the fatal ERROR issue minted by scanning;
-  TaskFlow decorator assignment constants unresolved; reused aliases for
-  explicit `dag=` bindings statically ambiguous.
+- Task 7 (9): TaskFlow retry insertion/bare decorator coverage; literal
+  `retries=None` wording; mirrored analysis helper; `default_args` start_date;
+  line-based decorator targeting in pathological layouts; dynamic operator
+  `execution_timeout` SET fixability loss (payload flips to ADD); platform
+  suppressions cannot waive the fatal ERROR issue minted by scanning; TaskFlow
+  decorator assignment constants unresolved; reused aliases for explicit `dag=`
+  bindings statically ambiguous.
+- Final review residual: `delete_policy()` does not post-validate a pack after
+  removing a policy referenced by a gate; this pre-existing, fail-visible
+  recovery gap remains outside the remediation scope.
 
 ## Step 3 — Independent whole-branch review
 
@@ -200,9 +210,9 @@ same-wave Minor (M-1: incomplete CLI reports could embed a passing
 Both findings were fixed in the one consolidated final fix wave (TDD, red at
 `46c6824` then green; full gates re-run: `mise run check` 342 passed /
 pyright 0 errors, coverage 91.56%, schema check, runtime suite, frontend
-build — all exit 0). Evidence: `final-fix-report.md`. A **scoped re-review of
-the fix wave is still pending**; this verdict must not be finalized before it
-returns.
+build — all exit 0). Evidence: `final-fix-report.md`. The scoped re-review at
+`dff158f` marked both findings addressed with no new findings. Evidence:
+`final-re-review.md` and `review-46c6824..dff158f.diff`.
 
 ## Spec acceptance criteria cross-check
 
@@ -222,18 +232,18 @@ returns.
    evidence; nested-DAG resolution covered by existing suite plus the
    context-line guard).
 7. `mise run check`, coverage ≥ 90%, schema check, Docker runtime tests pass —
-   **met** (Step 2: 0/0/0/0/0 exits; 91.55%).
+    **met** (Step 2: 0/0/0/0/0 exits; 91.56%).
 
-## Provisional decision
+## Final Decision
 
-**P1 Ready — provisional (fix wave landed; scoped re-review pending).** All
+**P1 Ready.** All
 seven spec acceptance criteria are verified; every Critical and Important
 audit blocker maps to re-run passing evidence with no out-of-scope ruling.
 The Step 3 whole-branch review returned one Important (I-1) and one Minor
 (M-1); both were fixed in the consolidated final fix wave and all full gates
 were re-run green afterward (`mise run check` 342 passed, coverage 91.56%,
 schema check, runtime suite, frontend build — all exit 0; see
-`final-fix-report.md`). Final gate evidence at HEAD is the fix-wave run, which
-supersedes the earlier `abbed9c` run. This verdict becomes final only after
-the scoped re-review of the fix wave returns clean. No push, merge,
+`final-fix-report.md`). Final gate evidence for source HEAD `dff158f` is the
+fix-wave run, which
+supersedes the earlier `abbed9c` run. The scoped re-review is clean. No push, merge,
 publication, P2 start, or recovery-evidence deletion was performed.
