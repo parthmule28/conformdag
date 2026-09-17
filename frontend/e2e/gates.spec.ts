@@ -18,11 +18,7 @@ import type { ScanSummary } from "../src/api";
 const PACK_BUTTON = "conformdag-e2e-pack";
 const GATE_ID = "release-readiness";
 
-async function waitForTerminalScan(
-  page: Page,
-  repositoryId: string,
-  knownScans: number,
-): Promise<string> {
+async function waitForTerminalScan(page: Page, knownScans: number): Promise<string> {
   const history = page.getByRole("table", { name: "Scan history" });
   await expect(
     history.getByRole("row"),
@@ -85,7 +81,7 @@ test("gate add/edit drives a real gate result, and the broken scan stays incompl
   await expect(page).toHaveURL(new RegExp(`/repos/${healthy.id}$`));
   const knownScans = (await scanHistory(page.request, healthy.id)).length;
   await page.getByRole("button", { name: "Trigger scan" }).click();
-  const scanId = await waitForTerminalScan(page, healthy.id, knownScans);
+  const scanId = await waitForTerminalScan(page, knownScans);
 
   await page.goto(`/scans/${scanId}`);
   await expect(page).toHaveURL(new RegExp(`/scans/${scanId}$`));

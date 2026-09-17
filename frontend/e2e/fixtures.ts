@@ -30,7 +30,7 @@ export async function useAdminToken(page: Page): Promise<void> {
     ([key, token]) => {
       window.sessionStorage.setItem(key, token);
     },
-    [TOKEN_STORAGE_KEY, ADMIN_TOKEN],
+    [TOKEN_STORAGE_KEY, ADMIN_TOKEN] as const,
   );
 }
 

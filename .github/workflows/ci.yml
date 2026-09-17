@@ -34,6 +34,7 @@ jobs:
       - run: mise run setup
       - run: cd frontend && npm ci
       - run: cd frontend && npx playwright install --with-deps chromium
+      - run: cd frontend && npm run typecheck:e2e
       - run: cd frontend && npm run build
       - run: cd frontend && npm run e2e
         env:

@@ -13,7 +13,6 @@ import {
 
 test("overview drill-down to repository history, trends, and baseline", async ({ page }) => {
   const healthy = await repositoryByName(page.request, HEALTHY_REPOSITORY_NAME);
-  const broken = await repositoryByName(page.request, BROKEN_REPOSITORY_NAME);
   expect(healthy.baseline_scan_id).not.toBeNull();
 
   await page.goto("/");
