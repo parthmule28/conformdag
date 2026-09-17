@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from shutil import copyfile
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import httpx
 import pytest
@@ -44,7 +44,7 @@ from conformdag.platform.db import (
     ScanRow,
     SuppressionRow,
     claim_queued_scan,
-    create_session_factory,
+    initialize_session_factory,
     new_suppression_id,
     prune_scan_artifact,
     retention_target_scan_ids,
@@ -125,7 +125,7 @@ def platform_env_fixture(tmp_path: Path) -> str:
 
 @pytest.fixture(name="client")
 def client_fixture(platform_env: str) -> TestClient:
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     settings = PlatformSettings(dsn=platform_env, admin_token="secret-token")
     return TestClient(create_app(factory, settings))
 
@@ -147,7 +147,7 @@ def queue_repository_with_syntax_error(platform_env: str, tmp_path: Path) -> str
     (root / "dags").mkdir(parents=True)
     (root / "dags/broken.py").write_text("def broken(:\n", encoding="utf-8")
     (root / "pack.yaml").write_text("schema_version: '1'\nid: x\nversion: '1'\npolicies: []\n", encoding="utf-8")
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(
             RepositoryRow(
@@ -165,7 +165,7 @@ def queue_repository_with_syntax_error(platform_env: str, tmp_path: Path) -> str
 
 def load_scan(platform_env: str, scan_id: str) -> ScanRow:
     """Return the persisted scan row for one scan id."""
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         scan = session.get(ScanRow, scan_id)
         assert scan is not None
@@ -174,7 +174,7 @@ def load_scan(platform_env: str, scan_id: str) -> ScanRow:
 
 def factory(dsn: str) -> sessionmaker[Session]:
     """Return a session factory bound to the given platform DSN."""
-    return create_session_factory(dsn)
+    return initialize_session_factory(dsn)
 
 
 def settings(**overrides: Any) -> WorkerSettings:
@@ -205,6 +205,15 @@ def only_scan(dsn: str) -> ScanRow:
     """Return the single persisted scan row."""
     with factory(dsn)() as session:
         return session.scalars(select(ScanRow)).one()
+
+
+def seed_running_scan(dsn: str, root: Path) -> str:
+    """Seed one repository with a running scan over the given root and return its id."""
+    with factory(dsn)() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(root)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+        return "scan1"
 
 
 def _install_sleeper_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -250,6 +259,58 @@ def test_workspace_rejects_missing_paths_and_duplicates(tmp_path: Path) -> None:
     )
     with pytest.raises(WorkspaceError, match="unique"):
         load_workspace(tmp_path / "dupe.yaml")
+
+
+def test_compose_workspace_mounted_for_api_and_worker() -> None:
+    """Both Compose services must see the configured workspace at /workspace."""
+    compose = YAML(typ="safe").load(Path("deploy/docker-compose.yml").read_text(encoding="utf-8"))  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(compose, dict)
+    services = cast("dict[str, Any]", compose["services"])
+    mount = "${CONFORMDAG_WORKSPACE_DIR:?set CONFORMDAG_WORKSPACE_DIR}:/workspace:rw"
+    for service in ("api", "worker"):
+        assert mount in cast("list[str]", services[service]["volumes"]), service
+
+
+def test_invalid_configured_workspace_fails_app_startup(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.workspace import WorkspaceError
+
+    factory = initialize_session_factory(platform_env)
+    settings = PlatformSettings(dsn=platform_env, admin_token="secret-token")
+
+    with pytest.raises(WorkspaceError):
+        create_app(factory, settings, workspace_path=tmp_path / "missing.yaml")
+
+
+def test_configured_workspace_env_var_fails_app_startup(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.platform.app import load_settings
+    from conformdag.platform.workspace import WorkspaceError
+
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", platform_env)
+    monkeypatch.setenv("CONFORMDAG_WORKSPACE", str(tmp_path / "missing.yaml"))
+    factory = initialize_session_factory(platform_env)
+
+    with pytest.raises(WorkspaceError):
+        create_app(factory, load_settings())
+
+
+def test_configured_workspace_registers_packs_at_startup(platform_env: str, tmp_path: Path) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "policies/pack.yaml").write_text(
+        "schema_version: '1'\nid: ws\nversion: '1'\npolicies: []\n", encoding="utf-8"
+    )
+    (tmp_path / "workspace.yaml").write_text(
+        "schema_version: '1'\npolicy_packs:\n  - name: ws\n    path: policies/pack.yaml\n", encoding="utf-8"
+    )
+    factory = initialize_session_factory(platform_env)
+    settings = PlatformSettings(dsn=platform_env, admin_token="secret-token")
+    client = TestClient(create_app(factory, settings, workspace_path=tmp_path / "workspace.yaml"))
+
+    response = _get(client, "/api/v1/packs")
+
+    assert response.status_code == 200
+    assert [pack["name"] for pack in response.json()] == ["ws"]
 
 
 def test_health_is_open_and_reads_need_no_token(client: TestClient) -> None:
@@ -453,7 +514,7 @@ def test_create_app_registers_workspace_packs_at_startup(tmp_path: Path, monkeyp
     )
     monkeypatch.chdir(tmp_path)
 
-    factory = create_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    factory = initialize_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
     app = create_app(factory, PlatformSettings(dsn="sqlite:///unused", admin_token="secret-token"))
     client = TestClient(app)
 
@@ -465,7 +526,7 @@ def test_create_app_registers_workspace_packs_at_startup(tmp_path: Path, monkeyp
 
 
 def test_abandoned_running_scan_is_reclaimed_within_attempt_budget(platform_env: str) -> None:
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         repository = RepositoryRow(id="repo1", name="r", path=".")
         session.add(repository)
@@ -488,7 +549,7 @@ def test_abandoned_running_scan_is_reclaimed_within_attempt_budget(platform_env:
 
 
 def test_abandoned_scan_fails_after_attempt_budget(platform_env: str) -> None:
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         repository = RepositoryRow(id="repo1", name="r", path=".")
         session.add(repository)
@@ -528,7 +589,7 @@ def test_worker_executes_queued_scan_end_to_end(
         'config_version: "1"\nscan:\n  include: ["dags/**/*.py"]\n', encoding="utf-8"
     )
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
@@ -821,7 +882,7 @@ def test_export_json_is_byte_compatible_with_stored_report(client: TestClient, t
 
 
 def test_worker_skips_cancelled_scan(platform_env: str) -> None:
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path="."))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="cancelled"))
@@ -854,7 +915,7 @@ def test_worker_loop_sleeps_when_idle(platform_env: str, monkeypatch: pytest.Mon
         raise KeyboardInterrupt
 
     monkeypatch.setattr(worker_module.time, "sleep", fake_sleep)
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
 
     try:
         worker_module.run_worker(factory, platform_env, WorkerSettings(poll_seconds=1.0))
@@ -868,7 +929,7 @@ def test_worker_loop_sleeps_when_idle(platform_env: str, monkeypatch: pytest.Mon
 def test_worker_drains_inflight_scan_then_stops(platform_env: str, monkeypatch: pytest.MonkeyPatch) -> None:
     worker_module = importlib.import_module("conformdag.platform.worker")
     worker_module._shutdown_requested.clear()
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     started = threading.Event()
     calls: list[str] = []
 
@@ -1040,7 +1101,7 @@ def test_runner_persists_scan_failure(
 ) -> None:
     from conformdag.platform.runner import execute_scan
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
@@ -1071,7 +1132,7 @@ def test_runner_persists_scan_failure(
 def test_runner_rejects_non_running_scan(platform_env: str) -> None:
     from conformdag.platform.runner import execute_scan
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path="."))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
@@ -1079,6 +1140,18 @@ def test_runner_rejects_non_running_scan(platform_env: str) -> None:
 
     assert execute_scan("scan1", platform_env) == 2
     assert execute_scan("missing", platform_env) == 2
+
+
+def test_runner_does_not_run_migrations(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    def fail_if_called(_url: str) -> NoReturn:
+        raise AssertionError("the runner subprocess must never run migrations")
+
+    seed_running_scan(platform_env, tmp_path)
+    monkeypatch.setattr("conformdag.platform.db.run_migrations", fail_if_called)
+
+    assert execute_scan("scan1", platform_env) == 1
 
 
 def test_runner_marks_incomplete_report_failed(platform_env: str, tmp_path: Path) -> None:
@@ -1098,7 +1171,7 @@ def test_runner_marks_incomplete_report_failed(platform_env: str, tmp_path: Path
 def test_baseline_eligibility_rejects_ineligible_scans(platform_env: str) -> None:
     from conformdag.platform.db import eligible_baseline
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path="."))
         session.add(RepositoryRow(id="repo2", name="other", path="."))
@@ -1187,7 +1260,7 @@ def test_runner_baseline_eligibility_requires_succeeded_and_complete(platform_en
     _write_yaml(tmp_path / "pack.yaml", pack)
     (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
@@ -1265,7 +1338,7 @@ def test_runner_applies_platform_suppression_before_gate_evaluation(platform_env
     _write_yaml(tmp_path / "pack.yaml", pack)
     (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
@@ -1346,7 +1419,7 @@ def test_runner_persists_gate_result(platform_env: str, tmp_path: Path, monkeypa
     _write_yaml(tmp_path / "pack.yaml", pack)
     (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
@@ -1408,7 +1481,7 @@ def test_runner_persists_configured_pack_baseline_gate(
         'config_version: "1"\nscan:\n  policy_pack: policies/pack.yaml\n', encoding="utf-8"
     )
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=None))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
@@ -1484,7 +1557,7 @@ def test_runner_uses_retained_baseline_findings_after_artifact_pruning(platform_
     _write_yaml(pack_path, pack)
     (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
 
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(pack_path)))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
@@ -1561,7 +1634,7 @@ def test_workspace_rejects_duplicate_pack_names_and_non_mapping(tmp_path: Path) 
 
 
 def test_worker_reports_runner_failure_outcome(platform_env: str, tmp_path: Path) -> None:
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
@@ -1816,7 +1889,7 @@ def test_dashboard_index_is_served(client: TestClient) -> None:
 
 
 def test_retention_clears_artifacts_and_keeps_findings(platform_env: str) -> None:
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="r", path="."))
         for index in range(4):
@@ -2187,7 +2260,7 @@ def test_workspace_registration_surfaces_unknown_check(client: TestClient, tmp_p
 
 def _mutation_client(platform_env: str) -> TestClient:
     """Build a client that surfaces server errors as 500 responses instead of raising."""
-    factory = create_session_factory(platform_env)
+    factory = initialize_session_factory(platform_env)
     settings = PlatformSettings(dsn=platform_env, admin_token="secret-token")
     return TestClient(create_app(factory, settings), raise_server_exceptions=False)
 

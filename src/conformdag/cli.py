@@ -915,10 +915,10 @@ def agent_policy_review(
 
 def _platform_session_factory():
     from conformdag.platform.app import load_settings
-    from conformdag.platform.db import create_session_factory
+    from conformdag.platform.db import initialize_session_factory
 
     settings = load_settings()
-    return settings, create_session_factory(settings.dsn)
+    return settings, initialize_session_factory(settings.dsn)
 
 
 @baseline_app.command("set")

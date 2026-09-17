@@ -137,13 +137,23 @@ def run_migrations(url: str) -> None:
 def create_session_factory(url: str) -> sessionmaker[Session]:
     """Create a session factory bound to the platform database URL.
 
-    The platform schema is created exclusively through Alembic migrations; the
-    session factory applies pending migrations at startup so every deployment
-    and test run reaches the same schema revision.
+    Binding only: no schema work happens here. Runner subprocesses share this
+    factory so they can never race the startup migration; migrations are a
+    single startup responsibility owned by ``initialize_session_factory``.
     """
-    run_migrations(url)
     engine = create_engine(url, future=True)
     return sessionmaker(bind=engine, future=True, expire_on_commit=False)
+
+
+def initialize_session_factory(url: str) -> sessionmaker[Session]:
+    """Run pending migrations once at startup, then bind a session factory.
+
+    Only long-lived platform processes (``serve``, ``worker``, and the CLI
+    platform commands) call this; the schema is created exclusively through
+    Alembic migrations, never through ``Base.metadata.create_all()``.
+    """
+    run_migrations(url)
+    return create_session_factory(url)
 
 
 def next_scan_id() -> str:

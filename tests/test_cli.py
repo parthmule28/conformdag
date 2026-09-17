@@ -215,10 +215,10 @@ def test_baseline_set_reports_platform_initialization_sqlalchemy_error(
     monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", "sqlite:///platform.db")
     monkeypatch.setenv("CONFORMDAG_PLATFORM_TOKEN", "secret-token")
 
-    def fail_create_session_factory(_dsn: str) -> NoReturn:
+    def fail_initialize_session_factory(_dsn: str) -> NoReturn:
         raise SQLAlchemyError("migration failed")
 
-    monkeypatch.setattr("conformdag.platform.db.create_session_factory", fail_create_session_factory)
+    monkeypatch.setattr("conformdag.platform.db.initialize_session_factory", fail_initialize_session_factory)
 
     result = CliRunner().invoke(app, ["baseline", "set", "scan1"])
 
@@ -241,12 +241,12 @@ def test_doctor_fails_when_configured_platform_dsn_is_unreachable(
 
 
 def test_baseline_set_marks_scan_in_platform_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from conformdag.platform.db import RepositoryRow, ScanRow, create_session_factory
+    from conformdag.platform.db import RepositoryRow, ScanRow, initialize_session_factory
 
     dsn = f"sqlite:///{tmp_path / 'platform.db'}"
     monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", dsn)
     monkeypatch.setenv("CONFORMDAG_PLATFORM_TOKEN", "secret-token")
-    factory = create_session_factory(dsn)
+    factory = initialize_session_factory(dsn)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="core-dags", path=str(tmp_path)))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="succeeded", complete=True))
@@ -263,12 +263,12 @@ def test_baseline_set_marks_scan_in_platform_store(tmp_path: Path, monkeypatch: 
 
 
 def test_baseline_eligibility_rejects_ineligible_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from conformdag.platform.db import RepositoryRow, ScanRow, create_session_factory
+    from conformdag.platform.db import RepositoryRow, ScanRow, initialize_session_factory
 
     dsn = f"sqlite:///{tmp_path / 'platform.db'}"
     monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", dsn)
     monkeypatch.setenv("CONFORMDAG_PLATFORM_TOKEN", "secret-token")
-    factory = create_session_factory(dsn)
+    factory = initialize_session_factory(dsn)
     with factory() as session:
         session.add(RepositoryRow(id="repo1", name="core-dags", path=str(tmp_path)))
         for status in ("queued", "failed", "cancelled"):

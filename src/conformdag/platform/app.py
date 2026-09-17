@@ -47,6 +47,7 @@ class PlatformSettings(BaseModel):
     admin_token: str | None = None
     retention_keep: int = Field(default=50, ge=1)
     cors_origins: list[str] = ["http://localhost:5173"]
+    workspace: Path | None = None
 
 
 def load_settings() -> PlatformSettings:
@@ -58,7 +59,11 @@ def load_settings() -> PlatformSettings:
     retention = int(os.environ.get("CONFORMDAG_PLATFORM_RETENTION_KEEP", "50"))
     cors_raw = os.environ.get("CONFORMDAG_PLATFORM_CORS_ORIGINS", "http://localhost:5173")
     origins = [origin.strip() for origin in cors_raw.split(",") if origin.strip()]
-    return PlatformSettings(dsn=dsn, admin_token=token, retention_keep=retention, cors_origins=origins)
+    workspace_raw = os.environ.get("CONFORMDAG_WORKSPACE")
+    workspace = Path(workspace_raw) if workspace_raw else None
+    return PlatformSettings(
+        dsn=dsn, admin_token=token, retention_keep=retention, cors_origins=origins, workspace=workspace
+    )
 
 
 class RepositoryCreate(BaseModel):
@@ -408,8 +413,19 @@ def update_suppression(request: Request, suppression_id: str, payload: Suppressi
         return _suppression_payload(row)
 
 
-def create_app(session_factory: sessionmaker[Session], settings: PlatformSettings) -> FastAPI:
-    """Build the platform FastAPI application bound to one session factory."""
+def create_app(
+    session_factory: sessionmaker[Session], settings: PlatformSettings, workspace_path: Path | None = None
+) -> FastAPI:
+    """Build the platform FastAPI application bound to one session factory.
+
+    Startup workspace contract: when a workspace file is explicitly configured
+    (the ``workspace_path`` argument or ``settings.workspace`` from the
+    ``CONFORMDAG_WORKSPACE`` environment variable), it is loaded and registered
+    at startup and any load or parse failure aborts startup visibly. Without
+    explicit configuration the default ``./conformdag-workspace.yaml`` is
+    loaded opportunistically: a missing or malformed file only skips pack
+    registration, and ``POST /api/v1/workspace/load`` remains available.
+    """
     install_json_logging()
     app = FastAPI(title="ConformDAG Platform", version="1")
     app.state.session_factory = session_factory
@@ -422,12 +438,17 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
         allow_headers=["*"],
     )
     app.state.pack_service = PackService()
-    try:
-        workspace, _ = load_workspace()
-    except WorkspaceError:
-        pass
-    else:
+    configured_workspace = workspace_path if workspace_path is not None else settings.workspace
+    if configured_workspace is not None:
+        workspace, _ = load_workspace(configured_workspace)
         _register_workspace_packs(app.state.pack_service, workspace)
+    else:
+        try:
+            workspace, _ = load_workspace()
+        except WorkspaceError:
+            pass
+        else:
+            _register_workspace_packs(app.state.pack_service, workspace)
 
     def request_error_handler(request: Request, exc: Exception) -> Response:
         """Add request observability to Starlette's normal unhandled-error response."""

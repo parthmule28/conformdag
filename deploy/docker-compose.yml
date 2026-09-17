@@ -5,8 +5,11 @@ services:
     environment:
       CONFORMDAG_PLATFORM_DSN: postgresql+psycopg://conformdag:conformdag@postgres:5432/conformdag
       CONFORMDAG_PLATFORM_TOKEN: ${CONFORMDAG_PLATFORM_TOKEN:?set CONFORMDAG_PLATFORM_TOKEN}
+      CONFORMDAG_WORKSPACE: /workspace/conformdag-workspace.yaml
     ports:
       - "127.0.0.1:8642:8642"
+    volumes:
+      - ${CONFORMDAG_WORKSPACE_DIR:?set CONFORMDAG_WORKSPACE_DIR}:/workspace:rw
     depends_on:
       postgres:
         condition: service_healthy
