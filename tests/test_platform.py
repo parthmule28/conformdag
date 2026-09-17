@@ -3480,6 +3480,77 @@ def test_dashboard_policy_update_preserves_contract_metadata(client: TestClient,
     assert after["safe_path"] == before["safe_path"]
 
 
+def test_policy_upsert_round_trips_tags_and_preserves_contract_metadata(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    admin = {"Authorization": "Bearer secret-token"}
+    url = "/api/v1/packs/org/policies/AIR-DET-001"
+    before = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert before["tags"] == []
+    source_hash_before = next(
+        policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001"
+    ).source.content_hash
+    edit = {
+        "title": "Tagged owner policy",
+        "version": before["version"],
+        "status": before["status"],
+        "severity": before["severity"],
+        "check_kind": before["check_kind"],
+        "check_config": before["check_config"],
+        "source_document": before["source_document"],
+        "source_section": before["source_section"],
+        "invariant": before["invariant"],
+    }
+
+    tagged = _as_httpx(client).put(url, json={**edit, "tags": ["data", "analytics-platform"]}, headers=admin)
+    assert tagged.status_code == 200
+    tagged_row = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert tagged_row["tags"] == ["data", "analytics-platform"]
+    for key in ("source_version", "ownership", "scope", "exceptions", "enforcement", "invariant", "safe_path"):
+        assert tagged_row[key] == before[key], f"tag update changed contract field {key!r}"
+
+    omitted = _as_httpx(client).put(url, json=edit, headers=admin)
+    assert omitted.status_code == 200
+    assert _load_dashboard_policy(client, "org", "AIR-DET-001")["tags"] == ["data", "analytics-platform"]
+
+    cleared = _as_httpx(client).put(url, json={**edit, "tags": []}, headers=admin)
+    assert cleared.status_code == 200
+    cleared_row = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert cleared_row["tags"] == []
+    for key in ("source_version", "ownership", "scope", "exceptions", "enforcement", "invariant", "safe_path"):
+        assert cleared_row[key] == before[key], f"tag clear changed contract field {key!r}"
+
+    saved = next(policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001")
+    assert saved.source.content_hash == source_hash_before
+
+
+@pytest.mark.parametrize("tags", [["Data"], ["data", "data"], ["bad_tag"]])
+def test_policy_upsert_rejects_invalid_tags_and_preserves_bytes(
+    client: TestClient, tmp_path: Path, tags: list[str]
+) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    before = pack_path.read_bytes()
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json={
+            "title": "Broken tag policy",
+            "version": "1.0.0",
+            "status": "ACTIVE",
+            "severity": "high",
+            "check_kind": "required-owner",
+            "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+            "source_document": "standards/dag-authoring.md",
+            "source_section": "Ownership and metadata",
+            "invariant": "Every DAG has an owner.",
+            "tags": tags,
+        },
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert pack_path.read_bytes() == before
+
+
 def test_concurrent_policy_updates_do_not_lose_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.platform.packs import PackService
 

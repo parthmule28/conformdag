@@ -62,6 +62,7 @@ class PackService:
                 "version": policy.version,
                 "status": policy.status.value,
                 "severity": policy.severity.value,
+                "tags": policy.tags,
                 "check_kind": policy.configuration.kind,
                 "check_config": policy.configuration.model_dump(mode="json"),
                 "source_document": str(policy.source.document),
@@ -212,6 +213,10 @@ def _merge_policy_data(
             clean[key] = policy_data[key]
     if policy_data.get("safe_path") is not None:
         clean["safe_path"] = policy_data["safe_path"]
+    if policy_data.get("tags") is not None:
+        clean["tags"] = policy_data["tags"]
+    elif existing is None:
+        clean.pop("tags", None)
     if "check_config" in policy_data or "check_kind" in policy_data:
         configuration = dict(policy_data["check_config"])
         configuration["kind"] = policy_data["check_kind"]

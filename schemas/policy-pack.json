@@ -632,6 +632,13 @@
         "status": {
           "$ref": "#/$defs/LifecycleStatus"
         },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
         "title": {
           "title": "Title",
           "type": "string"

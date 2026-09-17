@@ -97,7 +97,8 @@ class PolicyUpsertRequest(BaseModel):
     Editable fields are required. Contract metadata fields (``source_version``,
     ``ownership``, ``scope``, ``exceptions``, ``enforcement``, ``safe_path``)
     are optional: an existing policy keeps its persisted value when the request
-    omits them, while a new policy must carry them completely.
+    omits them, while a new policy must carry them completely. ``tags`` follows
+    the preserve-on-omit rule; an explicit empty list clears the tags.
     """
 
     title: str
@@ -115,6 +116,7 @@ class PolicyUpsertRequest(BaseModel):
     scope: dict[str, Any] | None = None
     exceptions: dict[str, Any] | None = None
     enforcement: dict[str, Any] | None = None
+    tags: list[str] | None = None
 
 
 class SuppressionCreate(BaseModel):
