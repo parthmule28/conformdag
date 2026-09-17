@@ -228,6 +228,22 @@ const FINDING_SUPPRESSED_ERROR: Finding = {
   baseline_status: "existing",
 };
 
+const FINDING_ERROR_UNSUPPRESSED: Finding = {
+  policy_id: "SCHED-004",
+  policy_version: "1",
+  status: "ERROR",
+  severity: "high",
+  file_path: "dags/schedules.py",
+  start_line: 41,
+  end_line: 44,
+  fingerprint: "fp-err-2",
+  explanation: "Schedule expression could not be evaluated",
+  remediation: "Correct the cron expression",
+  fix: null,
+  suppressed: false,
+  baseline_status: "new",
+};
+
 const FINDING_PASS_LOW: Finding = {
   policy_id: "DOC-003",
   policy_version: "4",
@@ -246,7 +262,12 @@ const FINDING_PASS_LOW: Finding = {
 
 const FINDINGS_PAGE: Page<Finding> = {
   total: 12,
-  items: [FINDING_FAIL, FINDING_SUPPRESSED_ERROR, FINDING_PASS_LOW],
+  items: [
+    FINDING_FAIL,
+    FINDING_SUPPRESSED_ERROR,
+    FINDING_ERROR_UNSUPPRESSED,
+    FINDING_PASS_LOW,
+  ],
 };
 
 const EMPTY_FINDINGS: Page<Finding> = { items: [], total: 0 };
@@ -396,6 +417,26 @@ describe("ScanPage", () => {
     expect(within(failDialog).getByText('dag = DAG("orders")')).toBeInTheDocument();
     expect(within(failDialog).getByText(/add-owner/)).toBeInTheDocument();
     expect(within(failDialog).queryByText("Report artifact unavailable")).not.toBeInTheDocument();
+  });
+
+  it("calls out an unsuppressed ERROR finding instead of reading it as a passing gate", async () => {
+    completedScanMocks();
+    renderScanPage("scan-1");
+
+    await screen.findByText("OWN-001");
+
+    const errorRow = rowForFinding("SCHED-004");
+    expect(within(errorRow).getByText("ERROR")).toBeInTheDocument();
+    expect(within(errorRow).getByText("Active")).toBeInTheDocument();
+    expect(within(errorRow).queryByText("SUPPRESSED")).not.toBeInTheDocument();
+
+    const dialog = await openDetail("SCHED-004");
+    expect(within(dialog).getByText("Unsuppressed ERROR")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/cannot be treated as\s+passing its gate/),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText("Suppressed finding")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Schedule expression could not be evaluated")).toBeInTheDocument();
   });
 
   it("labels an incomplete scan and its missing gate result as Not evaluated instead of deriving a pass", async () => {
