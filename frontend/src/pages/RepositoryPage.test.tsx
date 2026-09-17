@@ -304,6 +304,32 @@ describe("RepositoryPage", () => {
     await waitFor(() => expect(scanHistoryMock).toHaveBeenCalledTimes(2));
   });
 
+  it("shows an actionable error with retry when trends fail", async () => {
+    happyMocks();
+    getRepositoryTrendsMock.mockRejectedValue(
+      new ApiError(503, "req-6", "platform unavailable", "trends failed with 503"),
+    );
+    renderRepositoryPage();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/temporarily unavailable/i);
+    expect(screen.queryByText("No trend data yet")).not.toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(getRepositoryTrendsMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows a loading state while trends are in flight instead of an empty state", async () => {
+    listRepositoriesMock.mockResolvedValue([REPOSITORY]);
+    scanHistoryMock.mockResolvedValue(HISTORY);
+    getRepositoryTrendsMock.mockReturnValue(new Promise(() => undefined));
+    renderRepositoryPage();
+
+    await screen.findByText("Showing 1\u201310 of 12");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading trends");
+    expect(screen.queryByText("No trend data yet")).not.toBeInTheDocument();
+  });
+
   it("shows calm empty states when the repository has no scans or trend points", async () => {
     listRepositoriesMock.mockResolvedValue([REPOSITORY]);
     scanHistoryMock.mockResolvedValue({ items: [], total: 0 });

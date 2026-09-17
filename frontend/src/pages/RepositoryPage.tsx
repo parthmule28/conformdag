@@ -171,7 +171,23 @@ export default function RepositoryPage() {
         title={`Trends (last ${OVERVIEW_DAYS} days)`}
         subtitle="Daily fail and error finding counts from this repository's completed scans."
       >
-        {trends.data === undefined || trends.data.points.length === 0 ? (
+        {trends.isPending ? (
+          <p role="status" className="text-sm text-muted">
+            Loading trends…
+          </p>
+        ) : trends.isError ? (
+          <Banner
+            variant="error"
+            title="Repository trends could not be loaded"
+            action={
+              <Button variant="secondary" size="sm" onClick={() => trends.refetch()}>
+                Retry
+              </Button>
+            }
+          >
+            <p>{describeApiError(trends.error)}</p>
+          </Banner>
+        ) : trends.data.points.length === 0 ? (
           <EmptyState
             title="No trend data yet"
             description="Trend points appear once this repository's scans complete."
