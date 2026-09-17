@@ -133,6 +133,15 @@ resolved like operator values.
 Task 7: minor (deferred): reused aliases for explicit dag bindings remain
 statically ambiguous.
 Task 7: complete (commits bc57827..abbed9c, review clean; 9 deferred Minors)
+Task 8 final review: Important I-1 — PackService mutation validates only the
+individual policy and can persist an unrunnable reconstructed pack; this violates
+the authoritative mutation boundary. Minor M-1 — incomplete CLI reports can
+carry a passing gate_result. No Critical findings.
+Final review ruling: fix I-1 and include M-1 in the same consolidated wave
+because both are small authoritative-boundary/report-integrity defects and the
+acceptance verdict cannot be Ready while I-1 remains. Cost if wrong: one extra
+fix/review cycle and broader final-gate reruns; leaving I-1 would require
+filesystem recovery for a normal dashboard mutation.
 BASE for Task 8: abbed9c
 Task 8: acceptance Step 1 executed — every audit Critical (7) and Important (9)
 blocker re-verified green at abbed9c via the Tasks 1-7 focused regression
@@ -151,3 +160,16 @@ re-review.
 Task 8: provisional decision — P1 Ready (provisional), recorded in
 acceptance-report.md; no push, merge, publication, P2 start, or
 recovery-evidence deletion performed.
+Task 8: final fix wave executed at base 46c6824 (TDD red→green) — I-1 fixed by
+authoritative `validate_policy_pack()` before `_write_pack()` in
+`PackService.upsert_policy` (PackError → existing 422 path, pack bytes
+unchanged, recovery proven); M-1 fixed by skipping gate evaluation for
+incomplete CLI reports (exit-3 behavior preserved). Regressions:
+test_upsert_policy_rejects_unknown_evaluator_and_keeps_pack_usable,
+test_policy_upsert_endpoint_rejects_unknown_evaluator_with_422,
+test_scan_incomplete_report_does_not_embed_gate_result. Full gates re-run
+green: `mise run check` (342 passed, pyright 0 errors), `mise run
+test:coverage` (91.56%), `mise run schema --check`, `mise run test:runtime`
+(13 passed), `mise run ui-build` — all exit 0. Evidence:
+final-fix-report.md. Scoped re-review of the fix wave PENDING; verdict stays
+provisional until it returns.

@@ -822,3 +822,17 @@ def test_scan_uses_configured_pack_for_gate_evaluation(tmp_path: Path) -> None:
     report = json.loads(result.stdout)
     assert report["gate_result"]["gate_id"] == "default"
     assert report["gate_result"]["passed"] is True
+
+
+def test_scan_incomplete_report_does_not_embed_gate_result(tmp_path: Path) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=True, owner=None, count=2)
+    (root / "dags" / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app, ["scan", "--path", str(root), "--policy-pack", str(root / "pack.yaml"), "--format", "json"]
+    )
+
+    assert result.exit_code == 3
+    report = json.loads(result.stdout)
+    assert report["complete"] is False
+    assert report["gate_result"] is None

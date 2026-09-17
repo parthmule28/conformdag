@@ -189,12 +189,20 @@ around.
 
 ## Step 3 — Independent whole-branch review
 
-**PENDING** — owned by the controller per the acceptance instruction; no
-additional reviewer was dispatched. Review package scope when run:
-`849c840..abbed9c` (12 commits) with the remediation spec, plan, both readiness
-audits, all task reports/reviews, and the full diff. Any resulting
-Critical/Important findings require one consolidated fix wave plus one scoped
-re-review before this verdict is finalized.
+**EXECUTED at `46c6824`** (`849c840..46c6824`, 13 commits) — verdict: one
+Important finding (I-1: `PackService.upsert_policy` validated only the
+reconstructed `Policy`, not the reconstructed `PolicyPack`, so a dashboard
+mutation could persist an unrunnable pack and block recovery) and one
+same-wave Minor (M-1: incomplete CLI reports could embed a passing
+`gate_result`). No Critical findings. Full evidence:
+`final-review.md` and `review-849c840..46c6824.diff`.
+
+Both findings were fixed in the one consolidated final fix wave (TDD, red at
+`46c6824` then green; full gates re-run: `mise run check` 342 passed /
+pyright 0 errors, coverage 91.56%, schema check, runtime suite, frontend
+build — all exit 0). Evidence: `final-fix-report.md`. A **scoped re-review of
+the fix wave is still pending**; this verdict must not be finalized before it
+returns.
 
 ## Spec acceptance criteria cross-check
 
@@ -218,12 +226,14 @@ re-review before this verdict is finalized.
 
 ## Provisional decision
 
-**P1 Ready — provisional.** All seven spec acceptance criteria are verified at
-HEAD `abbed9c`; every Critical and Important audit blocker maps to re-run
-passing evidence with no out-of-scope ruling; full gates, coverage (91.55%),
-schemas, runtime, and frontend build are green; no `.coverage.cachyos*`
-artifacts remain. This verdict becomes final only after the controller's
-Step 3 whole-branch review (`849c840..abbed9c`) returns clean, or after any
-Critical/Important finding it raises is fixed in one consolidated wave plus one
-scoped re-review. No push, merge, publication, P2 start, or recovery-evidence
-deletion was performed.
+**P1 Ready — provisional (fix wave landed; scoped re-review pending).** All
+seven spec acceptance criteria are verified; every Critical and Important
+audit blocker maps to re-run passing evidence with no out-of-scope ruling.
+The Step 3 whole-branch review returned one Important (I-1) and one Minor
+(M-1); both were fixed in the consolidated final fix wave and all full gates
+were re-run green afterward (`mise run check` 342 passed, coverage 91.56%,
+schema check, runtime suite, frontend build — all exit 0; see
+`final-fix-report.md`). Final gate evidence at HEAD is the fix-wave run, which
+supersedes the earlier `abbed9c` run. This verdict becomes final only after
+the scoped re-review of the fix wave returns clean. No push, merge,
+publication, P2 start, or recovery-evidence deletion was performed.

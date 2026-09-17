@@ -2210,6 +2210,60 @@ def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
         service.delete_policy("test", "AIR-DET-001")
 
 
+def test_upsert_policy_rejects_unknown_evaluator_and_keeps_pack_usable(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackError, PackService
+
+    (tmp_path / "standards").mkdir()
+    (tmp_path / "policies").mkdir()
+    copyfile("policies/pack.yaml", tmp_path / "policies" / "pack.yaml")
+    copyfile("standards/dag-authoring.md", tmp_path / "standards" / "dag-authoring.md")
+    pack_path = tmp_path / "policies" / "pack.yaml"
+    before = pack_path.read_bytes()
+    service = PackService({"test": pack_path})
+
+    with pytest.raises(PackError, match="unknown deterministic check"):
+        service.upsert_policy(
+            "test",
+            "AIR-DET-001",
+            {
+                "title": "Broken owner policy",
+                "version": "2.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "ownership": {"owner": "platform"},
+                "invariant": "Every DAG has an owner.",
+                "check_kind": "required-owner",
+                "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["time-travel"]},
+                "source_document": "standards/dag-authoring.md",
+                "source_section": "Ownership and metadata",
+            },
+        )
+
+    assert pack_path.read_bytes() == before
+    assert load_policy_pack(pack_path, tmp_path) is not None
+
+    service.upsert_policy(
+        "test",
+        "AIR-DET-001",
+        {
+            "title": "Recovered owner policy",
+            "version": "2.0.0",
+            "status": "ACTIVE",
+            "severity": "high",
+            "ownership": {"owner": "platform"},
+            "invariant": "Every DAG has an owner.",
+            "check_kind": "required-owner",
+            "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+            "source_document": "standards/dag-authoring.md",
+            "source_section": "Ownership and metadata",
+        },
+    )
+    saved = load_policy_pack(pack_path, tmp_path)
+    policy = next(item for item in saved.policies if item.id == "AIR-DET-001")
+    assert policy.title == "Recovered owner policy"
+
+
 def test_pack_policy_save_endpoint_persists_dashboard_check_fields(client: TestClient, tmp_path: Path) -> None:
     from conformdag.platform.packs import PackService
 
@@ -2244,6 +2298,33 @@ def test_pack_policy_save_endpoint_persists_dashboard_check_fields(client: TestC
     assert policy.title == "Updated owner policy"
     assert policy.configuration.kind == "required-owner"
     assert policy.configuration.allowed_values == ["platform"]
+
+
+def test_policy_upsert_endpoint_rejects_unknown_evaluator_with_422(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    before = pack_path.read_bytes()
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json={
+            "title": "Broken owner policy",
+            "version": "2.0.0",
+            "status": "ACTIVE",
+            "severity": "high",
+            "check_kind": "required-owner",
+            "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+            "source_document": "standards/dag-authoring.md",
+            "source_section": "Ownership and metadata",
+            "invariant": "Every DAG has an owner.",
+            "enforcement": {"type": "deterministic", "deterministic_checks": ["time-travel"]},
+        },
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert "unknown deterministic check" in response.json()["detail"]
+    assert pack_path.read_bytes() == before
+    assert load_policy_pack(pack_path, tmp_path) is not None
 
 
 def _register_org_pack(client: TestClient, tmp_path: Path) -> Path:

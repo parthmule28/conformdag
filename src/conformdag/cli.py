@@ -719,7 +719,7 @@ def scan(
             _fail(ValueError(f"cannot load baseline report {baseline}: {exc}"))
         if baseline_report.complete is not True:
             _fail(ValueError(f"baseline report {baseline} is incomplete and cannot be used"))
-    gate_result = evaluate_pack_gates(pack, report, baseline_report)
+    gate_result = evaluate_pack_gates(pack, report, baseline_report) if report.complete else None
     if gate_result is not None:
         report = report.model_copy(update={"gate_result": gate_result})
     output_report = report

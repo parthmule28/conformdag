@@ -14,7 +14,7 @@ from typing import Any
 from ruamel.yaml import YAML
 
 from conformdag.models import Policy, PolicyPack
-from conformdag.policy import PolicyValidationError, load_policy_pack
+from conformdag.policy import PolicyValidationError, load_policy_pack, validate_policy_pack
 
 
 class PackError(ValueError):
@@ -99,6 +99,9 @@ class PackService:
                 pack.policies[idx] = validated
             else:
                 pack.policies.append(validated)
+            issues = validate_policy_pack(pack)
+            if issues:
+                raise PackError("; ".join(issues))
             _write_pack(pack, pack_path)
 
     def delete_policy(self, pack_name: str, policy_id: str) -> None:
