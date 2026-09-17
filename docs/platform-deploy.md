@@ -38,6 +38,20 @@ The dashboard API is served on `http://127.0.0.1:8642/api/v1`. Bind it to a team
 interface only when the exposure model is understood: reads are open and mutations
 require the single-admin bearer token; there is no multi-user RBAC.
 
+## Startup contract
+
+- Database schema migrations run once when the API (`serve`) or worker (`worker`)
+  starts. Runner subprocesses only bind to the migrated database; they never run
+  migrations, so they cannot race startup.
+- Both Compose services mount `$CONFORMDAG_WORKSPACE_DIR` at `/workspace`. When
+  the API service has `CONFORMDAG_WORKSPACE` set, it loads that workspace file at
+  startup and registers every repository and pack it declares. A missing,
+  unreadable, or malformed configured workspace aborts API startup visibly
+  instead of silently starting with no packs.
+- Without `CONFORMDAG_WORKSPACE`, workspace loading is opportunistic: a missing
+  default workspace is not an error, and `POST /api/v1/workspace/load` can
+  register or reload a workspace at any time.
+
 ## Register and scan
 
 ```bash
@@ -75,6 +89,7 @@ a major platform version.
 | `CONFORMDAG_PLATFORM_DSN` | api, worker | Required database URL (Postgres in production) |
 | `CONFORMDAG_PLATFORM_TOKEN` | api | Single-admin bearer token; unset disables mutations |
 | `CONFORMDAG_PLATFORM_RETENTION_KEEP` | api, worker | Full report artifacts kept per repo (default 50) |
+| `CONFORMDAG_WORKSPACE` | api | Workspace file loaded at startup; load errors abort startup |
 | `CONFORMDAG_WORKER_POLL_SECONDS` | worker | Idle poll interval (default 2.0) |
 | `CONFORMDAG_WORKER_IDLE_SECONDS` | worker | Reclaim a running scan after this idle time (default 600) |
 | `CONFORMDAG_WORKER_TIMEOUT_SECONDS` | worker | Hard subprocess timeout per scan (default 1800) |

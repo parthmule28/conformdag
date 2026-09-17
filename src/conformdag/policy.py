@@ -99,9 +99,23 @@ def load_policy_pack(path: Path, repository_root: Path | None = None) -> PolicyP
     pack_path = path.resolve()
     root = (repository_root or pack_path.parent).resolve()
     issues = validate_policy_provenance(pack, pack_path=pack_path, repository_root=root)
+    issues.extend(validate_policy_pack(pack))
     if issues:
         raise PolicyValidationError(issues)
     return pack
+
+
+def validate_policy_pack(pack: PolicyPack) -> list[str]:
+    """Return registry and quality-gate issues that make a pack unrunnable."""
+    from conformdag.evaluator import CHECK_EVALUATORS
+    from conformdag.gates import validate_quality_gates
+
+    issues = validate_quality_gates(pack)
+    for policy in pack.policies:
+        for check in policy.enforcement.deterministic_checks:
+            if check not in CHECK_EVALUATORS:
+                issues.append(f"{policy.id}: unknown deterministic check {check!r}")
+    return issues
 
 
 def select_policy_pack(path: Path | None, repository_root: Path) -> PolicyPack:

@@ -37,21 +37,34 @@ def apply_spans(source: str, spans: list[EditSpan]) -> str:
     Args:
         source: The complete original file content.
         spans: Structured edit specs computed against ``source`` coordinates.
+            Identical duplicate spans are applied once.
 
     Returns:
         The new file content with every span applied.
 
     Raises:
-        ValueError: If any span references a line outside the source or two
-            spans overlap.
+        ValueError: If any span references a line outside the source, or if
+            two distinct spans share coordinates or have overlapping ranges.
     """
     ordered = sorted(spans)
-    for left, right in zip(ordered, ordered[1:], strict=False):
+    unique = [span for index, span in enumerate(ordered) if index == 0 or span != ordered[index - 1]]
+    for left, right in zip(unique, unique[1:], strict=False):
+        left_bounds = (left.start_line, left.start_col, left.end_line, left.end_col)
+        right_bounds = (right.start_line, right.start_col, right.end_line, right.end_col)
+        if left_bounds == right_bounds:
+            raise ValueError(
+                "conflicting edit spans: distinct edits share coordinates "
+                f"{left.start_line}:{left.start_col}-{left.end_line}:{left.end_col}"
+            )
         if (right.start_line, right.start_col) < (left.end_line, left.end_col):
-            raise ValueError("overlapping edit spans")
+            raise ValueError(
+                "conflicting edit spans: overlapping edit spans "
+                f"{left.start_line}:{left.start_col}-{left.end_line}:{left.end_col} and "
+                f"{right.start_line}:{right.start_col}-{right.end_line}:{right.end_col}"
+            )
     lines = source.splitlines(keepends=True)
     result = source
-    for span in reversed(ordered):
+    for span in reversed(unique):
         start = _offset(lines, span.start_line, span.start_col)
         end = _offset(lines, span.end_line, span.end_col)
         result = result[:start] + span.replacement + result[end:]

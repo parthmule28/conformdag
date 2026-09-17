@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
+import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import PlainTextResponse
 
 from conformdag.models import ScanReport
 from conformdag.platform.db import (
@@ -20,10 +26,14 @@ from conformdag.platform.db import (
     RepositoryRow,
     ScanRow,
     SuppressionRow,
+    eligible_baseline,
     new_id,
     utcnow,
 )
-from conformdag.platform.workspace import load_workspace
+from conformdag.platform.logging import install_json_logging
+from conformdag.platform.packs import PackError, PackService
+from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
+from conformdag.policy import PolicyValidationError
 from conformdag.reporting import render_html, render_sarif
 
 API_PREFIX = "/api/v1"
@@ -35,7 +45,9 @@ class PlatformSettings(BaseModel):
 
     dsn: str
     admin_token: str | None = None
-    retention_keep: int = 50
+    retention_keep: int = Field(default=50, ge=1)
+    cors_origins: list[str] = ["http://localhost:5173"]
+    workspace: Path | None = None
 
 
 def load_settings() -> PlatformSettings:
@@ -45,7 +57,13 @@ def load_settings() -> PlatformSettings:
         raise RuntimeError("platform requires CONFORMDAG_PLATFORM_DSN")
     token = os.environ.get("CONFORMDAG_PLATFORM_TOKEN")
     retention = int(os.environ.get("CONFORMDAG_PLATFORM_RETENTION_KEEP", "50"))
-    return PlatformSettings(dsn=dsn, admin_token=token, retention_keep=retention)
+    cors_raw = os.environ.get("CONFORMDAG_PLATFORM_CORS_ORIGINS", "http://localhost:5173")
+    origins = [origin.strip() for origin in cors_raw.split(",") if origin.strip()]
+    workspace_raw = os.environ.get("CONFORMDAG_WORKSPACE")
+    workspace = Path(workspace_raw) if workspace_raw else None
+    return PlatformSettings(
+        dsn=dsn, admin_token=token, retention_keep=retention, cors_origins=origins, workspace=workspace
+    )
 
 
 class RepositoryCreate(BaseModel):
@@ -61,6 +79,32 @@ class WorkspaceLoadRequest(BaseModel):
     """Optional explicit path of the workspace file to register."""
 
     path: str | None = None
+
+
+class PolicyUpsertRequest(BaseModel):
+    """Payload for creating or updating a policy in a pack.
+
+    Editable fields are required. Contract metadata fields (``source_version``,
+    ``ownership``, ``scope``, ``exceptions``, ``enforcement``, ``safe_path``)
+    are optional: an existing policy keeps its persisted value when the request
+    omits them, while a new policy must carry them completely.
+    """
+
+    title: str
+    version: str
+    status: str
+    severity: str
+    check_kind: str
+    check_config: dict[str, Any]
+    source_document: str
+    source_section: str
+    invariant: str
+    safe_path: str | None = None
+    source_version: str | None = None
+    ownership: dict[str, Any] | None = None
+    scope: dict[str, Any] | None = None
+    exceptions: dict[str, Any] | None = None
+    enforcement: dict[str, Any] | None = None
 
 
 class SuppressionCreate(BaseModel):
@@ -81,6 +125,12 @@ class SuppressionUpdate(BaseModel):
     expires_at: datetime | None = None
 
 
+class BaselineSetRequest(BaseModel):
+    """Selection payload marking one scan as a repository's baseline."""
+
+    scan_id: str
+
+
 def require_admin(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     """Reject mutation requests unless the single-admin bearer token matches."""
     settings: PlatformSettings = request.app.state.settings
@@ -96,6 +146,15 @@ def require_admin(request: Request, authorization: Annotated[str | None, Header(
 def _factory(request: Request) -> sessionmaker[Session]:
     factory: sessionmaker[Session] = request.app.state.session_factory
     return factory
+
+
+def _register_workspace_packs(service: PackService, workspace: WorkspaceFile) -> None:
+    """Register every workspace pack (and per-repo pack) with the pack service."""
+    for pack in workspace.policy_packs:
+        service.register(pack.name, pack.path)
+    for repository in workspace.repositories:
+        if repository.policy_pack is not None:
+            service.register(f"repo/{repository.name}", repository.policy_pack)
 
 
 def _health() -> dict[str, str]:
@@ -127,6 +186,7 @@ def register_repository(request: Request, payload: RepositoryCreate) -> dict[str
 def load_workspace_file(request: Request, payload: WorkspaceLoadRequest) -> dict[str, int]:
     """Register every workspace repository that is not already present."""
     workspace, _ = load_workspace(Path(payload.path).resolve() if payload.path else None)
+    _register_workspace_packs(request.app.state.pack_service, workspace)
     factory = _factory(request)
     registered = 0
     with factory() as session:
@@ -160,6 +220,7 @@ def list_repositories(request: Request) -> list[dict[str, str | None]]:
                 "path": row.path,
                 "policy_pack": row.policy_pack,
                 "airflow_profile": row.airflow_profile,
+                "baseline_scan_id": row.baseline_scan_id,
             }
             for row in rows
         ]
@@ -209,15 +270,29 @@ def scan_status(request: Request, scan_id: str) -> dict[str, object]:
             "complete": scan.complete,
             "result_fingerprint": scan.result_fingerprint,
             "error": scan.error,
+            "gate_passed": (
+                cast("dict[str, object]", scan.report_json.get("gate_result") or {}).get("passed")
+                if scan.report_json
+                else None
+            ),
         }
 
 
-def scan_history(request: Request, repository_id: str) -> list[dict[str, object]]:
+def scan_history(
+    request: Request,
+    repository_id: str,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[dict[str, object]]:
     """Return the scan history of one repository, newest first."""
     factory = _factory(request)
     with factory() as session:
         rows = session.scalars(
-            select(ScanRow).where(ScanRow.repository_id == repository_id).order_by(ScanRow.created_at.desc())
+            select(ScanRow)
+            .where(ScanRow.repository_id == repository_id)
+            .order_by(ScanRow.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         ).all()
         return [
             {
@@ -231,20 +306,66 @@ def scan_history(request: Request, repository_id: str) -> list[dict[str, object]
         ]
 
 
+def set_baseline(request: Request, repository_id: str, payload: BaselineSetRequest) -> dict[str, str]:
+    """Mark one finished scan as the baseline for its repository."""
+    factory = _factory(request)
+    with factory() as session:
+        repository = session.get(RepositoryRow, repository_id)
+        if repository is None:
+            raise HTTPException(status_code=404, detail="repository not registered")
+        scan = session.get(ScanRow, payload.scan_id)
+        if scan is None or scan.repository_id != repository_id:
+            raise HTTPException(status_code=404, detail="scan not found for this repository")
+        if eligible_baseline(session, repository_id, payload.scan_id) is None:
+            raise HTTPException(
+                status_code=409,
+                detail="scan is not eligible as a baseline: it must be a succeeded, complete scan",
+            )
+        repository.baseline_scan_id = payload.scan_id
+        session.commit()
+        return {"repository_id": repository_id, "baseline_scan_id": payload.scan_id}
+
+
 def scan_report(request: Request, scan_id: str) -> dict[str, Any]:
     """Return the canonical report JSON artifact for one scan."""
     return _load_report(_factory(request), scan_id).model_dump(mode="json")
 
 
-def scan_findings(request: Request, scan_id: str, status: str | None = None) -> list[dict[str, object]]:
-    """List normalized findings for one scan, optionally filtered by status."""
+def scan_findings(
+    request: Request,
+    scan_id: str,
+    status: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[dict[str, object]]:
+    """List normalized findings and optional baseline labels for one scan.
+
+    ``baseline_status`` is ``"existing"`` or ``"new"`` when the repository
+    has a same-repository successful baseline scan. It is ``None`` when no
+    usable baseline is configured; that state is not treated as ``existing``.
+    """
     factory = _factory(request)
     with factory() as session:
         query = select(FindingRow).where(FindingRow.scan_id == scan_id)
         if status:
             query = query.where(FindingRow.status == status.upper())
-        rows = session.scalars(query.order_by(FindingRow.policy_id, FindingRow.file_path)).all()
-        return [_finding_payload(row) for row in rows]
+        rows = session.scalars(
+            query.order_by(FindingRow.policy_id, FindingRow.file_path).limit(limit).offset(offset)
+        ).all()
+        baseline_fingerprints: set[str] | None = None
+        scan = session.get(ScanRow, scan_id)
+        if scan is not None:
+            repository = session.get(RepositoryRow, scan.repository_id)
+            baseline = (
+                eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
+                if repository and repository.baseline_scan_id
+                else None
+            )
+            if baseline is not None:
+                baseline_fingerprints = set(
+                    session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline.id)).all()
+                )
+        return [_finding_payload(row, baseline_fingerprints) for row in rows]
 
 
 def export_scan(request: Request, scan_id: str, scan_format: str) -> Response:
@@ -303,11 +424,88 @@ def update_suppression(request: Request, suppression_id: str, payload: Suppressi
         return _suppression_payload(row)
 
 
-def create_app(session_factory: sessionmaker[Session], settings: PlatformSettings) -> FastAPI:
-    """Build the platform FastAPI application bound to one session factory."""
+def create_app(
+    session_factory: sessionmaker[Session], settings: PlatformSettings, workspace_path: Path | None = None
+) -> FastAPI:
+    """Build the platform FastAPI application bound to one session factory.
+
+    Startup workspace contract: when a workspace file is explicitly configured
+    (the ``workspace_path`` argument or ``settings.workspace`` from the
+    ``CONFORMDAG_WORKSPACE`` environment variable), it is loaded and registered
+    at startup and any load or parse failure aborts startup visibly. Without
+    explicit configuration the default ``./conformdag-workspace.yaml`` is
+    loaded opportunistically: a missing or malformed file only skips pack
+    registration, and ``POST /api/v1/workspace/load`` remains available.
+    """
+    install_json_logging()
     app = FastAPI(title="ConformDAG Platform", version="1")
     app.state.session_factory = session_factory
     app.state.settings = settings
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.state.pack_service = PackService()
+    configured_workspace = workspace_path if workspace_path is not None else settings.workspace
+    if configured_workspace is not None:
+        workspace, _ = load_workspace(configured_workspace)
+        _register_workspace_packs(app.state.pack_service, workspace)
+    else:
+        try:
+            workspace, _ = load_workspace()
+        except WorkspaceError:
+            pass
+        else:
+            _register_workspace_packs(app.state.pack_service, workspace)
+
+    def request_error_handler(request: Request, exc: Exception) -> Response:
+        """Add request observability to Starlette's normal unhandled-error response."""
+        request_id = cast(str, request.state.request_id)
+        start = cast(float, request.state.request_started)
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        response = PlainTextResponse("Internal Server Error", status_code=500)
+        response.headers["X-Request-ID"] = request_id
+        logging.getLogger("conformdag.platform.request").exception(
+            "request",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+                "error": str(exc),
+            },
+        )
+        return response
+
+    app.add_exception_handler(Exception, request_error_handler)
+
+    async def request_logging_middleware(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+        start = time.perf_counter()
+        request.state.request_id = request_id
+        request.state.request_started = start
+        response = await call_next(request)
+        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        response.headers["X-Request-ID"] = request_id
+        logging.getLogger("conformdag.platform.request").info(
+            "request",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
+        return response
+
+    app.middleware("http")(request_logging_middleware)
 
     app.get(API_PREFIX + "/health")(_health)
     app.post(API_PREFIX + "/repos", dependencies=[Depends(require_admin)])(register_repository)
@@ -317,16 +515,68 @@ def create_app(session_factory: sessionmaker[Session], settings: PlatformSetting
     app.post(API_PREFIX + "/scans/{scan_id}/cancel", dependencies=[Depends(require_admin)])(cancel_scan)
     app.get(API_PREFIX + "/scans/{scan_id}")(scan_status)
     app.get(API_PREFIX + "/repos/{repository_id}/scans")(scan_history)
+    app.put(API_PREFIX + "/repos/{repository_id}/baseline", dependencies=[Depends(require_admin)])(set_baseline)
     app.get(API_PREFIX + "/scans/{scan_id}/report")(scan_report)
     app.get(API_PREFIX + "/scans/{scan_id}/findings")(scan_findings)
     app.get(API_PREFIX + "/scans/{scan_id}/export/{scan_format}")(export_scan)
     app.get(API_PREFIX + "/suppressions")(list_suppressions)
     app.post(API_PREFIX + "/suppressions", dependencies=[Depends(require_admin)])(create_suppression)
     app.patch(API_PREFIX + "/suppressions/{suppression_id}", dependencies=[Depends(require_admin)])(update_suppression)
+
+    app.get(API_PREFIX + "/packs")(_pack_list)
+    app.get(API_PREFIX + "/packs/{pack_name}/policies")(_pack_policies)
+    app.put(API_PREFIX + "/packs/{pack_name}/policies/{policy_id}", dependencies=[Depends(require_admin)])(
+        _pack_upsert_policy
+    )
+    app.delete(API_PREFIX + "/packs/{pack_name}/policies/{policy_id}", dependencies=[Depends(require_admin)])(
+        _pack_delete_policy
+    )
+    app.post(API_PREFIX + "/packs/{pack_name}/validate", dependencies=[Depends(require_admin)])(_pack_validate)
+
     app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "DELETE"])(_api_fallback)
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
+
+
+def _pack_list(request: Request) -> list[dict[str, Any]]:
+    service: PackService = request.app.state.pack_service
+    return service.list_packs()
+
+
+def _pack_policies(request: Request, pack_name: str) -> list[dict[str, Any]]:
+    service: PackService = request.app.state.pack_service
+    try:
+        return service.list_policies(pack_name)
+    except PackError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _pack_upsert_policy(
+    request: Request, pack_name: str, policy_id: str, payload: PolicyUpsertRequest
+) -> dict[str, str]:
+    service: PackService = request.app.state.pack_service
+    try:
+        service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json"))
+    except (PackError, PolicyValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "saved", "policy_id": policy_id}
+
+
+def _pack_delete_policy(request: Request, pack_name: str, policy_id: str) -> dict[str, str]:
+    service: PackService = request.app.state.pack_service
+    try:
+        service.delete_policy(pack_name, policy_id)
+    except PackError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PolicyValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "deleted", "policy_id": policy_id}
+
+
+def _pack_validate(request: Request, pack_name: str) -> dict[str, Any]:
+    service: PackService = request.app.state.pack_service
+    return service.validate_pack(pack_name)
 
 
 def _api_fallback(rest: str) -> dict[str, str]:
@@ -342,7 +592,10 @@ def _load_report(session_factory: sessionmaker[Session], scan_id: str) -> ScanRe
         return ScanReport.model_validate(scan.report_json)
 
 
-def _finding_payload(row: FindingRow) -> dict[str, object]:
+def _finding_payload(row: FindingRow, baseline_fingerprints: set[str] | None = None) -> dict[str, object]:
+    baseline_status: str | None = None
+    if baseline_fingerprints is not None:
+        baseline_status = "existing" if row.fingerprint in baseline_fingerprints else "new"
     return {
         "policy_id": row.policy_id,
         "policy_version": row.policy_version,
@@ -355,6 +608,7 @@ def _finding_payload(row: FindingRow) -> dict[str, object]:
         "remediation": row.remediation,
         "fix": row.fix_json,
         "suppressed": row.suppressed,
+        "baseline_status": baseline_status,
     }
 
 

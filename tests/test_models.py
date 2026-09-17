@@ -9,10 +9,12 @@ from conformdag.models import (
     EnforcementConfig,
     EnforcementType,
     LifecycleStatus,
+    MaxSeverityRule,
     Ownership,
     Policy,
     PolicyPack,
     PolicySource,
+    QualityGate,
     RequiredOwnerConfig,
     Severity,
 )
@@ -62,3 +64,45 @@ def test_datetime_metadata_is_json_serializable() -> None:
     owner = Ownership(owner="platform", approved_at=datetime.now(UTC))
 
     assert owner.model_dump(mode="json")["approved_at"].startswith("20")
+
+
+def test_quality_gate_rules_discriminate_by_type() -> None:
+    gate = QualityGate.model_validate(
+        {
+            "id": "default",
+            "rules": [
+                {"type": "no-new-findings"},
+                {"type": "max-severity", "severity": "high"},
+                {"type": "max-findings", "count": 20},
+                {"type": "always-block", "policy_ids": ["AIR-DET-005"]},
+                {"type": "failure-rate", "max_percent": 10.0},
+            ],
+        }
+    )
+    assert [rule.type for rule in gate.rules] == [
+        "no-new-findings",
+        "max-severity",
+        "max-findings",
+        "always-block",
+        "failure-rate",
+    ]
+    assert isinstance(gate.rules[1], MaxSeverityRule)
+    assert gate.rules[1].severity is Severity.HIGH
+
+
+def test_unknown_gate_rule_type_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        QualityGate.model_validate({"id": "x", "rules": [{"type": "nonsense"}]})
+
+
+def test_policy_pack_accepts_quality_gates() -> None:
+    pack = PolicyPack.model_validate(
+        {
+            "schema_version": "1",
+            "id": "x",
+            "version": "1",
+            "policies": [],
+            "quality_gates": [{"id": "default", "rules": [{"type": "max-findings", "count": 5}]}],
+        }
+    )
+    assert len(pack.quality_gates) == 1

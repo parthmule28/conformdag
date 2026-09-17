@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from jinja2 import Environment, select_autoescape
 
+from conformdag.gates import blocking_findings
 from conformdag.models import Finding, FindingStatus, RunIssue, ScanReport, Suppression
 
 
@@ -116,12 +117,7 @@ def normalize_report(report: ScanReport) -> ScanReport:
 
 def has_blocking_failures(report: ScanReport) -> bool:
     """Return whether an unsuppressed blocking failure should exit 1."""
-    return any(
-        finding.status is FindingStatus.FAIL
-        and not finding.suppressed
-        and (finding.enforcement.value == "deterministic" or finding.blocking)
-        for finding in report.findings
-    )
+    return bool(blocking_findings(report))
 
 
 def render_sarif(report: ScanReport) -> dict[str, object]:

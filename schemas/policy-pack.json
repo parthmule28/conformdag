@@ -7,6 +7,31 @@
       "title": "AirflowProfile",
       "type": "string"
     },
+    "AlwaysBlockRule": {
+      "additionalProperties": false,
+      "description": "Rule: the listed policy ids always block, even when otherwise gated out.",
+      "properties": {
+        "policy_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Policy Ids",
+          "type": "array"
+        },
+        "type": {
+          "const": "always-block",
+          "default": "always-block",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "policy_ids"
+      ],
+      "title": "AlwaysBlockRule",
+      "type": "object"
+    },
     "ApprovedAbstractionsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -25,6 +50,42 @@
         }
       },
       "title": "ApprovedAbstractionsConfig",
+      "type": "object"
+    },
+    "CatchupPolicyConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_catchup": {
+          "default": false,
+          "title": "Allow Catchup",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "catchup-policy",
+          "default": "catchup-policy",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "CatchupPolicyConfig",
+      "type": "object"
+    },
+    "DynamicDagFactoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "default": false,
+          "title": "Allow",
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "dynamic-dag-factory",
+          "default": "dynamic-dag-factory",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "DynamicDagFactoryConfig",
       "type": "object"
     },
     "EnforcementConfig": {
@@ -140,6 +201,29 @@
       "title": "ExecutionTimeoutConfig",
       "type": "object"
     },
+    "FailureRateRule": {
+      "additionalProperties": false,
+      "description": "Rule: failing findings below ``max_percent`` percent of all findings.",
+      "properties": {
+        "max_percent": {
+          "maximum": 100.0,
+          "minimum": 0.0,
+          "title": "Max Percent",
+          "type": "number"
+        },
+        "type": {
+          "const": "failure-rate",
+          "default": "failure-rate",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "max_percent"
+      ],
+      "title": "FailureRateRule",
+      "type": "object"
+    },
     "ForbiddenOperatorsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -198,6 +282,82 @@
       ],
       "title": "LifecycleStatus",
       "type": "string"
+    },
+    "MaxFindingsRule": {
+      "additionalProperties": false,
+      "description": "Rule: fewer than ``count`` failing findings (a report with none always passes).",
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "type": {
+          "const": "max-findings",
+          "default": "max-findings",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "title": "MaxFindingsRule",
+      "type": "object"
+    },
+    "MaxSeverityRule": {
+      "additionalProperties": false,
+      "description": "Rule: no failing findings at or above the given severity.",
+      "properties": {
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "type": {
+          "const": "max-severity",
+          "default": "max-severity",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity"
+      ],
+      "title": "MaxSeverityRule",
+      "type": "object"
+    },
+    "ModuleScopeVariablesConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "module-scope-variables",
+          "default": "module-scope-variables",
+          "title": "Kind",
+          "type": "string"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
+        }
+      },
+      "title": "ModuleScopeVariablesConfig",
+      "type": "object"
+    },
+    "NoNewFindingsRule": {
+      "additionalProperties": false,
+      "description": "Rule: no failing findings that are absent from the baseline scan.",
+      "properties": {
+        "type": {
+          "const": "no-new-findings",
+          "default": "no-new-findings",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "NoNewFindingsRule",
+      "type": "object"
     },
     "OperatorRule": {
       "additionalProperties": false,
@@ -364,14 +524,19 @@
           "discriminator": {
             "mapping": {
               "approved-abstractions": "#/$defs/ApprovedAbstractionsConfig",
+              "catchup-policy": "#/$defs/CatchupPolicyConfig",
+              "dynamic-dag-factory": "#/$defs/DynamicDagFactoryConfig",
               "execution-timeout": "#/$defs/ExecutionTimeoutConfig",
               "forbidden-operators": "#/$defs/ForbiddenOperatorsConfig",
               "idempotence": "#/$defs/IdempotenceConfig",
+              "module-scope-variables": "#/$defs/ModuleScopeVariablesConfig",
               "orchestration-boundary": "#/$defs/OrchestrationBoundaryConfig",
               "required-owner": "#/$defs/RequiredOwnerConfig",
               "required-tags": "#/$defs/RequiredTagsConfig",
               "retry-bounds": "#/$defs/RetryBoundsConfig",
+              "ruff-air": "#/$defs/RuffAirConfig",
               "sensitive-logging": "#/$defs/SensitiveLoggingConfig",
+              "start-date-freshness": "#/$defs/StartDateFreshnessConfig",
               "top-level-io": "#/$defs/TopLevelIOConfig"
             },
             "propertyName": "kind"
@@ -406,6 +571,21 @@
             },
             {
               "$ref": "#/$defs/ApprovedAbstractionsConfig"
+            },
+            {
+              "$ref": "#/$defs/StartDateFreshnessConfig"
+            },
+            {
+              "$ref": "#/$defs/CatchupPolicyConfig"
+            },
+            {
+              "$ref": "#/$defs/ModuleScopeVariablesConfig"
+            },
+            {
+              "$ref": "#/$defs/DynamicDagFactoryConfig"
+            },
+            {
+              "$ref": "#/$defs/RuffAirConfig"
             }
           ],
           "title": "Configuration"
@@ -534,6 +714,58 @@
       "title": "PolicySource",
       "type": "object"
     },
+    "QualityGate": {
+      "additionalProperties": false,
+      "description": "One org-defined pass/fail decision over a scan's findings.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "always-block": "#/$defs/AlwaysBlockRule",
+                "failure-rate": "#/$defs/FailureRateRule",
+                "max-findings": "#/$defs/MaxFindingsRule",
+                "max-severity": "#/$defs/MaxSeverityRule",
+                "no-new-findings": "#/$defs/NoNewFindingsRule"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/NoNewFindingsRule"
+              },
+              {
+                "$ref": "#/$defs/MaxSeverityRule"
+              },
+              {
+                "$ref": "#/$defs/MaxFindingsRule"
+              },
+              {
+                "$ref": "#/$defs/AlwaysBlockRule"
+              },
+              {
+                "$ref": "#/$defs/FailureRateRule"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "rules"
+      ],
+      "title": "QualityGate",
+      "type": "object"
+    },
     "RequiredOwnerConfig": {
       "additionalProperties": false,
       "properties": {
@@ -647,6 +879,30 @@
       "title": "RetryBoundsConfig",
       "type": "object"
     },
+    "RuffAirConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "ruff-air",
+          "default": "ruff-air",
+          "title": "Kind",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rules"
+      ],
+      "title": "RuffAirConfig",
+      "type": "object"
+    },
     "SensitiveLoggingConfig": {
       "additionalProperties": false,
       "properties": {
@@ -685,6 +941,30 @@
       "title": "Severity",
       "type": "string"
     },
+    "StartDateFreshnessConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "start-date-freshness",
+          "default": "start-date-freshness",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_age_years": {
+          "default": 2,
+          "minimum": 1,
+          "title": "Max Age Years",
+          "type": "integer"
+        },
+        "require_timezone": {
+          "default": true,
+          "title": "Require Timezone",
+          "type": "boolean"
+        }
+      },
+      "title": "StartDateFreshnessConfig",
+      "type": "object"
+    },
     "TopLevelIOConfig": {
       "additionalProperties": false,
       "properties": {
@@ -722,6 +1002,13 @@
         "$ref": "#/$defs/Policy"
       },
       "title": "Policies",
+      "type": "array"
+    },
+    "quality_gates": {
+      "items": {
+        "$ref": "#/$defs/QualityGate"
+      },
+      "title": "Quality Gates",
       "type": "array"
     },
     "schema_version": {

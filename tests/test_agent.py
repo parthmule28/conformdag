@@ -5,6 +5,7 @@ import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
@@ -81,6 +82,39 @@ def _pr_transport_never_called() -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
+def test_pr_client_sets_a_120s_timeout() -> None:
+    from conformdag.agent import pr as pr_module
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(201, json={"html_url": "https://github.com/x/pull/1"})
+
+    build_client = cast("Callable[..., httpx.Client]", pr_module.__dict__["_build_client"])
+    client = build_client("https://api.github.com", "token", transport=httpx.MockTransport(handler))
+
+    assert client.timeout == httpx.Timeout(120.0)
+
+
+def test_branch_name_truncates_long_paths_with_hash_suffix() -> None:
+    from conformdag.agent import pipeline as pipeline_module
+
+    long_file = "/".join(["segment"] * 40) + ".py"
+    branch_name = cast("Callable[[str, str], str]", pipeline_module.__dict__["_branch_name"])
+    branch = branch_name("conformdag/fix", long_file)
+
+    assert len(branch) <= 240
+    assert branch.startswith("conformdag/fix")
+    assert branch[-9] == "-"
+
+
+def test_branch_name_keeps_short_paths_unchanged() -> None:
+    from conformdag.agent import pipeline as pipeline_module
+
+    branch_name = cast("Callable[[str, str], str]", pipeline_module.__dict__["_branch_name"])
+    branch = branch_name("conformdag/fix", "dags/reporting.py")
+
+    assert branch == "conformdag/fixdags-reporting.py"
+
+
 def test_triage_splits_fixable_from_manual(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
     root = build_repository(tmp_path)
     report = scan_repository(root, root / "policies/pack.yaml")
@@ -93,8 +127,30 @@ def test_triage_splits_fixable_from_manual(build_repository: Callable[[Path], Pa
         "AIR-DET-003",
         "AIR-DET-004",
     }
-    assert triage.manual == []
+    assert [item.policy_id for item in triage.manual] == ["AIR-DET-007"]
     assert all(":airflow" not in item.file_path for item in triage.fixable)
+
+
+def test_triage_surfaces_unresolved_evaluation_as_manual(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    root = build_repository(tmp_path)
+    (root / "dags/violations.py").unlink()
+    (root / "dags/dynamic.py").write_text(
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n"
+        "\n"
+        "with DAG(dag_id='dynamic'):\n"
+        "    @task(retries=RETRIES)\n"
+        "    def work(): ...\n",
+        encoding="utf-8",
+    )
+    report = scan_repository(root, root / "policies/pack.yaml")
+
+    triage = triage_report(report)
+
+    assert "AIR-DET-004" in {item.policy_id for item in triage.manual}
+    assert all(item.policy_id != "AIR-DET-004" for item in triage.fixable)
 
 
 def test_verifier_approves_and_caches(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
@@ -220,7 +276,7 @@ def test_pipeline_without_pr_client_applies_locally(build_repository: Callable[[
 
     assert outcome.changed
     assert outcome.pull_request_url is None
-    assert 'owner="analytics"' in (root / "dags/violations.py").read_text(encoding="utf-8")
+    assert "owner='analytics'" in (root / "dags/violations.py").read_text(encoding="utf-8")
 
 
 def test_pr_body_carries_evidence(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:

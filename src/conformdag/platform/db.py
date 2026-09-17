@@ -5,9 +5,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 from sqlalchemy import (
     JSON,
+    CursorResult,
     DateTime,
     ForeignKey,
     Index,
@@ -16,6 +18,7 @@ from sqlalchemy import (
     create_engine,
     func,
     select,
+    update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -52,6 +55,7 @@ class RepositoryRow(Base):
     path: Mapped[str] = mapped_column(String(1024))
     policy_pack: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     airflow_profile: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    baseline_scan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -133,13 +137,23 @@ def run_migrations(url: str) -> None:
 def create_session_factory(url: str) -> sessionmaker[Session]:
     """Create a session factory bound to the platform database URL.
 
-    The platform schema is created exclusively through Alembic migrations; the
-    session factory applies pending migrations at startup so every deployment
-    and test run reaches the same schema revision.
+    Binding only: no schema work happens here. Runner subprocesses share this
+    factory so they can never race the startup migration; migrations are a
+    single startup responsibility owned by ``initialize_session_factory``.
     """
-    run_migrations(url)
     engine = create_engine(url, future=True)
     return sessionmaker(bind=engine, future=True, expire_on_commit=False)
+
+
+def initialize_session_factory(url: str) -> sessionmaker[Session]:
+    """Run pending migrations once at startup, then bind a session factory.
+
+    Only long-lived platform processes (``serve``, ``worker``, and the CLI
+    platform commands) call this; the schema is created exclusively through
+    Alembic migrations, never through ``Base.metadata.create_all()``.
+    """
+    run_migrations(url)
+    return create_session_factory(url)
 
 
 def next_scan_id() -> str:
@@ -190,6 +204,45 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
     return queued_scan
 
 
+def transition_running_scan(
+    session: Session, scan_id: str, status: str, error: str | None = None, *, requeue: bool = False
+) -> bool:
+    """Conditionally transition a running scan to ``status``.
+
+    Returns True when the transition was applied. The conditional UPDATE makes
+    cancellation win over any concurrent worker or runner outcome: a scan that
+    was cancelled after the caller's last explicit status check is never
+    overwritten, and the caller's pending changes are rolled back instead.
+    Requeueing clears the claim timestamp so the scan re-enters the queue;
+    terminal transitions stamp ``finished_at``.
+    """
+    statement = (
+        update(ScanRow).where(ScanRow.id == scan_id, ScanRow.status == "running").values(status=status, error=error)
+    )
+    statement = statement.values(claimed_at=None) if requeue else statement.values(finished_at=utcnow())
+    applied = cast("CursorResult[Any]", session.execute(statement))
+    if applied.rowcount:
+        session.commit()
+        return True
+    session.rollback()
+    return False
+
+
+def eligible_baseline(session: Session, repository_id: str, scan_id: str) -> ScanRow | None:
+    """Return the scan row when it may serve as one repository's baseline.
+
+    A baseline must belong to the same repository and be a succeeded, complete
+    scan; queued, running, failed, cancelled, and incomplete scans are never
+    eligible.
+    """
+    scan = session.get(ScanRow, scan_id)
+    if scan is None or scan.repository_id != repository_id:
+        return None
+    if scan.status != "succeeded" or scan.complete is not True:
+        return None
+    return scan
+
+
 def count_scans(session: Session, repository_id: str) -> int:
     """Return the number of scans recorded for one repository."""
     return int(
@@ -198,12 +251,16 @@ def count_scans(session: Session, repository_id: str) -> int:
 
 
 def retention_target_scan_ids(session: Session, repository_id: str, keep: int) -> list[str]:
-    """Return scan ids beyond the newest ``keep`` for one repository."""
+    """Return scan ids beyond the newest ``keep`` for one repository.
+
+    At least the single newest artifact is always protected, so a misconfigured
+    ``keep`` below one can never prune the latest report.
+    """
     newest = (
         select(ScanRow.id)
         .where(ScanRow.repository_id == repository_id)
         .order_by(ScanRow.created_at.desc())
-        .limit(keep)
+        .limit(max(keep, 1))
         .subquery()
     )
     older = select(ScanRow.id).where(

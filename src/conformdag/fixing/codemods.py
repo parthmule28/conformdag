@@ -11,7 +11,7 @@ from conformdag.fixing.specs import EditSpan
 from conformdag.models import RemediationAction, RemediationPayload
 
 AUTOFIX_KINDS: Final[frozenset[str]] = frozenset(
-    {"required-owner", "required-tags", "execution-timeout", "retry-bounds"}
+    {"required-owner", "required-tags", "execution-timeout", "retry-bounds", "catchup-policy"}
 )
 PROPOSED_ONLY_KINDS: Final[frozenset[str]] = frozenset({"top-level-io"})
 MANUAL_KINDS: Final[frozenset[str]] = frozenset(
@@ -21,6 +21,10 @@ MANUAL_KINDS: Final[frozenset[str]] = frozenset(
         "orchestration-boundary",
         "sensitive-logging",
         "approved-abstractions",
+        "ruff-air",
+        "start-date-freshness",
+        "module-scope-variables",
+        "dynamic-dag-factory",
     }
 )
 
@@ -65,6 +69,11 @@ def _is_dag_call(node: ast.Call) -> bool:
 def _is_task_call(node: ast.Call) -> bool:
     qualified = _qualified_name(node.func)
     return bool(qualified and qualified.rsplit(".", 1)[-1].endswith("Operator"))
+
+
+def _is_taskflow_decorator_call(node: ast.Call) -> bool:
+    qualified = _qualified_name(node.func)
+    return bool(qualified and qualified.rsplit(".", 1)[-1] == "task")
 
 
 def _keyword(call: ast.Call, name: str) -> ast.keyword | None:
@@ -135,6 +144,21 @@ def _find_task_call(tree: ast.Module, payload: RemediationPayload) -> ast.Call |
     return _nearest(candidates, payload.target.line)
 
 
+def _find_taskflow_decorator(tree: ast.Module, payload: RemediationPayload) -> ast.Call | None:
+    """Locate the ``@task(...)`` decorator of the decorated function named by the payload."""
+    if payload.target is None:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.lineno != payload.target.line:
+            continue
+        for decorator in node.decorator_list:
+            if isinstance(decorator, ast.Call) and _is_taskflow_decorator_call(decorator):
+                return decorator
+    return None
+
+
 def _fix_dag_kwarg(
     source: str, payload: RemediationPayload, name: str, text: str, tree: ast.Module | None = None
 ) -> list[EditSpan] | None:
@@ -162,7 +186,7 @@ def _fix_task_kwarg(
 def fix_owner(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
     if payload.value is None:
         return None
-    return _fix_dag_kwarg(source, payload, "owner", f'"{payload.value}"', tree)
+    return _fix_dag_kwarg(source, payload, "owner", repr(payload.value), tree)
 
 
 def fix_tags(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
@@ -195,15 +219,32 @@ def fix_execution_timeout(
     return _fix_task_kwarg(source, payload, "execution_timeout", text, tree)
 
 
+def _fix_retry_kwarg(
+    source: str, payload: RemediationPayload, name: str, text: str, tree: ast.Module | None = None
+) -> list[EditSpan] | None:
+    parsed = tree or ast.parse(source)
+    call = _find_taskflow_decorator(parsed, payload) or _find_task_call(parsed, payload)
+    if call is None:
+        return None
+    if payload.action is RemediationAction.SET_KWARG:
+        span = _set_kwarg_span(call, name, text)
+        return [span] if span else None
+    return [_kwarg_addition_span(call, f"{name}={text}")]
+
+
 def fix_retry_bounds(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
     if payload.value is None or payload.kwarg is None:
         return None
     if payload.kwarg == "retries":
-        return _fix_task_kwarg(source, payload, "retries", payload.value, tree)
+        return _fix_retry_kwarg(source, payload, "retries", payload.value, tree)
     if payload.kwarg == "retry_delay":
         text = f"timedelta(seconds={payload.value})"
-        return _fix_task_kwarg(source, payload, "retry_delay", text, tree)
+        return _fix_retry_kwarg(source, payload, "retry_delay", text, tree)
     return None
+
+
+def fix_catchup(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
+    return _fix_dag_kwarg(source, payload, "catchup", "False", tree)
 
 
 def _needs_timedelta_import(tree: ast.Module) -> bool:
@@ -291,6 +332,7 @@ FIXERS: Final[dict[str, Codemod]] = {
     "required-tags": fix_tags,
     "execution-timeout": fix_execution_timeout,
     "retry-bounds": fix_retry_bounds,
+    "catchup-policy": fix_catchup,
     "top-level-io": fix_move_statement,
 }
 

@@ -7,12 +7,21 @@ import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
-from conformdag.analysis import CallRecord, DagRecord, SourceModel, TaskRecord
+from conformdag.analysis import (
+    CallRecord,
+    DagRecord,
+    SourceModel,
+    TaskRecord,
+    secret_like,
+)
 from conformdag.models import (
     AirflowProfile,
+    CatchupPolicyConfig,
+    DynamicDagFactoryConfig,
     EnforcementType,
     ExecutionTimeoutConfig,
     Finding,
@@ -20,6 +29,7 @@ from conformdag.models import (
     FindingLocation,
     FindingStatus,
     ForbiddenOperatorsConfig,
+    ModuleScopeVariablesConfig,
     OperatorRule,
     Policy,
     RemediationAction,
@@ -28,8 +38,12 @@ from conformdag.models import (
     RequiredOwnerConfig,
     RequiredTagsConfig,
     RetryBoundsConfig,
+    RuffAirConfig,
+    SensitiveLoggingConfig,
+    StartDateFreshnessConfig,
     TopLevelIOConfig,
 )
+from conformdag.ruff_adapter import run_ruff
 
 
 class EvaluationPhaseError(RuntimeError):
@@ -49,6 +63,8 @@ class EvaluationContext:
     policy: Policy
     models: Sequence[SourceModel]
     airflow_profile: AirflowProfile | None = None
+    repository_root: Path | None = None
+    ruff_violations: list[dict[str, Any]] | None = None
 
 
 class DeterministicEvaluator(Protocol):
@@ -253,6 +269,10 @@ class TagEvaluator:
 
 
 def _dag_defaults(model: SourceModel, task: TaskRecord) -> dict[str, object]:
+    if task.dag_line is not None:
+        for dag in model.dags:
+            if dag.line == task.dag_line:
+                return dag.defaults
     for dag in model.dags:
         if task.dag_name is None or task.dag_name == dag.variable_name:
             return dag.defaults
@@ -342,6 +362,10 @@ class RetryEvaluator:
         findings: list[Finding] = []
         for model in context.models:
             for task in model.tasks:
+                unresolved = sorted(name for name in ("retries", "retry_delay") if name in task.unresolved_kwargs)
+                if unresolved:
+                    findings.append(self._unresolved_finding(context, model, task, unresolved))
+                    continue
                 retries = _effective_value(model, task, "retries")
                 delay = _effective_value(model, task, "retry_delay")
                 retries = 0 if retries is None else retries
@@ -374,6 +398,30 @@ class RetryEvaluator:
                     )
                 )
         return findings
+
+    @staticmethod
+    def _unresolved_finding(
+        context: EvaluationContext,
+        model: SourceModel,
+        task: TaskRecord,
+        unresolved: list[str],
+    ) -> Finding:
+        task_label = task.task_id or task.qualified_name
+        names = ", ".join(unresolved)
+        return _finding(
+            context.policy,
+            model,
+            task.line,
+            FindingStatus.ERROR,
+            f"task {task_label} sets dynamic {names}; the effective value cannot be verified statically",
+            f"task:{task_label}:retry:unresolved:{'+'.join(unresolved)}",
+            fix_payload=RemediationPayload(
+                fix_kind="retry-bounds",
+                action=RemediationAction.MANUAL,
+                target=fix_target(task.line, task_label, "task-call"),
+                hint="replace the dynamic value with numeric literals within policy bounds",
+            ),
+        )
 
     @staticmethod
     def _payload(
@@ -554,6 +602,287 @@ class ForbiddenOperatorEvaluator:
         return findings
 
 
+class StartDateFreshnessEvaluator:
+    """Deterministic check kind: ``start-date-freshness``."""
+
+    policy_id = "AIR-DET-007"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(StartDateFreshnessConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        current_year = datetime.now(UTC).year
+        for model in context.models:
+            for dag in model.dags:
+                if dag.start_date is None:
+                    findings.append(
+                        _finding(
+                            context.policy,
+                            model,
+                            dag.line,
+                            FindingStatus.FAIL,
+                            "start_date is missing or could not be resolved statically; "
+                            f"set a recent timezone-aware start_date no older than "
+                            f"{configuration.max_age_years} year(s)",
+                            f"dag:{dag.variable_name or dag.line}:start_date:missing",
+                            fix_payload=RemediationPayload(
+                                fix_kind="start-date-freshness",
+                                action=RemediationAction.MANUAL,
+                                target=fix_target(dag.line, dag.variable_name, "dag-call"),
+                                hint="move start_date to a recent timezone-aware date "
+                                "(e.g. pendulum.datetime(..., tz='UTC'))",
+                            ),
+                        )
+                    )
+                    continue
+                year, month, day = dag.start_date
+                naive = dag.start_date_tz is False
+                stale = (current_year - year) > configuration.max_age_years
+                if not stale and not (naive and configuration.require_timezone):
+                    continue
+                problems: list[str] = []
+                if stale:
+                    problems.append(
+                        f"start_date {year:04d}-{month:02d}-{day:02d} is older than "
+                        f"{configuration.max_age_years} year(s)"
+                    )
+                if naive and configuration.require_timezone:
+                    problems.append("start_date has no timezone")
+                anchor = f"dag:{dag.variable_name or dag.line}:start_date"
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        dag.line,
+                        FindingStatus.FAIL,
+                        "; ".join(problems),
+                        anchor,
+                        fix_payload=RemediationPayload(
+                            fix_kind="start-date-freshness",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(dag.line, dag.variable_name, "dag-call"),
+                            hint="move start_date to a recent timezone-aware date "
+                            "(e.g. pendulum.datetime(..., tz='UTC'))",
+                        ),
+                    )
+                )
+        return findings
+
+
+class CatchupPolicyEvaluator:
+    """Deterministic check kind: ``catchup-policy``."""
+
+    policy_id = "AIR-DET-008"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(CatchupPolicyConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for dag in model.dags:
+                if dag.catchup is not True or configuration.allow_catchup:
+                    continue
+                anchor = f"dag:{dag.variable_name or dag.line}:catchup"
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        dag.line,
+                        FindingStatus.FAIL,
+                        f"catchup is enabled for {dag.variable_name or 'dag'}; with a stale "
+                        "start_date this schedules every missed interval (backfill bomb)",
+                        anchor,
+                        fix_payload=RemediationPayload(
+                            fix_kind="catchup-policy",
+                            action=RemediationAction.SET_KWARG,
+                            kwarg="catchup",
+                            target=fix_target(dag.line, dag.variable_name, "dag-call"),
+                            value="False",
+                            hint="sets catchup=False on the DAG call",
+                        ),
+                    )
+                )
+        return findings
+
+
+class ModuleScopeVariablesEvaluator:
+    """Deterministic check kind: ``module-scope-variables``."""
+
+    policy_id = "AIR-DET-009"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(ModuleScopeVariablesConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for call in model.calls:
+                if not call.module_scope:
+                    continue
+                if not any(call.qualified_name == pattern for pattern in configuration.patterns):
+                    continue
+                anchor = f"call:{call.qualified_name}:{call.line}"
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        call.line,
+                        FindingStatus.FAIL,
+                        f"top-level {call.qualified_name}() hits the metadata database on every scheduler parse cycle",
+                        anchor,
+                        fix_payload=RemediationPayload(
+                            fix_kind="module-scope-variables",
+                            action=RemediationAction.MOVE_STATEMENT,
+                            target=fix_target(call.line, call.qualified_name, "statement"),
+                            hint="move the variable access into a task body, or use a {{ var.value.* }} Jinja template",
+                        ),
+                    )
+                )
+        return findings
+
+
+class SensitiveLoggingEvaluator:
+    """Deterministic check kind: ``sensitive-logging`` (hardcoded secrets)."""
+
+    policy_id = "AIR-DET-010"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(SensitiveLoggingConfig, context.policy.configuration)
+        findings: list[Finding] = []
+        for model in context.models:
+            for constant in model.constants:
+                if not isinstance(constant.value, str):
+                    continue
+                looks_secret = secret_like(constant.name) or any(
+                    pattern.lower() in constant.name.lower() for pattern in configuration.secret_patterns
+                )
+                if not looks_secret:
+                    continue
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        constant.line,
+                        FindingStatus.FAIL,
+                        f"module-scope constant {constant.name!r} looks like a hardcoded credential",
+                        anchor=f"secret:{constant.name}:{constant.line}",
+                        fix_payload=RemediationPayload(
+                            fix_kind="sensitive-logging",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(constant.line, constant.name, "statement"),
+                            hint="move the value into an Airflow Connection or a secrets "
+                            "backend; never commit credentials",
+                        ),
+                    )
+                )
+        return findings
+
+
+class DynamicDagFactoryEvaluator:
+    """Deterministic check kind: ``dynamic-dag-factory`` (loop-generated DAGs)."""
+
+    policy_id = "AIR-DET-011"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(DynamicDagFactoryConfig, context.policy.configuration)
+        if configuration.allow:
+            return []
+        findings: list[Finding] = []
+        for model in context.models:
+            for line in model.dynamic_dag_lines:
+                anchor = f"dynamic-dag:{model.source.relative_path}:{line}"
+                findings.append(
+                    _finding(
+                        context.policy,
+                        model,
+                        line,
+                        FindingStatus.FAIL,
+                        "module-scope loop generates DAGs; per Airflow best practices "
+                        "this slows fleet-wide parsing and multiplies scheduling load",
+                        anchor,
+                        fix_payload=RemediationPayload(
+                            fix_kind="dynamic-dag-factory",
+                            action=RemediationAction.MANUAL,
+                            target=fix_target(line, None, "statement"),
+                            hint="prefer dynamic task mapping, DAG bundles, or config-file "
+                            "generation committed to the repo",
+                        ),
+                    )
+                )
+        return findings
+
+
+def _ruff_path(repository_root: Path, filename: object) -> str | None:
+    if not isinstance(filename, str) or not filename:
+        return None
+    path = Path(filename)
+    candidate = path if path.is_absolute() else repository_root / path
+    try:
+        return candidate.resolve().relative_to(repository_root.resolve()).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
+def _ruff_rule_matches(code: str, selector: str) -> bool:
+    normalized_code = code.upper()
+    normalized_selector = selector.upper()
+    return normalized_code == normalized_selector or normalized_code.startswith(normalized_selector)
+
+
+class RuffAirEvaluator:
+    """Deterministic check kind: ``ruff-air`` (composed Ruff AIR violations)."""
+
+    policy_id = "AIR-DET-012"
+
+    def evaluate(self, context: EvaluationContext) -> list[Finding]:
+        configuration = cast(RuffAirConfig, context.policy.configuration)
+        if context.repository_root is None:
+            return []
+        violations = context.ruff_violations
+        if violations is None:
+            violations = run_ruff(context.repository_root, configuration.rules) or []
+        scanned = {model.source.relative_path for model in context.models}
+        findings: list[Finding] = []
+        for violation in violations:
+            code = violation.get("code")
+            if not isinstance(code, str) or not any(
+                _ruff_rule_matches(code, selector) for selector in configuration.rules
+            ):
+                continue
+            relative = _ruff_path(context.repository_root, violation.get("filename"))
+            if relative is None or relative not in scanned:
+                continue
+            location = violation.get("location")
+            if not isinstance(location, dict):
+                continue
+            location = cast(dict[str, Any], location)
+            row = location.get("row")
+            if not isinstance(row, int) or isinstance(row, bool) or row <= 0:
+                continue
+            raw_message = violation.get("message", "")
+            message = raw_message if isinstance(raw_message, str) else str(raw_message)
+            detail = f"{code}: {message}"
+            findings.append(
+                Finding(
+                    policy_id=context.policy.id,
+                    policy_version=context.policy.version,
+                    status=FindingStatus.FAIL,
+                    severity=context.policy.severity,
+                    enforcement=EnforcementType.DETERMINISTIC,
+                    location=FindingLocation(file=Path(relative), start_line=row, end_line=row),
+                    evidence=FindingEvidence(text=redact_evidence(detail), start_line=row, end_line=row),
+                    explanation=detail,
+                    remediation=context.policy.safe_path,
+                    fix=RemediationPayload(
+                        fix_kind="ruff-air",
+                        action=RemediationAction.MANUAL,
+                        target=RemediationTarget(line=row, column=0, node="statement"),
+                        hint=f"review Ruff rule {code}; source fixes are disabled",
+                    ),
+                    fingerprint=structural_fingerprint(
+                        context.policy, relative, f"ruff:{code}:{row}", FindingStatus.FAIL
+                    ),
+                )
+            )
+        return findings
+
+
 CHECK_EVALUATORS: dict[str, DeterministicEvaluator] = {
     "effective-owner": OwnerEvaluator(),
     "tags": TagEvaluator(),
@@ -561,6 +890,12 @@ CHECK_EVALUATORS: dict[str, DeterministicEvaluator] = {
     "retry-bounds": RetryEvaluator(),
     "module-scope-io": TopLevelIOEvaluator(),
     "operator-allow-list": ForbiddenOperatorEvaluator(),
+    "start-date-freshness": StartDateFreshnessEvaluator(),
+    "catchup-policy": CatchupPolicyEvaluator(),
+    "module-scope-variables": ModuleScopeVariablesEvaluator(),
+    "sensitive-logging": SensitiveLoggingEvaluator(),
+    "dynamic-dag-factory": DynamicDagFactoryEvaluator(),
+    "ruff-air": RuffAirEvaluator(),
 }
 
 LEGACY_POLICY_EVALUATORS: dict[str, DeterministicEvaluator] = {
@@ -570,6 +905,7 @@ LEGACY_POLICY_EVALUATORS: dict[str, DeterministicEvaluator] = {
     "AIR-DET-004": CHECK_EVALUATORS["retry-bounds"],
     "AIR-DET-005": CHECK_EVALUATORS["module-scope-io"],
     "AIR-DET-006": CHECK_EVALUATORS["operator-allow-list"],
+    "AIR-DET-012": CHECK_EVALUATORS["ruff-air"],
 }
 
 
@@ -585,12 +921,30 @@ def evaluate_deterministic(
     policies: Iterable[Policy],
     models: Sequence[SourceModel],
     airflow_profile: AirflowProfile | None = None,
+    repository_root: Path | None = None,
+    ruff_violations: list[dict[str, Any]] | None = None,
 ) -> tuple[list[Finding], list[str], list[str]]:
     """Evaluate supported deterministic policies with stable policy/file ordering."""
+    ordered_policies = sorted(policies, key=lambda item: item.id)
+    shared_ruff_violations = ruff_violations
+    if shared_ruff_violations is None and repository_root is not None:
+        ruff_policies = [
+            policy
+            for policy in ordered_policies
+            if policy.status.value == "ACTIVE"
+            and policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
+            and policy_applies(policy, airflow_profile)
+            and ("ruff-air" in policy.enforcement.deterministic_checks or policy.id == "AIR-DET-012")
+        ]
+        if ruff_policies:
+            rules = sorted(
+                {rule for policy in ruff_policies for rule in cast(RuffAirConfig, policy.configuration).rules}
+            )
+            shared_ruff_violations = run_ruff(repository_root, rules) or []
     findings: list[Finding] = []
     evaluated: list[str] = []
     skipped: list[str] = []
-    for policy in sorted(policies, key=lambda item: item.id):
+    for policy in ordered_policies:
         if policy.status.value != "ACTIVE" or policy.enforcement.type not in (
             EnforcementType.DETERMINISTIC,
             EnforcementType.HYBRID,
@@ -605,5 +959,15 @@ def evaluate_deterministic(
             skipped.append(policy.id)
             continue
         evaluated.append(policy.id)
-        findings.extend(evaluator.evaluate(EvaluationContext(policy, models, airflow_profile)))
+        findings.extend(
+            evaluator.evaluate(
+                EvaluationContext(
+                    policy,
+                    models,
+                    airflow_profile,
+                    repository_root,
+                    shared_ruff_violations,
+                )
+            )
+        )
     return findings, evaluated, skipped

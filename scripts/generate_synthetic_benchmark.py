@@ -22,6 +22,16 @@ MUTATION_RECIPES = {
     "module-scope-network-call-v1": "Add a module-scope outbound HTTP call.",
     "forbidden-operator-v1": "Replace the allowed operator with a forbidden operator.",
 }
+SYNTHETIC_POLICY_IDS = frozenset(
+    {
+        "AIR-DET-001",
+        "AIR-DET-002",
+        "AIR-DET-003",
+        "AIR-DET-004",
+        "AIR-DET-005",
+        "AIR-DET-006",
+    }
+)
 
 
 def _dag(name: str, *, owner: str | None = "platform", tags: bool = True) -> str:
@@ -67,7 +77,7 @@ def _fixture(policy_id: str, index: int, violation: bool) -> tuple[str, str | No
 
 def main() -> None:
     pack = load_policy_pack(ROOT / "policies" / "pack.yaml", ROOT)
-    deterministic = [policy for policy in pack.policies if policy.id.startswith("AIR-DET-")]
+    deterministic = [policy for policy in pack.policies if policy.id in SYNTHETIC_POLICY_IDS]
     OUTPUT.mkdir(parents=True, exist_ok=True)
     cases: list[dict[str, object]] = []
     public_raw = YAML(typ="safe").load(PUBLIC_SOURCES.read_text(encoding="utf-8"))
