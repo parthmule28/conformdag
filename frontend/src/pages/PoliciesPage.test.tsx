@@ -379,6 +379,9 @@ describe("PoliciesPage", () => {
   it("sends an explicit empty tag list when tags are cleared", async () => {
     await renderAndSelectCore();
 
+    // An earlier test installs a persistent 422 rejection; make the save in
+    // this test succeed explicitly instead of inheriting it.
+    updatePolicyMock.mockResolvedValue({ status: "ok", policy_id: "OWN-001" });
     fireEvent.click(screen.getByRole("button", { name: "Edit policy OWN-001" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Tags"), { target: { value: "" } });

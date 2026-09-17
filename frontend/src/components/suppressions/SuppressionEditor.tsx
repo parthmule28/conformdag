@@ -20,9 +20,15 @@ function isoToLocalInput(iso: string): string {
   return parsed.toISOString().slice(0, 16);
 }
 
-/** datetime-local control value converted back to the ISO-8601 wire format. */
+/**
+ * datetime-local control value converted back to the ISO-8601 wire format.
+ * The control renders UTC wall time (see `isoToLocalInput`), so the
+ * timezone-less value is re-read as UTC; parsing it as local time would
+ * silently shift the stored instant by the viewer's offset.
+ */
 function localInputToIso(value: string): string | null {
-  const parsed = new Date(value);
+  const withSeconds = value.length === 16 ? `${value}:00` : value;
+  const parsed = new Date(`${withSeconds}Z`);
   if (Number.isNaN(parsed.getTime())) {
     return null;
   }

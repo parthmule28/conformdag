@@ -179,7 +179,9 @@ describe("SuppressionsPage", () => {
         fingerprint: "fp-new-9",
         reason: "migration in progress",
         owner: "data-platform",
-        expires_at: new Date("2030-06-01T12:00").toISOString(),
+        // The datetime-local value is UTC wall time, so the wire instant is
+        // exact and never shifted by the viewer's timezone.
+        expires_at: "2030-06-01T12:00:00.000Z",
       }),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -241,10 +243,36 @@ describe("SuppressionsPage", () => {
       expect(updateSuppressionMock).toHaveBeenCalledWith("sup-1", {
         reason: "updated reason",
         owner: "data-platform",
-        expires_at: new Date("2030-01-01T00:00").toISOString(),
+        // The stored instant must survive the control round-trip untouched.
+        expires_at: "2030-01-01T00:00:00.000Z",
       }),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("preserves the stored expiry instant when only an unrelated field changes", async () => {
+    populatedList();
+    updateSuppressionMock.mockResolvedValue(ACTIVE);
+    renderSuppressions();
+
+    await screen.findByRole("button", { name: "Edit suppression sup-1" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit suppression sup-1" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Reason"), {
+      target: { value: "only the reason changed" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save suppression" }));
+
+    await waitFor(() => expect(updateSuppressionMock).toHaveBeenCalledTimes(1));
+    const call = updateSuppressionMock.mock.calls[0];
+    expect(call?.[0]).toBe("sup-1");
+    // Editing the reason must not reactivate or prematurely expire the waiver:
+    // the expiry instant on the wire equals the stored one exactly.
+    expect(call?.[1]).toEqual({
+      reason: "only the reason changed",
+      owner: "data-platform",
+      expires_at: "2030-01-01T00:00:00.000Z",
+    });
   });
 
   it("explains that an expired suppression does not waive a current finding", async () => {
