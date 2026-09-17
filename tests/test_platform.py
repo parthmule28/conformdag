@@ -21,18 +21,26 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from ruamel.yaml import YAML
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 import conformdag.platform.packs as packs_module
+from conformdag.analysis import ParseCache
 from conformdag.evaluator import CHECK_EVALUATORS
 from conformdag.models import (
     AirflowProfile,
     EnforcementConfig,
     EnforcementType,
+    Finding,
+    FindingLocation,
+    FindingStatus,
     Ownership,
     PolicyPack,
     PolicySource,
+    RemediationAction,
+    RemediationPayload,
+    RemediationTarget,
     RunMetadata,
     ScanReport,
     Severity,
@@ -774,6 +782,32 @@ def test_scan_history_endpoint_paginates(client: TestClient, tmp_path: Path) -> 
     assert [row["scan_id"] for row in page_two] == ["scan0"]
 
 
+def test_scan_history_emits_complete_and_gate_passed(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(
+                id="scan-summarized",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="e" * 64,
+                report_json={"report_version": "2", "complete": True, "gate_result": {"passed": True}},
+            )
+        )
+        session.commit()
+
+    entry = next(
+        row
+        for row in _get(client, f"/api/v1/repos/{repository_id}/scans").json()
+        if row["scan_id"] == "scan-summarized"
+    )
+
+    assert entry["status"] == "succeeded"
+    assert entry["complete"] is True
+    assert entry["gate_passed"] is True
+
+
 def test_findings_endpoint_labels_findings_against_repository_baseline(client: TestClient, tmp_path: Path) -> None:
     repository_id = _register(client, tmp_path)
     with _platform_state(client)[0]() as session:
@@ -877,6 +911,129 @@ def test_findings_endpoint_uses_null_baseline_status_without_usable_baseline(
     findings = _get(client, "/api/v1/scans/current-scan/findings").json()
 
     assert findings[0]["baseline_status"] is None
+
+
+def test_findings_migration_adds_nullable_end_line(platform_env: str) -> None:
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        bind = session.get_bind()
+        columns = {column["name"]: column for column in sa_inspect(bind).get_columns("findings")}
+
+    assert "end_line" in columns
+    assert columns["end_line"]["nullable"] is True
+
+
+def test_finding_payload_emits_positions_fix_and_baseline_status(
+    client: TestClient, platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    repository_id = _register(client, tmp_path)
+
+    def fake_scan_repository(
+        repository_root: Path, policy_pack: Path | None = None, *, parse_cache: ParseCache | None = None
+    ) -> ScanReport:
+        return ScanReport(
+            complete=True,
+            result_fingerprint="a" * 64,
+            run=RunMetadata(
+                tool_version="test",
+                policy_pack_id="test-pack",
+                policy_pack_version="1.0.0",
+                timestamp=datetime.now(UTC),
+            ),
+            findings=[
+                Finding(
+                    policy_id="AIR-DET-001",
+                    policy_version="1.0.0",
+                    status=FindingStatus.FAIL,
+                    severity=Severity.HIGH,
+                    enforcement=EnforcementType.DETERMINISTIC,
+                    location=FindingLocation(file=Path("dags/x.py"), start_line=3, end_line=7),
+                    explanation="missing owner",
+                    remediation="set an owner",
+                    fix=RemediationPayload(
+                        fix_kind="set-kwarg",
+                        action=RemediationAction.SET_KWARG,
+                        kwarg="owner",
+                        target=RemediationTarget(line=3),
+                        value="data-platform",
+                    ),
+                    fingerprint="c" * 64,
+                )
+            ],
+        )
+
+    monkeypatch.setattr("conformdag.platform.runner.scan_repository", fake_scan_repository)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="scan-positions", repository_id=repository_id, status="running"))
+        session.add(
+            ScanRow(
+                id="baseline-scan",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="b" * 64,
+            )
+        )
+        session.add(
+            FindingRow(
+                scan_id="baseline-scan",
+                repository_id=repository_id,
+                policy_id="AIR-DET-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/old.py",
+                start_line=1,
+                fingerprint="b" * 64,
+            )
+        )
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.baseline_scan_id = "baseline-scan"
+        session.commit()
+
+    assert execute_scan("scan-positions", platform_env) == 0
+
+    finding = _get(client, "/api/v1/scans/scan-positions/findings").json()[0]
+
+    assert finding["start_line"] == 3
+    assert finding["end_line"] == 7
+    assert finding["fix"] == {
+        "fix_kind": "set-kwarg",
+        "action": "set-kwarg",
+        "kwarg": "owner",
+        "target": {"line": 3, "column": 0, "enclosing": None, "node": "statement"},
+        "value": "data-platform",
+        "hint": None,
+    }
+    assert finding["baseline_status"] == "new"
+
+
+def test_finding_payload_keeps_legacy_rows_readable_without_end_line(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="scan-legacy", repository_id=repository_id, status="succeeded"))
+        session.add(
+            FindingRow(
+                scan_id="scan-legacy",
+                repository_id=repository_id,
+                policy_id="AIR-DET-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/legacy.py",
+                start_line=9,
+                fingerprint="d" * 64,
+            )
+        )
+        session.commit()
+
+    finding = _get(client, "/api/v1/scans/scan-legacy/findings").json()[0]
+
+    assert finding["start_line"] == 9
+    assert finding["end_line"] is None
 
 
 def test_export_json_is_byte_compatible_with_stored_report(client: TestClient, tmp_path: Path) -> None:

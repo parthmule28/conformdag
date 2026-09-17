@@ -92,6 +92,7 @@ class FindingRow(Base):
     severity: Mapped[str] = mapped_column(String(16))
     file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     start_line: Mapped[int | None] = mapped_column(nullable=True)
+    end_line: Mapped[int | None] = mapped_column(nullable=True)
     fingerprint: Mapped[str] = mapped_column(String(64))
     explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     remediation: Mapped[str | None] = mapped_column(Text, nullable=True)

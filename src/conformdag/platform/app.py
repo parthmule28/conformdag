@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import PlainTextResponse
 
 from conformdag.models import ScanReport
+from conformdag.platform.contracts import FindingResponse, ScanSummaryResponse
 from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
@@ -283,7 +284,7 @@ def scan_history(
     repository_id: str,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[dict[str, object]]:
+) -> list[ScanSummaryResponse]:
     """Return the scan history of one repository, newest first."""
     factory = _factory(request)
     with factory() as session:
@@ -294,16 +295,21 @@ def scan_history(
             .limit(limit)
             .offset(offset)
         ).all()
-        return [
-            {
-                "scan_id": row.id,
-                "status": row.status,
-                "created_at": row.created_at,
-                "finished_at": row.finished_at,
-                "result_fingerprint": row.result_fingerprint,
-            }
-            for row in rows
-        ]
+        summaries: list[ScanSummaryResponse] = []
+        for row in rows:
+            gate_result = cast("dict[str, object]", row.report_json.get("gate_result") or {}) if row.report_json else {}
+            summaries.append(
+                ScanSummaryResponse(
+                    scan_id=row.id,
+                    status=row.status,
+                    created_at=row.created_at,
+                    finished_at=row.finished_at,
+                    result_fingerprint=row.result_fingerprint,
+                    complete=row.complete,
+                    gate_passed=cast("bool | None", gate_result.get("passed")),
+                )
+            )
+        return summaries
 
 
 def set_baseline(request: Request, repository_id: str, payload: BaselineSetRequest) -> dict[str, str]:
@@ -337,7 +343,7 @@ def scan_findings(
     status: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[dict[str, object]]:
+) -> list[FindingResponse]:
     """List normalized findings and optional baseline labels for one scan.
 
     ``baseline_status`` is ``"existing"`` or ``"new"`` when the repository
@@ -594,24 +600,25 @@ def _load_report(session_factory: sessionmaker[Session], scan_id: str) -> ScanRe
         return ScanReport.model_validate(scan.report_json)
 
 
-def _finding_payload(row: FindingRow, baseline_fingerprints: set[str] | None = None) -> dict[str, object]:
+def _finding_payload(row: FindingRow, baseline_fingerprints: set[str] | None = None) -> FindingResponse:
     baseline_status: str | None = None
     if baseline_fingerprints is not None:
         baseline_status = "existing" if row.fingerprint in baseline_fingerprints else "new"
-    return {
-        "policy_id": row.policy_id,
-        "policy_version": row.policy_version,
-        "status": row.status,
-        "severity": row.severity,
-        "file_path": row.file_path,
-        "start_line": row.start_line,
-        "fingerprint": row.fingerprint,
-        "explanation": row.explanation,
-        "remediation": row.remediation,
-        "fix": row.fix_json,
-        "suppressed": row.suppressed,
-        "baseline_status": baseline_status,
-    }
+    return FindingResponse(
+        policy_id=row.policy_id,
+        policy_version=row.policy_version,
+        status=row.status,
+        severity=row.severity,
+        file_path=row.file_path,
+        start_line=row.start_line,
+        end_line=row.end_line,
+        fingerprint=row.fingerprint,
+        explanation=row.explanation,
+        remediation=row.remediation,
+        fix=row.fix_json,
+        suppressed=row.suppressed,
+        baseline_status=baseline_status,
+    )
 
 
 def _suppression_payload(row: SuppressionRow) -> dict[str, object]:

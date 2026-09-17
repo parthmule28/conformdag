@@ -62,6 +62,7 @@ def _ingest(session: Session, scan: ScanRow, report: ScanReport) -> None:
                 severity=finding.severity.value,
                 file_path=finding.location.file.as_posix() if finding.location.file else None,
                 start_line=finding.location.start_line,
+                end_line=finding.location.end_line,
                 fingerprint=finding.fingerprint,
                 explanation=finding.explanation,
                 remediation=finding.remediation,
