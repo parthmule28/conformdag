@@ -11,17 +11,34 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   ApiError,
   cancelScan,
+  createSuppression,
+  deleteGate,
   findings,
   getOverview,
   getRepositoryTrends,
   getScanReport,
   getScanStatus,
+  listPackGates,
+  listPackPolicies,
+  listPacks,
   listRepositories,
+  listSuppressions,
   scanHistory,
   setBaseline,
   triggerScan,
+  updatePolicy,
+  updateSuppression,
+  upsertGate,
+  validatePack,
 } from "../api";
-import type { FindingParams } from "../api";
+import type {
+  FindingParams,
+  GateUpsertRequest,
+  PolicyUpsertRequest,
+  Suppression,
+  SuppressionInput,
+  SuppressionUpdateInput,
+} from "../api";
 import type { Status } from "../components/ui";
 
 export const OVERVIEW_DAYS = 30;
@@ -135,6 +152,10 @@ export const queryKeys = {
   scanReport: (scanId: string) => ["scans", scanId, "report"] as const,
   scanFindings: (scanId: string, params: FindingParams) =>
     ["scans", scanId, "findings", params] as const,
+  packs: () => ["packs"] as const,
+  packPolicies: (packName: string) => ["packs", packName, "policies"] as const,
+  packGates: (packName: string) => ["packs", packName, "gates"] as const,
+  suppressions: () => ["suppressions"] as const,
 };
 
 /**
@@ -285,5 +306,139 @@ export function useSetBaselineMutation() {
   return useMutation({
     mutationFn: ({ repositoryId, scanId }: SetBaselineInput) => setBaseline(repositoryId, scanId),
     onSuccess: () => invalidate(),
+  });
+}
+
+const PACKS_ROOT = ["packs"] as const;
+const SUPPRESSIONS_ROOT = ["suppressions"] as const;
+
+export function usePacksQuery() {
+  return useQuery({
+    queryKey: queryKeys.packs(),
+    queryFn: () => listPacks(),
+  });
+}
+
+export function usePackPoliciesQuery(packName: string) {
+  return useQuery({
+    queryKey: queryKeys.packPolicies(packName),
+    queryFn: () => listPackPolicies(packName),
+    enabled: packName !== "",
+  });
+}
+
+export function usePackGatesQuery(packName: string) {
+  return useQuery({
+    queryKey: queryKeys.packGates(packName),
+    queryFn: () => listPackGates(packName),
+    enabled: packName !== "",
+  });
+}
+
+export function useSuppressionsQuery() {
+  return useQuery({
+    queryKey: queryKeys.suppressions(),
+    queryFn: () => listSuppressions(),
+  });
+}
+
+/**
+ * A suppression waives findings only while its expiry is in the future. An
+ * unparsable expiry is treated as expired (fail closed) so the UI never
+ * presents an unknown record as a current waiver; the server re-checks expiry
+ * at scan time.
+ */
+export function isSuppressionExpired(
+  suppression: Pick<Suppression, "expires_at">,
+  now: Date = new Date(),
+): boolean {
+  const expires = new Date(suppression.expires_at);
+  return Number.isNaN(expires.getTime()) || expires.getTime() <= now.getTime();
+}
+
+export interface UpdatePolicyInput {
+  packName: string;
+  policyId: string;
+  payload: PolicyUpsertRequest;
+}
+
+export function useUpdatePolicyMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ packName, policyId, payload }: UpdatePolicyInput) =>
+      updatePolicy(packName, policyId, payload),
+    onSuccess: () => {
+      // The packs root covers the pack summary list plus every pack's policy
+      // and gate keys (prefix match), refreshing both in a single pass.
+      void queryClient.invalidateQueries({ queryKey: PACKS_ROOT });
+    },
+  });
+}
+
+export interface UpsertGateInput {
+  packName: string;
+  gateId: string;
+  payload: GateUpsertRequest;
+}
+
+export function useUpsertGateMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ packName, gateId, payload }: UpsertGateInput) =>
+      upsertGate(packName, gateId, payload),
+    onSuccess: () => {
+      // Gates, pack policies, and pack summaries live under the packs root;
+      // recorded scan results are refreshed so stale verdicts are re-read.
+      void queryClient.invalidateQueries({ queryKey: PACKS_ROOT });
+      void queryClient.invalidateQueries({ queryKey: SCANS_ROOT });
+    },
+  });
+}
+
+export interface DeleteGateInput {
+  packName: string;
+  gateId: string;
+}
+
+export function useDeleteGateMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ packName, gateId }: DeleteGateInput) => deleteGate(packName, gateId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PACKS_ROOT });
+      void queryClient.invalidateQueries({ queryKey: SCANS_ROOT });
+    },
+  });
+}
+
+export function useValidatePackMutation() {
+  // A read-only server check over the pack file: nothing to invalidate.
+  return useMutation({
+    mutationFn: (packName: string) => validatePack(packName),
+  });
+}
+
+export function useCreateSuppressionMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: SuppressionInput) => createSuppression(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: SUPPRESSIONS_ROOT });
+    },
+  });
+}
+
+export interface UpdateSuppressionInput {
+  id: string;
+  payload: SuppressionUpdateInput;
+}
+
+export function useUpdateSuppressionMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: UpdateSuppressionInput) => updateSuppression(id, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: SUPPRESSIONS_ROOT });
+    },
   });
 }
