@@ -254,7 +254,7 @@ def test_pipeline_without_pr_client_applies_locally(build_repository: Callable[[
 
     assert outcome.changed
     assert outcome.pull_request_url is None
-    assert 'owner="analytics"' in (root / "dags/violations.py").read_text(encoding="utf-8")
+    assert "owner='analytics'" in (root / "dags/violations.py").read_text(encoding="utf-8")
 
 
 def test_pr_body_carries_evidence(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:

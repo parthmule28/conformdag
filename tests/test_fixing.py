@@ -140,7 +140,7 @@ def test_dry_run_writes_nothing_and_prints_verified_diff(
     assert patch.path == "dags/violations.py"
     assert "-        retries=9," in patch.diff
     assert "+        retries=5," in patch.diff
-    assert 'owner="analytics"' in patch.updated
+    assert "owner='analytics'" in patch.updated
     assert "timedelta(seconds=86400)" in patch.updated
     assert "tags=['domain:analytics', 'owner']" in patch.updated
     assert outcome.clean
@@ -160,7 +160,7 @@ def test_apply_writes_verified_patches_and_rescan_is_clean(
 
     assert outcome.applied_files == ["dags/violations.py"]
     updated = (root / "dags/violations.py").read_text(encoding="utf-8")
-    assert 'owner="analytics"' in updated
+    assert "owner='analytics'" in updated
     assert "retries=5" in updated
     report = scan_repository(root, root / "policies/pack.yaml")
     failing = {finding.policy_id for finding in report.findings if finding.status.value == "FAIL"}
@@ -283,7 +283,7 @@ def test_cli_fix_dry_run_keeps_sources_intact(build_repository: Callable[[Path],
     assert result.exit_code == 0
     assert "fix dry-run: 1 verified patch(es)" in result.stderr
     assert "--- a/dags/violations.py" in result.stdout
-    assert 'owner="analytics"' in result.stdout
+    assert "owner='analytics'" in result.stdout
 
 
 def test_cli_fix_apply_writes_and_exits_zero_when_clean(
@@ -305,7 +305,7 @@ def test_cli_fix_apply_writes_and_exits_zero_when_clean(
 
     assert result.exit_code == 0
     assert "applied: dags/violations.py" in result.stderr
-    assert 'owner="analytics"' in (root / "dags/violations.py").read_text(encoding="utf-8")
+    assert "owner='analytics'" in (root / "dags/violations.py").read_text(encoding="utf-8")
 
 
 def _policy(config: PolicyConfiguration, check: str, policy_id: str = "AIR-TST-001") -> Policy:
@@ -470,6 +470,24 @@ def test_owner_codemod_returns_none_without_dag_call() -> None:
 
     assert fix_owner("x = 1\n", payload) is None
     assert fix_owner("x = 1\n", payload.model_copy(update={"value": None})) is None
+
+
+def test_owner_codemod_uses_repr_for_generated_literals() -> None:
+    payload = RemediationPayload(
+        fix_kind="required-owner",
+        action=RemediationAction.ADD_OWNER,
+        kwarg="owner",
+        value='bad"owner',
+        target=RemediationTarget(line=2, column=0, enclosing="dag", node="dag-call"),
+    )
+    source = "from airflow import DAG\ndag = DAG(dag_id='x')\n"
+
+    spans = fix_owner(source, payload)
+
+    assert spans is not None
+    updated = apply_spans(source, spans)
+    assert "owner='bad\"owner'" in updated
+    ast.parse(updated)
 
 
 def test_tags_codemod_extends_existing_list_and_rejects_non_list() -> None:
@@ -683,6 +701,182 @@ def test_patch_candidates_deduplicates_identical_spans(
 
     assert not residuals
     assert candidates["dags/a.py"].count("owner='platform'") == 1
+
+
+def test_patch_candidates_merges_distinct_insertions_at_same_offset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from conformdag.fixing import engine as engine_module
+
+    original = {"dags/a.py": "from airflow import DAG\ndag = DAG()\n"}
+    finding = Finding(
+        policy_id="AIR-TST-001",
+        policy_version="1.0.0",
+        status=FindingStatus.FAIL,
+        severity=Severity.HIGH,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(file=Path("dags/a.py"), start_line=2),
+        fingerprint="f" * 64,
+        fix=RemediationPayload(
+            fix_kind="x",
+            action=RemediationAction.ADD_OWNER,
+            target=RemediationTarget(line=2, column=0, enclosing="dag", node="dag-call"),
+            value="platform",
+        ),
+    )
+
+    def generate_colliding_spans(_source: str, _payload: RemediationPayload) -> tuple[list[EditSpan], bool]:
+        return [
+            EditSpan(2, 10, 2, 10, ", owner='platform'"),
+            EditSpan(2, 10, 2, 10, ", tags=['domain:data']"),
+        ], False
+
+    monkeypatch.setattr(engine_module, "generate_spans", generate_colliding_spans)
+
+    def import_span(_source: str) -> EditSpan:
+        return EditSpan(1, 0, 1, 0, "")
+
+    monkeypatch.setattr(engine_module, "timedelta_import_span", import_span)
+
+    patch_candidates = cast(
+        "Callable[[dict[str, str], dict[str, str], dict[str, list[Finding]], int], tuple[dict[str, str], list[ResidualFailure]]]",
+        engine_module.__dict__["_patch_candidates"],
+    )
+    candidates, residuals = patch_candidates(original, {}, {"dags/a.py": [finding]}, 1)
+
+    assert not residuals
+    assert candidates == {"dags/a.py": "from airflow import DAG\ndag = DAG(, owner='platform', tags=['domain:data'])\n"}
+
+
+def test_patch_candidates_converts_equal_coordinate_replacements_into_residuals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from conformdag.fixing import engine as engine_module
+
+    original = {"dags/a.py": "line one\nline two\n"}
+    finding = Finding(
+        policy_id="AIR-TST-001",
+        policy_version="1.0.0",
+        status=FindingStatus.FAIL,
+        severity=Severity.HIGH,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(file=Path("dags/a.py"), start_line=1),
+        fingerprint="f" * 64,
+        fix=RemediationPayload(
+            fix_kind="x",
+            action=RemediationAction.SET_KWARG,
+            target=RemediationTarget(line=1, column=0, node="dag-call"),
+            value="False",
+        ),
+    )
+
+    def generate_equal_range_spans(_source: str, _payload: RemediationPayload) -> tuple[list[EditSpan], bool]:
+        return [
+            EditSpan(1, 0, 1, 8, "replaced-a"),
+            EditSpan(1, 0, 1, 8, "replaced-b"),
+        ], False
+
+    monkeypatch.setattr(engine_module, "generate_spans", generate_equal_range_spans)
+
+    def import_span(_source: str) -> EditSpan:
+        return EditSpan(1, 0, 1, 0, "")
+
+    monkeypatch.setattr(engine_module, "timedelta_import_span", import_span)
+
+    patch_candidates = cast(
+        "Callable[[dict[str, str], dict[str, str], dict[str, list[Finding]], int], tuple[dict[str, str], list[ResidualFailure]]]",
+        engine_module.__dict__["_patch_candidates"],
+    )
+    candidates, residuals = patch_candidates(original, {}, {"dags/a.py": [finding]}, 1)
+
+    assert candidates == {}
+    assert len(residuals) == 1
+    assert "conflicting edit spans" in residuals[0].reason
+
+
+def test_apply_spans_rejects_distinct_zero_width_insertions_at_same_offset() -> None:
+    spans = [EditSpan(1, 3, 1, 3, ', owner="a"'), EditSpan(1, 3, 1, 3, ', owner="b"')]
+    with pytest.raises(ValueError, match="conflicting edit spans"):
+        apply_spans("DAG()\n", spans)
+
+
+def test_apply_spans_rejects_distinct_replacements_sharing_a_range() -> None:
+    spans = [EditSpan(1, 0, 1, 5, "ALPHA"), EditSpan(1, 0, 1, 5, "OMEGA")]
+    with pytest.raises(ValueError, match="conflicting edit spans"):
+        apply_spans("alpha\n", spans)
+
+
+def test_apply_spans_deduplicates_identical_spans() -> None:
+    span = EditSpan(1, 3, 1, 3, ", owner='a'")
+
+    assert apply_spans("DAG()\n", [span, span]) == "DAG, owner='a'()\n"
+
+
+def test_incomplete_verification_never_applies(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from conformdag.fixing import engine as engine_module
+
+    root = build_repository(tmp_path)
+    before = (root / "dags/violations.py").read_text(encoding="utf-8")
+
+    def generate_malformed(_source: str, _payload: RemediationPayload) -> tuple[list[EditSpan], bool]:
+        return [EditSpan(2, 0, 3, 0, "def broken(:\n")], False
+
+    monkeypatch.setattr(engine_module, "generate_spans", generate_malformed)
+
+    outcome = run_fix(root, root / "policies/pack.yaml", apply=True)
+
+    assert outcome.applied_files == []
+    assert outcome.residuals
+    assert outcome.verification_report is not None
+    assert outcome.verification_report.complete is False
+    fatal_messages = {issue.message for issue in outcome.verification_report.issues if issue.fatal}
+    assert all(residual.reason in fatal_messages for residual in outcome.residuals)
+    assert all(residual.iterations == 1 for residual in outcome.residuals)
+    after = (root / "dags/violations.py").read_text(encoding="utf-8")
+    assert after == before
+    ast.parse(after)
+
+
+def test_apply_verified_refuses_unparsable_content(tmp_path: Path) -> None:
+    from conformdag.fixing import engine as engine_module
+
+    apply_verified = cast(
+        "Callable[[Path, dict[str, str]], list[str]]",
+        engine_module.__dict__["_apply_verified"],
+    )
+
+    with pytest.raises(ValueError, match="unparsable"):
+        apply_verified(tmp_path, {"dags/bad.py": "def broken(:\n"})
+
+    assert list(tmp_path.rglob("*")) == []
+
+
+def test_apply_quotes_generated_owner_literals_safely(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+) -> None:
+    root = build_repository(tmp_path)
+    pack_path = root / "policies/pack.yaml"
+    pack_text = pack_path.read_text(encoding="utf-8")
+    pack_path.write_text(
+        pack_text.replace(
+            "allowed_values: [platform, data-engineering, analytics]",
+            "allowed_values: ['bad\"owner']",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    outcome = run_fix(root, pack_path, apply=True)
+
+    assert outcome.applied_files == ["dags/violations.py"]
+    updated = (root / "dags/violations.py").read_text(encoding="utf-8")
+    assert "owner='bad\"owner'" in updated
+    ast.parse(updated)
 
 
 def test_cli_fix_apply_reports_residual_with_exit_one(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import io
 import tempfile
 from dataclasses import dataclass, field
@@ -222,16 +223,12 @@ def _patch_candidates(
             needs_import = needs_import or import_needed
         if not spans:
             continue
-        unique_spans: list[EditSpan] = []
-        for span in spans:
-            if span not in unique_spans:
-                unique_spans.append(span)
         if needs_import:
             import_span = timedelta_import_span(source)
-            if import_span not in unique_spans:
-                unique_spans.append(import_span)
+            if import_span not in spans:
+                spans.append(import_span)
         try:
-            candidates[relative] = apply_spans(source, unique_spans)
+            candidates[relative] = apply_spans(source, _merge_spans(spans))
         except ValueError as exc:
             residuals.append(
                 ResidualFailure(
@@ -239,7 +236,7 @@ def _patch_candidates(
                     path=relative,
                     fix_kind=",".join(sorted({finding.fix.fix_kind for finding in findings if finding.fix})),
                     iterations=iteration,
-                    reason=f"overlapping edit spans: {exc}",
+                    reason=str(exc),
                 )
             )
     return candidates, residuals
@@ -270,6 +267,9 @@ def _verify_patches(
             break
         patched.update(candidates)
         latest = _scan_patched_copy(config, pack_path, original, patched)
+        if latest.complete is not True:
+            residuals.extend(_incomplete_verification_residuals(open_targets, set(candidates), latest, iteration))
+            break
         clean_files = {relative for relative in candidates if relative not in _autofix_targets_by_file(latest)}
         verified.update((relative, patched[relative]) for relative in clean_files)
         if not set(candidates) - set(verified):
@@ -300,6 +300,78 @@ def _record_unverified_residuals(
                     iterations=max_iterations,
                 )
             )
+
+
+def _merge_spans(spans: list[EditSpan]) -> list[EditSpan]:
+    """Deduplicate identical spans and merge zero-width insertions at a shared offset.
+
+    Distinct insertions at one coordinate are concatenated in sorted order,
+    which is byte-identical to sequential reversed-order application, while
+    every other distinct span stays subject to ``apply_spans`` conflict checks.
+
+    Args:
+        spans: Edit spans generated for one file.
+
+    Returns:
+        Deduplicated spans with shared-offset insertions merged.
+    """
+    merged: list[EditSpan] = []
+    for span in sorted(spans):
+        if merged:
+            previous = merged[-1]
+            same_coordinates = (
+                previous.start_line,
+                previous.start_col,
+                previous.end_line,
+                previous.end_col,
+            ) == (span.start_line, span.start_col, span.end_line, span.end_col)
+            zero_width = previous.start_line == previous.end_line and previous.start_col == previous.end_col
+            if same_coordinates and zero_width:
+                if span.replacement != previous.replacement:
+                    merged[-1] = EditSpan(
+                        previous.start_line,
+                        previous.start_col,
+                        previous.end_line,
+                        previous.end_col,
+                        previous.replacement + span.replacement,
+                    )
+                continue
+        merged.append(span)
+    return merged
+
+
+def _incomplete_verification_residuals(
+    open_targets: dict[str, list[Finding]],
+    candidate_files: set[str],
+    report: ScanReport,
+    iteration: int,
+) -> list[ResidualFailure]:
+    """Convert every candidate finding into a residual when the verification scan is incomplete."""
+    reason = _incomplete_reason(report)
+    residuals: list[ResidualFailure] = []
+    for relative, findings in sorted(open_targets.items()):
+        if relative not in candidate_files:
+            continue
+        for finding in findings:
+            payload = finding.fix
+            residuals.append(
+                ResidualFailure(
+                    policy_id=finding.policy_id,
+                    path=relative,
+                    fix_kind=payload.fix_kind if payload else "unknown",
+                    iterations=iteration,
+                    reason=reason,
+                )
+            )
+    return residuals
+
+
+def _incomplete_reason(report: ScanReport) -> str:
+    """Return the first fatal issue message from an incomplete verification scan."""
+    for issue in report.issues:
+        if issue.fatal:
+            return issue.message
+    return "scan of the patched copy is incomplete"  # pragma: no cover - scan marks fatal issues
 
 
 def _dedup_residuals(
@@ -399,7 +471,7 @@ def _record_proposed_moves(outcome: FixOutcome, contents: dict[str, str]) -> Non
             )
             continue
         spans, _ = result
-        updated = apply_spans(contents[relative], spans)
+        updated = apply_spans(contents[relative], _merge_spans(spans))
         outcome.proposed_moves.append(
             ProposedMove(
                 path=relative,
@@ -428,6 +500,24 @@ def _finalize_patches(
 
 
 def _apply_verified(root: Path, verified: dict[str, str]) -> list[str]:
+    """Write verified contents after parsing each one as a final safety assertion.
+
+    Args:
+        root: Repository root to write into.
+        verified: Verified per-file contents.
+
+    Returns:
+        The sorted repository-relative paths that were written.
+
+    Raises:
+        ValueError: If any verified content is not parsable Python; in that
+            case nothing is written.
+    """
+    for relative, content in sorted(verified.items()):
+        try:
+            ast.parse(content)
+        except SyntaxError as exc:
+            raise ValueError(f"refusing to apply unparsable verified content for {relative}: {exc}") from exc
     for relative, content in verified.items():
         (root / relative).write_text(content, encoding="utf-8")
     return sorted(verified)

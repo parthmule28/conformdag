@@ -166,7 +166,7 @@ def _fix_task_kwarg(
 def fix_owner(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
     if payload.value is None:
         return None
-    return _fix_dag_kwarg(source, payload, "owner", f'"{payload.value}"', tree)
+    return _fix_dag_kwarg(source, payload, "owner", repr(payload.value), tree)
 
 
 def fix_tags(source: str, payload: RemediationPayload, tree: ast.Module | None = None) -> list[EditSpan] | None:
