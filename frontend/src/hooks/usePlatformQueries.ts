@@ -11,18 +11,23 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   ApiError,
   cancelScan,
+  findings,
   getOverview,
   getRepositoryTrends,
+  getScanReport,
+  getScanStatus,
   listRepositories,
   scanHistory,
   setBaseline,
   triggerScan,
 } from "../api";
+import type { FindingParams } from "../api";
 import type { Status } from "../components/ui";
 
 export const OVERVIEW_DAYS = 30;
 export const HISTORY_PAGE_SIZE = 10;
 export const ACTIVE_POLL_INTERVAL_MS = 5000;
+export const FINDINGS_PAGE_SIZE = 25;
 
 const ACTIVE_SCAN_STATUSES = new Set(["queued", "running"]);
 
@@ -61,6 +66,23 @@ export function gateBadgeStatus(gatePassed: boolean | null): Status | null {
     return "FAIL";
   }
   return null;
+}
+
+/**
+ * Finding statuses without a badge tone (e.g. NEEDS_REVIEW) return null so
+ * callers render the raw status text instead of a misleading badge.
+ */
+export function findingBadgeStatus(status: string): Status | null {
+  switch (status) {
+    case "PASS":
+      return "PASS";
+    case "FAIL":
+      return "FAIL";
+    case "ERROR":
+      return "ERROR";
+    default:
+      return null;
+  }
 }
 
 export function formatTimestamp(iso: string): string {
@@ -109,7 +131,53 @@ export const queryKeys = {
     ["repositories", repositoryId, "trends", { days }] as const,
   scanHistory: (repositoryId: string, limit: number, offset: number) =>
     ["repositories", repositoryId, "scans", { limit, offset }] as const,
+  scanStatus: (scanId: string) => ["scans", scanId, "status"] as const,
+  scanReport: (scanId: string) => ["scans", scanId, "report"] as const,
+  scanFindings: (scanId: string, params: FindingParams) =>
+    ["scans", scanId, "findings", params] as const,
 };
+
+/**
+ * Toolbar state for finding investigation. Empty strings mean "no filter";
+ * `findingsQueryParams` turns this into the exact server contract where
+ * unset filters are omitted rather than sent as empty values.
+ */
+export interface FindingsFilterState {
+  status: string;
+  severity: string;
+  policyId: string;
+  filePath: string;
+  suppressed: "" | "true" | "false";
+  baselineStatus: "" | "new" | "existing";
+}
+
+export const EMPTY_FINDINGS_FILTERS: FindingsFilterState = {
+  status: "",
+  severity: "",
+  policyId: "",
+  filePath: "",
+  suppressed: "",
+  baselineStatus: "",
+};
+
+export function findingsQueryParams(
+  filters: FindingsFilterState,
+  limit: number,
+  offset: number,
+): FindingParams {
+  const policyId = filters.policyId.trim();
+  const filePath = filters.filePath.trim();
+  return {
+    status: filters.status === "" ? undefined : filters.status,
+    severity: filters.severity === "" ? undefined : filters.severity,
+    policy_id: policyId === "" ? undefined : policyId,
+    file_path: filePath === "" ? undefined : filePath,
+    suppressed: filters.suppressed === "" ? undefined : filters.suppressed === "true",
+    baseline_status: filters.baselineStatus === "" ? undefined : filters.baselineStatus,
+    limit,
+    offset,
+  };
+}
 
 const OVERVIEW_ROOT = ["overview"] as const;
 const SCANS_ROOT = ["scans"] as const;
@@ -148,6 +216,37 @@ export function useScanHistoryQuery(repositoryId: string, limit: number, offset:
       (query.state.data?.items.some((scan) => isActiveScan(scan.status)) ?? false)
         ? ACTIVE_POLL_INTERVAL_MS
         : false,
+  });
+}
+
+export function useScanStatusQuery(scanId: string) {
+  return useQuery({
+    queryKey: queryKeys.scanStatus(scanId),
+    queryFn: () => getScanStatus(scanId),
+    enabled: scanId !== "",
+    // Polling is bounded and stops on its own once a terminal status arrives.
+    refetchInterval: (query) =>
+      isActiveScan(query.state.data?.status ?? "") ? ACTIVE_POLL_INTERVAL_MS : false,
+  });
+}
+
+export function useScanReportQuery(scanId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.scanReport(scanId),
+    queryFn: () => getScanReport(scanId),
+    // The report artifact is immutable once written, so it is fetched only
+    // after the scan reaches a terminal state and never refetched on focus.
+    enabled: scanId !== "" && enabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+export function useScanFindingsQuery(scanId: string, params: FindingParams) {
+  return useQuery({
+    queryKey: queryKeys.scanFindings(scanId, params),
+    queryFn: () => findings(scanId, params),
+    enabled: scanId !== "",
+    placeholderData: keepPreviousData,
   });
 }
 
