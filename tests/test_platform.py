@@ -808,6 +808,164 @@ def test_scan_history_emits_complete_and_gate_passed(client: TestClient, tmp_pat
     assert entry["gate_passed"] is True
 
 
+def test_scan_history_returns_total_and_deterministic_tie_order(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        same_time = datetime(2026, 3, 1, tzinfo=UTC)
+        for scan_id in ("scan-b", "scan-a", "scan-c"):
+            session.add(
+                ScanRow(
+                    id=scan_id,
+                    repository_id=repository_id,
+                    status="succeeded",
+                    created_at=same_time,
+                )
+            )
+        session.commit()
+
+    response = _get(client, f"/api/v1/repos/{repository_id}/scans?limit=2")
+
+    assert response.headers["X-Total-Count"] == "3"
+    assert [row["scan_id"] for row in response.json()] == ["scan-c", "scan-b"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "severity=high",
+        "policy_id=AIR-TST-001",
+        "file_path=dags/example.py",
+        "suppressed=true",
+        "baseline_status=new",
+    ],
+)
+def test_findings_endpoint_filters_and_paginates(client: TestClient, tmp_path: Path, query: str) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(
+                id="baseline-scan",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="b" * 64,
+            )
+        )
+        session.add(ScanRow(id="scan1", repository_id=repository_id, status="succeeded"))
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.baseline_scan_id = "baseline-scan"
+        for index, fingerprint in enumerate(("1" * 64, "2" * 64)):
+            session.add(
+                FindingRow(
+                    scan_id="scan1",
+                    repository_id=repository_id,
+                    policy_id="AIR-TST-001",
+                    policy_version="1.0.0",
+                    status="FAIL",
+                    severity="high",
+                    file_path="dags/example.py",
+                    start_line=index + 1,
+                    fingerprint=fingerprint,
+                    suppressed=True,
+                )
+            )
+        for fingerprint in ("3" * 64, "4" * 64):
+            session.add(
+                FindingRow(
+                    scan_id="baseline-scan",
+                    repository_id=repository_id,
+                    policy_id="AIR-TST-001",
+                    policy_version="1.0.0",
+                    status="FAIL",
+                    severity="high",
+                    file_path="dags/example.py",
+                    start_line=1,
+                    fingerprint=fingerprint,
+                    suppressed=True,
+                )
+            )
+            session.add(
+                FindingRow(
+                    scan_id="scan1",
+                    repository_id=repository_id,
+                    policy_id="AIR-OTHER-001",
+                    policy_version="1.0.0",
+                    status="PASS",
+                    severity="medium",
+                    file_path="dags/other.py",
+                    start_line=9,
+                    fingerprint=fingerprint,
+                    suppressed=False,
+                )
+            )
+        session.commit()
+
+    unpaginated = _get(client, f"/api/v1/scans/scan1/findings?{query}")
+    paginated = _get(client, f"/api/v1/scans/scan1/findings?{query}&limit=1&offset=1")
+
+    assert unpaginated.headers["X-Total-Count"] == "2"
+    assert [row["fingerprint"] for row in unpaginated.json()] == ["1" * 64, "2" * 64]
+    assert paginated.headers["X-Total-Count"] == "2"
+    assert [row["fingerprint"] for row in paginated.json()] == ["2" * 64]
+
+
+def test_findings_baseline_filter_returns_no_false_new_rows_without_baseline(
+    client: TestClient, tmp_path: Path
+) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="ineligible-scan", repository_id=repository_id, status="queued"))
+        session.add(ScanRow(id="scan1", repository_id=repository_id, status="succeeded"))
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.baseline_scan_id = "ineligible-scan"
+        session.add(
+            FindingRow(
+                scan_id="scan1",
+                repository_id=repository_id,
+                policy_id="AIR-TST-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/example.py",
+                start_line=1,
+                fingerprint="e" * 64,
+                suppressed=False,
+            )
+        )
+        session.commit()
+
+    for query in ("baseline_status=new", "baseline_status=existing"):
+        response = _get(client, f"/api/v1/scans/scan1/findings?{query}")
+        assert response.json() == []
+        assert response.headers["X-Total-Count"] == "0"
+
+    labeled = _get(client, "/api/v1/scans/scan1/findings")
+    assert labeled.json()[0]["baseline_status"] is None
+
+
+@pytest.mark.parametrize("bad_query", ["limit=0", "limit=501", "offset=-1"])
+def test_findings_endpoint_rejects_invalid_pagination_params(client: TestClient, bad_query: str) -> None:
+    response = _get(client, f"/api/v1/scans/scan1/findings?{bad_query}")
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("bad_query", ["limit=0", "limit=501", "offset=-1"])
+def test_scan_history_endpoint_rejects_invalid_pagination_params(client: TestClient, bad_query: str) -> None:
+    response = _get(client, f"/api/v1/repos/repo1/scans?{bad_query}")
+
+    assert response.status_code == 422
+
+
+def test_cors_exposes_total_count_header_for_configured_origins(client: TestClient) -> None:
+    response = _as_httpx(client).get("/api/v1/health", headers={"Origin": "http://localhost:5173"})
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-expose-headers") == "X-Total-Count"
+
+
 def test_findings_endpoint_labels_findings_against_repository_baseline(client: TestClient, tmp_path: Path) -> None:
     repository_id = _register(client, tmp_path)
     with _platform_state(client)[0]() as session:

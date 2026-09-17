@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, false, func, nullslast, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import PlainTextResponse
 
@@ -27,6 +27,7 @@ from conformdag.platform.db import (
     RepositoryRow,
     ScanRow,
     SuppressionRow,
+    count_scans,
     eligible_baseline,
     new_id,
     utcnow,
@@ -282,16 +283,23 @@ def scan_status(request: Request, scan_id: str) -> dict[str, object]:
 def scan_history(
     request: Request,
     repository_id: str,
+    response: Response,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ScanSummaryResponse]:
-    """Return the scan history of one repository, newest first."""
+    """Return the scan history of one repository, newest first.
+
+    Ordering is ``created_at`` descending with ``scan id`` descending as the
+    tie-breaker, so entries sharing a timestamp keep a deterministic order.
+    ``X-Total-Count`` carries the repository's unpaged scan count.
+    """
     factory = _factory(request)
     with factory() as session:
+        response.headers["X-Total-Count"] = str(count_scans(session, repository_id))
         rows = session.scalars(
             select(ScanRow)
             .where(ScanRow.repository_id == repository_id)
-            .order_by(ScanRow.created_at.desc())
+            .order_by(ScanRow.created_at.desc(), ScanRow.id.desc())
             .limit(limit)
             .offset(offset)
         ).all()
@@ -340,37 +348,71 @@ def scan_report(request: Request, scan_id: str) -> dict[str, Any]:
 def scan_findings(
     request: Request,
     scan_id: str,
-    status: str | None = None,
+    response: Response,
+    status: Annotated[str | None, Query()] = None,
+    severity: Annotated[str | None, Query()] = None,
+    policy_id: Annotated[str | None, Query()] = None,
+    file_path: Annotated[str | None, Query()] = None,
+    suppressed: Annotated[bool | None, Query()] = None,
+    baseline_status: Annotated[str | None, Query(pattern="^(existing|new)$")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[FindingResponse]:
-    """List normalized findings and optional baseline labels for one scan.
+    """List normalized findings with server-side filters and pagination.
 
     ``baseline_status`` is ``"existing"`` or ``"new"`` when the repository
     has a same-repository successful baseline scan. It is ``None`` when no
-    usable baseline is configured; that state is not treated as ``existing``.
+    usable baseline is configured; that state is not treated as ``existing``,
+    and both baseline-status filters return no rows in that case. Filters are
+    applied before counting, so ``X-Total-Count`` always carries the unpaged
+    number of matching findings, and ordering is deterministic.
     """
     factory = _factory(request)
     with factory() as session:
-        query = select(FindingRow).where(FindingRow.scan_id == scan_id)
-        if status:
-            query = query.where(FindingRow.status == status.upper())
-        rows = session.scalars(
-            query.order_by(FindingRow.policy_id, FindingRow.file_path).limit(limit).offset(offset)
-        ).all()
-        baseline_fingerprints: set[str] | None = None
         scan = session.get(ScanRow, scan_id)
-        if scan is not None:
-            repository = session.get(RepositoryRow, scan.repository_id)
-            baseline = (
-                eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
-                if repository and repository.baseline_scan_id
-                else None
+        repository = session.get(RepositoryRow, scan.repository_id) if scan is not None else None
+        baseline_fingerprints: set[str] | None = None
+        baseline = (
+            eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
+            if scan is not None and repository is not None and repository.baseline_scan_id
+            else None
+        )
+        if baseline is not None:
+            baseline_fingerprints = set(
+                session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline.id)).all()
             )
-            if baseline is not None:
-                baseline_fingerprints = set(
-                    session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline.id)).all()
-                )
+        filters: list[ColumnElement[bool]] = [FindingRow.scan_id == scan_id]
+        if status:
+            filters.append(FindingRow.status == status.upper())
+        if severity:
+            filters.append(FindingRow.severity == severity.lower())
+        if policy_id:
+            filters.append(FindingRow.policy_id == policy_id)
+        if file_path:
+            filters.append(FindingRow.file_path == file_path)
+        if suppressed is not None:
+            filters.append(FindingRow.suppressed == suppressed)
+        if baseline_status is not None:
+            if baseline_fingerprints is None:
+                filters.append(false())
+            elif baseline_status == "existing":
+                filters.append(FindingRow.fingerprint.in_(baseline_fingerprints))
+            else:
+                filters.append(FindingRow.fingerprint.not_in(baseline_fingerprints))
+        total = session.scalar(select(func.count()).select_from(FindingRow).where(*filters)) or 0
+        response.headers["X-Total-Count"] = str(total)
+        rows = session.scalars(
+            select(FindingRow)
+            .where(*filters)
+            .order_by(
+                FindingRow.policy_id,
+                nullslast(FindingRow.file_path),
+                nullslast(FindingRow.start_line),
+                FindingRow.fingerprint,
+            )
+            .limit(limit)
+            .offset(offset)
+        ).all()
         return [_finding_payload(row, baseline_fingerprints) for row in rows]
 
 
@@ -453,6 +495,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Total-Count"],
     )
     app.state.pack_service = PackService()
     configured_workspace = workspace_path if workspace_path is not None else settings.workspace
