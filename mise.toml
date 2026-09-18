@@ -12,6 +12,10 @@ node = "26.5.1"
 description = "Create the locked development environment"
 run = "uv sync --all-groups --all-extras"
 
+[tasks.demo]
+description = "Start a disposable local ConformDAG demo (Ctrl-C removes its seeded state)"
+run = "uv run python scripts/demo.py"
+
 [tasks.lint]
 description = "Run Ruff lint checks"
 run = "uv run ruff check ."

@@ -1,18 +1,21 @@
 """Platform tier tests: workspace model, HTTP API contract, and worker durability."""
 
 import hashlib
-import importlib
+import importlib.util
 import json
 import logging
 import os
 import signal
+import socket
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from shutil import copyfile
+from types import ModuleType, SimpleNamespace
 from typing import Any, NoReturn, cast
 
 import httpx
@@ -358,6 +361,104 @@ def test_demo_worker_processes_interactive_scans_after_seed(tmp_path: Path) -> N
         worker_module._shutdown_requested.clear()
 
     assert not worker.is_alive()
+
+
+def _load_demo_launcher_module() -> ModuleType:
+    """Load scripts/demo.py by path so launcher helpers are exercised as shipped."""
+    launcher_path = Path(__file__).resolve().parents[1] / "scripts" / "demo.py"
+    spec = importlib.util.spec_from_file_location("conformdag_demo_launcher", launcher_path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise ImportError(f"demo launcher not found at {launcher_path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def _free_loopback_port() -> int:
+    """Reserve an ephemeral loopback port for a launcher test, then release it."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+    finally:
+        probe.close()
+
+
+def test_demo_port_preflight_rejects_occupied_loopback_port() -> None:
+    demo = _load_demo_launcher_module()
+    blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        address = blocker.getsockname()
+        host = str(address[0])
+        port = int(address[1])
+        with pytest.raises(RuntimeError) as excinfo:
+            demo.ensure_port_available(host, port)
+    finally:
+        blocker.close()
+
+    message = str(excinfo.value)
+    assert host in message
+    assert str(port) in message
+
+
+def test_demo_url_enables_the_client_tour() -> None:
+    demo = _load_demo_launcher_module()
+    assert demo.demo_url("127.0.0.1", 8642) == "http://127.0.0.1:8642/?demo=1"
+
+
+def test_demo_launcher_no_open_runs_server_and_shuts_down_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    demo = _load_demo_launcher_module()
+    worker_module = importlib.import_module("conformdag.platform.worker")
+    worker_module._shutdown_requested.clear()
+
+    opened: list[str] = []
+
+    def _record_open(url: str) -> bool:
+        opened.append(url)
+        return True
+
+    class _FakeServer:
+        def __init__(self) -> None:
+            self.should_exit = False
+            self.run_calls = 0
+
+        def run(self) -> None:
+            self.run_calls += 1
+
+    fake_server = _FakeServer()
+    served: list[tuple[str, int]] = []
+
+    def _fake_make_server(app: FastAPI, host: str, port: int) -> _FakeServer:
+        served.append((host, port))
+        return fake_server
+
+    shutdown_calls: list[bool] = []
+    real_request_shutdown = worker_module.request_shutdown
+
+    def _recording_shutdown() -> None:
+        shutdown_calls.append(True)
+        real_request_shutdown()
+
+    port = _free_loopback_port()
+    try:
+        monkeypatch.setattr(demo, "webbrowser", SimpleNamespace(open=_record_open))
+        monkeypatch.setattr(demo, "_make_server", _fake_make_server)
+        monkeypatch.setattr(worker_module, "request_shutdown", _recording_shutdown)
+        exit_code = demo.main(["--no-open", "--port", str(port)])
+    finally:
+        worker_module._shutdown_requested.clear()
+
+    assert exit_code == 0
+    assert opened == []
+    assert served == [("127.0.0.1", port)]
+    assert fake_server.run_calls == 1
+    assert fake_server.should_exit is True
+    assert shutdown_calls == [True]
+    assert not any(thread.name == "conformdag-demo-worker" for thread in threading.enumerate())
+    assert list(Path(tempfile.gettempdir()).glob("conformdag-demo-*")) == []
 
 
 def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
