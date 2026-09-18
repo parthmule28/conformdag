@@ -16,6 +16,7 @@ reports/
 benchmark-results/
 
 # Local tools and secrets
+.worktrees/
 .codex/
 .cursor/
 .env
