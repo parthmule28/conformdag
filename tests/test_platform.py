@@ -64,7 +64,7 @@ from conformdag.platform.db import (
     stale_running_cutoff,
     utcnow,
 )
-from conformdag.platform.demo import build_demo_workspace, seed_demo_scenario, start_demo_worker
+from conformdag.platform.demo import DemoWorkspace, build_demo_workspace, seed_demo_scenario, start_demo_worker
 from conformdag.platform.worker import WorkerSettings, run_worker_once
 from conformdag.policy import load_policy_pack
 
@@ -443,6 +443,7 @@ def test_demo_launcher_no_open_runs_server_and_shuts_down_worker(monkeypatch: py
         real_request_shutdown()
 
     port = _free_loopback_port()
+    before = set(Path(tempfile.gettempdir()).glob("conformdag-demo-*"))
     try:
         monkeypatch.setattr(demo, "webbrowser", SimpleNamespace(open=_record_open))
         monkeypatch.setattr(demo, "_make_server", _fake_make_server)
@@ -458,7 +459,48 @@ def test_demo_launcher_no_open_runs_server_and_shuts_down_worker(monkeypatch: py
     assert fake_server.should_exit is True
     assert shutdown_calls == [True]
     assert not any(thread.name == "conformdag-demo-worker" for thread in threading.enumerate())
-    assert list(Path(tempfile.gettempdir()).glob("conformdag-demo-*")) == []
+    assert set(Path(tempfile.gettempdir()).glob("conformdag-demo-*")) == before
+
+
+def test_demo_launcher_signal_bridge_behaviour_by_phase() -> None:
+    demo = _load_demo_launcher_module()
+
+    class _FakeServer:
+        def __init__(self) -> None:
+            self.should_exit = False
+
+    server_holder: list[_FakeServer | None] = [None]
+    bridge = demo._stop_bridge(server_holder)
+
+    with pytest.raises(KeyboardInterrupt):
+        bridge(signal.SIGTERM, None)
+
+    server = _FakeServer()
+    server_holder[0] = server
+    bridge(signal.SIGINT, None)
+    assert server.should_exit is True
+
+
+def test_demo_launcher_survives_sigterm_during_seeding(monkeypatch: pytest.MonkeyPatch) -> None:
+    demo = _load_demo_launcher_module()
+    demo_module = importlib.import_module("conformdag.platform.demo")
+    real_workspace_builder = demo_module.build_demo_workspace
+    seed_window_entered: list[bool] = []
+
+    def _sigterm_during_seed(root: Path) -> DemoWorkspace:
+        seed_window_entered.append(True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        return real_workspace_builder(root)
+
+    monkeypatch.setattr(demo_module, "build_demo_workspace", _sigterm_during_seed)
+
+    before = set(Path(tempfile.gettempdir()).glob("conformdag-demo-*"))
+    exit_code = demo.main(["--no-open", "--port", str(_free_loopback_port())])
+
+    assert seed_window_entered == [True]
+    assert exit_code == 0
+    assert set(Path(tempfile.gettempdir()).glob("conformdag-demo-*")) == before
+    assert not any(thread.name == "conformdag-demo-worker" for thread in threading.enumerate())
 
 
 def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:

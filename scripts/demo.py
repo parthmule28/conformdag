@@ -78,17 +78,25 @@ def _make_server(app: FastAPI, host: str, port: int) -> Server:
     return uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
 
 
-def _signal_exit_forwarder(server: Server) -> SignalHandler:
-    """Build a handler that routes SIGINT/SIGTERM into Uvicorn's cooperative exit.
+def _stop_bridge(server_holder: list[Server | None]) -> SignalHandler:
+    """Build a cleanup-safe SIGINT/SIGTERM bridge covering the whole demo lifetime.
 
-    Installing this before ``server.run()`` matters: after its graceful
-    shutdown Uvicorn restores the previous handlers and re-raises the captured
-    signal. With this handler installed the re-raise is absorbed cooperatively
-    instead of killing the process with the default terminating disposition,
-    so the ``finally`` block always gets to clean the temporary state up.
+    The bridge is installed before the temporary directory or any seeded state
+    exists and stays installed until ``main`` exits. While the holder is empty
+    (parsing, preflight, seeding, app construction) a signal raises
+    ``KeyboardInterrupt`` so the exception unwinds through the
+    ``TemporaryDirectory`` context and removes the seeded state, instead of the
+    default terminating disposition killing the process mid-seed. Once the
+    Uvicorn server exists the bridge is cooperative (``should_exit``) and
+    absorbs Uvicorn's post-shutdown signal re-raise; while Uvicorn is serving,
+    its own handlers remain in charge and this bridge is only restored as the
+    previous handler at that point.
     """
 
     def handler(signum: int, frame: FrameType | None) -> object:
+        server = server_holder[0]
+        if server is None:
+            raise KeyboardInterrupt from None
         server.should_exit = True
         return None
 
@@ -99,60 +107,66 @@ def main(argv: list[str] | None = None) -> int:
     """Seed, serve, and clean up one disposable local demo instance."""
     args = _parse_args(argv)
 
+    server_holder: list[Server | None] = [None]
+    stop_bridge = _stop_bridge(server_holder)
+    installed: list[tuple[int, SignalHandler]] = []
     try:
-        ensure_port_available(args.host, args.port)
-    except RuntimeError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 2
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            installed.append((signum, signal.signal(signum, stop_bridge)))
+        try:
+            ensure_port_available(args.host, args.port)
+        except RuntimeError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
 
-    from conformdag.platform.app import PlatformSettings, create_app
-    from conformdag.platform.db import initialize_session_factory
-    from conformdag.platform.demo import build_demo_workspace, seed_demo_scenario, start_demo_worker
-    from conformdag.platform.worker import request_shutdown
+        from conformdag.platform.app import PlatformSettings, create_app
+        from conformdag.platform.db import initialize_session_factory
+        from conformdag.platform.demo import build_demo_workspace, seed_demo_scenario, start_demo_worker
+        from conformdag.platform.worker import request_shutdown
 
-    url = demo_url(args.host, args.port)
-    try:
-        with tempfile.TemporaryDirectory(prefix="conformdag-demo-") as tmp:
-            print("Seeding the disposable demo scenario through the real worker (this takes a moment)...")
-            workspace = build_demo_workspace(Path(tmp))
-            seed_demo_scenario(workspace)
-            worker = start_demo_worker(workspace)
-            settings = PlatformSettings(
-                dsn=workspace.dsn,
-                admin_token=args.token,
-                workspace=workspace.workspace_path,
-            )
-            app = create_app(
-                initialize_session_factory(workspace.dsn),
-                settings,
-                workspace_path=workspace.workspace_path,
-            )
-            server = _make_server(app, args.host, args.port)
-            print(f"ConformDAG demo dashboard: {url}")
-            print("This instance is loopback-only and disposable: every seeded row lives in a temporary directory.")
-            print(f"The admin token is for this local demo only: {args.token}")
-            print("Press Ctrl-C to stop; the seeded temporary state is removed automatically on exit.")
-            exit_forwarder = _signal_exit_forwarder(server)
-            installed: list[tuple[int, SignalHandler]] = []
-            try:
-                for signum in (signal.SIGINT, signal.SIGTERM):
-                    installed.append((signum, signal.signal(signum, exit_forwarder)))
-                if args.open_browser:
-                    webbrowser.open(url)
-                server.run()
-            except KeyboardInterrupt:  # pragma: no cover - defensive; the forwarder absorbs Ctrl-C
-                pass
-            finally:
-                server.should_exit = True
-                request_shutdown()
-                worker.join(timeout=WORKER_JOIN_TIMEOUT_SECONDS)
-                for signum, previous_handler in reversed(installed):
-                    signal.signal(signum, previous_handler)
-    except OSError as error:
-        print(f"error: the demo could not start or serve: {error}", file=sys.stderr)
-        return 1
-    except KeyboardInterrupt:
-        print("Interrupted; disposing the temporary demo state.")
+        url = demo_url(args.host, args.port)
+        try:
+            with tempfile.TemporaryDirectory(prefix="conformdag-demo-") as tmp:
+                print("Seeding the disposable demo scenario through the real worker (this takes a moment)...")
+                workspace = build_demo_workspace(Path(tmp))
+                seed_demo_scenario(workspace)
+                worker = start_demo_worker(workspace)
+                try:
+                    settings = PlatformSettings(
+                        dsn=workspace.dsn,
+                        admin_token=args.token,
+                        workspace=workspace.workspace_path,
+                    )
+                    app = create_app(
+                        initialize_session_factory(workspace.dsn),
+                        settings,
+                        workspace_path=workspace.workspace_path,
+                    )
+                    server_holder[0] = _make_server(app, args.host, args.port)
+                    print(f"ConformDAG demo dashboard: {url}")
+                    print(
+                        "This instance is loopback-only and disposable: every seeded row lives in a temporary directory."
+                    )
+                    print(f"The admin token is for this local demo only: {args.token}")
+                    print("Press Ctrl-C to stop; the seeded temporary state is removed automatically on exit.")
+                    if args.open_browser:
+                        webbrowser.open(url)
+                    server_holder[0].run()
+                finally:
+                    server = server_holder[0]
+                    if server is not None:
+                        server.should_exit = True
+                    request_shutdown()
+                    worker.join(timeout=WORKER_JOIN_TIMEOUT_SECONDS)
+        except OSError as error:
+            print(f"error: the demo could not start or serve: {error}", file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            print("Interrupted; disposing the temporary demo state.")
+            return 0
+    finally:
+        for signum, previous_handler in reversed(installed):
+            signal.signal(signum, previous_handler)
     return 0
 
 
