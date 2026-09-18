@@ -61,7 +61,7 @@ export function GateResultPanel({
   scanActive,
 }: GateResultPanelProps) {
   return (
-    <section aria-label="Gate result" className="grid gap-3">
+    <section data-tour="gate-result" aria-label="Gate result" className="grid gap-3">
       {gateResult === null ? (
         <>
           <NotEvaluatedReason

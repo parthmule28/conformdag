@@ -199,7 +199,9 @@ export default function PoliciesPage() {
                 <p>{describeApiError(gatesQuery.error)}</p>
               </Banner>
             ) : (
-              <GateEditor packName={packName} gates={gatesQuery.data ?? []} />
+              <div data-tour="policy-gate">
+                <GateEditor packName={packName} gates={gatesQuery.data ?? []} />
+              </div>
             )}
           </Card>
         </>

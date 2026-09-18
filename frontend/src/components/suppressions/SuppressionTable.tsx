@@ -38,7 +38,11 @@ export function SuppressionTable({ suppressions, onEdit }: SuppressionTableProps
         {suppressions.map((suppression) => {
           const expired = isSuppressionExpired(suppression);
           return (
-            <tr key={suppression.id} className={expired ? "opacity-60" : undefined}>
+            <tr
+              key={suppression.id}
+              className={expired ? "opacity-60" : undefined}
+              data-tour={expired ? "suppression-expired" : "suppression-active"}
+            >
               <Td>
                 <Link className="font-medium text-accent hover:underline" to="/policies">
                   {suppression.policy_id}

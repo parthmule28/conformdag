@@ -105,6 +105,7 @@ export function FindingsTable({ findings, emptyMessage, onInspect }: FindingsTab
                     variant="secondary"
                     size="sm"
                     aria-label={`Details for ${finding.policy_id}`}
+                    data-tour="finding-details"
                     onClick={() => onInspect(finding)}
                   >
                     Details

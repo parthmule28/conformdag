@@ -57,7 +57,9 @@ export default function OverviewPage() {
 
   return (
     <div className="grid gap-5">
-      <MetricStrip metrics={metrics} />
+      <div data-tour="overview-signal">
+        <MetricStrip metrics={metrics} />
+      </div>
       <Card
         title={`Trends (last ${OVERVIEW_DAYS} days)`}
         subtitle="Daily fail and error finding counts from completed scans. Dates without completed scans are omitted."

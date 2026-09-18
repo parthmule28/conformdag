@@ -22,6 +22,7 @@ export function PackList({ packs, selected, onSelect }: PackListProps) {
             <button
               type="button"
               aria-pressed={active}
+              data-tour="policy-pack"
               onClick={() => onSelect(pack.name)}
               className={cx(
                 "grid w-full gap-1 rounded-sm border px-3 py-2 text-left transition-colors",

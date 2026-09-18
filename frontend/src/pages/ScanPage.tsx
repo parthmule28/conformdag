@@ -28,7 +28,11 @@ const EXPORT_FORMATS = ["json", "sarif", "html"] as const;
 
 function ExportLink({ scanId, format }: { scanId: string; format: "json" | "sarif" | "html" }) {
   return (
-    <a className="text-accent hover:underline" href={exportUrl(scanId, format)}>
+    <a
+      className="text-accent hover:underline"
+      href={exportUrl(scanId, format)}
+      data-tour={format === "json" ? "scan-export" : undefined}
+    >
       {format.toUpperCase()}
     </a>
   );

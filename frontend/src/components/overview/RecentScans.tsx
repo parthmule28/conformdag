@@ -27,7 +27,11 @@ export function RecentScans({ scans }: { scans: OverviewScan[] }) {
           return (
             <tr key={scan.scan_id}>
               <Td>
-                <Link className="text-accent hover:underline" to={`/repos/${scan.repository_id}`}>
+                <Link
+                  className="text-accent hover:underline"
+                  to={`/repos/${scan.repository_id}`}
+                  data-tour="repository-link"
+                >
                   {scan.repository_name}
                 </Link>
               </Td>

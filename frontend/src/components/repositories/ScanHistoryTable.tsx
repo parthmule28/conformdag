@@ -45,14 +45,18 @@ export function ScanHistoryTable({
         </tr>
       </thead>
       <tbody>
-        {scans.map((scan) => {
+        {scans.map((scan, index) => {
           const gate = gateBadgeStatus(scan.gate_passed);
           const isCurrentBaseline = scan.scan_id === baselineScanId;
           const rowBusy = scan.scan_id === busyScanId;
           return (
             <tr key={scan.scan_id}>
               <Td>
-                <Link className="font-mono text-accent hover:underline" to={`/scans/${scan.scan_id}`}>
+                <Link
+                  className="font-mono text-accent hover:underline"
+                  to={`/scans/${scan.scan_id}`}
+                  data-tour={index === 0 ? "scan-link" : undefined}
+                >
                   {scan.scan_id}
                 </Link>
               </Td>

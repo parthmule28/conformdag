@@ -11,9 +11,17 @@ function DetailField({ label, children }: { label: string; children: React.React
   );
 }
 
-function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+function DetailSection({
+  title,
+  tourTarget,
+  children,
+}: {
+  title: string;
+  tourTarget?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="grid gap-1">
+    <section className="grid gap-1" data-tour={tourTarget}>
       <h3 className="text-sm font-semibold text-ink">{title}</h3>
       {children}
     </section>
@@ -123,7 +131,7 @@ export function FindingDetailPanel({
       <DetailSection title="Explanation">
         <p className="break-words">{finding.explanation ?? "No explanation was recorded."}</p>
       </DetailSection>
-      <DetailSection title="Remediation">
+      <DetailSection title="Remediation" tourTarget="finding-remediation">
         <p className="break-words">{finding.remediation ?? "No remediation was recorded."}</p>
       </DetailSection>
       {finding.fix !== null && (
