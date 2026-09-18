@@ -52,13 +52,16 @@ from conformdag.platform.db import (
     ScanRow,
     SuppressionRow,
     claim_queued_scan,
+    create_session_factory,
     initialize_session_factory,
+    new_id,
     new_suppression_id,
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
     utcnow,
 )
+from conformdag.platform.demo import build_demo_workspace, seed_demo_scenario, start_demo_worker
 from conformdag.platform.worker import WorkerSettings, run_worker_once
 from conformdag.policy import load_policy_pack
 
@@ -259,6 +262,102 @@ def _install_sleeper_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     sleeper.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8")
     sleeper.chmod(0o755)
     monkeypatch.setattr(sys, "executable", str(sleeper))
+
+
+def test_demo_seed_builds_valid_workspace_under_requested_root(tmp_path: Path) -> None:
+    workspace = build_demo_workspace(tmp_path)
+
+    assert workspace.root == tmp_path
+    assert workspace.workspace_path.is_file()
+    assert (workspace.root / "standards/dag-authoring.md").is_file()
+    assert workspace.pack_path.is_file()
+    assert workspace.workspace_path.is_relative_to(tmp_path)
+    assert workspace.pack_path.is_relative_to(tmp_path)
+
+
+def test_demo_seed_creates_baseline_and_later_gate_failure(tmp_path: Path) -> None:
+    workspace = build_demo_workspace(tmp_path)
+    scenario = seed_demo_scenario(workspace)
+    demo_factory = create_session_factory(workspace.dsn)
+
+    with demo_factory() as session:
+        repository = session.get(RepositoryRow, scenario.ids["repository"])
+        baseline = session.get(ScanRow, scenario.ids["baseline_scan"])
+        current = session.get(ScanRow, scenario.ids["current_scan"])
+
+        assert repository is not None
+        assert baseline is not None and baseline.complete is True
+        assert repository.baseline_scan_id == baseline.id
+        assert current is not None and current.complete is True
+        assert current.report_json is not None
+        gate_result = cast("dict[str, object]", current.report_json.get("gate_result"))
+        assert gate_result["passed"] is False
+        findings = session.scalars(select(FindingRow).where(FindingRow.scan_id == current.id)).all()
+        assert findings
+
+
+def test_demo_seed_suppressions_use_real_current_findings(tmp_path: Path) -> None:
+    workspace = build_demo_workspace(tmp_path)
+    scenario = seed_demo_scenario(workspace)
+    demo_factory = create_session_factory(workspace.dsn)
+
+    with demo_factory() as session:
+        active = session.get(SuppressionRow, scenario.ids["active_suppression"])
+        expired = session.get(SuppressionRow, scenario.ids["expired_suppression"])
+        assert active is not None and expired is not None
+        comparison_now = utcnow() if active.expires_at.tzinfo is not None else utcnow().replace(tzinfo=None)
+        assert active.expires_at > comparison_now
+        assert expired.expires_at < comparison_now
+        assert (active.policy_id, active.fingerprint) != (expired.policy_id, expired.fingerprint)
+
+        current_findings = session.scalars(
+            select(FindingRow).where(FindingRow.scan_id == scenario.ids["current_scan"])
+        ).all()
+        active_finding = next(
+            (
+                finding
+                for finding in current_findings
+                if finding.policy_id == active.policy_id and finding.fingerprint == active.fingerprint
+            ),
+            None,
+        )
+        assert active_finding is not None and active_finding.suppressed is True
+        assert any(finding.status == "FAIL" and not finding.suppressed for finding in current_findings)
+
+
+def test_demo_worker_processes_interactive_scans_after_seed(tmp_path: Path) -> None:
+    worker_module = importlib.import_module("conformdag.platform.worker")
+    worker_module._shutdown_requested.clear()
+    workspace = build_demo_workspace(tmp_path)
+    scenario = seed_demo_scenario(workspace)
+    demo_factory = create_session_factory(workspace.dsn)
+
+    with demo_factory() as session:
+        scan = ScanRow(id=new_id(), repository_id=scenario.ids["repository"], status="queued", trigger="dashboard")
+        session.add(scan)
+        session.commit()
+        scan_id = scan.id
+
+    worker = start_demo_worker(workspace)
+    try:
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            with demo_factory() as session:
+                row = session.get(ScanRow, scan_id)
+                assert row is not None
+                if row.status in {"succeeded", "failed", "cancelled"}:
+                    assert row.status == "succeeded"
+                    assert row.complete is True
+                    break
+            time.sleep(0.1)
+        else:
+            pytest.fail("demo worker never finished the interactive scan")
+    finally:
+        worker_module.request_shutdown()
+        worker.join(timeout=10.0)
+        worker_module._shutdown_requested.clear()
+
+    assert not worker.is_alive()
 
 
 def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
