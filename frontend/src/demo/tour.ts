@@ -108,15 +108,18 @@ export interface TourState {
   dismissed: boolean;
   /** Locations recorded when marked links were followed, keyed by marker. */
   recalled: Partial<Record<TourTarget, string>>;
+  /** Demo route (pathname + search) each step was entered on, for Back. */
+  routes: Record<number, string>;
 }
 
 export type TourAction =
-  | { type: "next" }
+  | { type: "next"; route: string }
   | { type: "back" }
   | { type: "skip" }
   | { type: "finish" }
   | { type: "restart" }
-  | { type: "record-link"; target: TourTarget; href: string };
+  | { type: "record-link"; target: TourTarget; href: string }
+  | { type: "record-route"; stepIndex: number; route: string };
 
 const DISMISSAL_KEY = "conformdag.demo-tour.dismissed";
 
@@ -134,27 +137,35 @@ export function toDemoLocation(
 }
 
 export function initialTourState(): TourState {
-  return { stepIndex: 0, dismissed: loadDismissed(), recalled: {} };
+  return { stepIndex: 0, dismissed: loadDismissed(), recalled: {}, routes: {} };
 }
 
 export function tourReducer(state: TourState, action: TourAction): TourState {
   switch (action.type) {
-    case "next":
+    case "next": {
+      const nextIndex = Math.min(state.stepIndex + 1, TOUR_STEPS.length - 1);
       return {
         ...state,
-        stepIndex: Math.min(state.stepIndex + 1, TOUR_STEPS.length - 1),
+        stepIndex: nextIndex,
+        routes: { ...state.routes, [nextIndex]: action.route },
       };
+    }
     case "back":
       return { ...state, stepIndex: Math.max(state.stepIndex - 1, 0) };
     case "skip":
     case "finish":
       return { ...state, dismissed: true };
     case "restart":
-      return { stepIndex: 0, dismissed: false, recalled: {} };
+      return { stepIndex: 0, dismissed: false, recalled: {}, routes: {} };
     case "record-link":
       return {
         ...state,
         recalled: { ...state.recalled, [action.target]: action.href },
+      };
+    case "record-route":
+      return {
+        ...state,
+        routes: { ...state.routes, [action.stepIndex]: action.route },
       };
   }
 }

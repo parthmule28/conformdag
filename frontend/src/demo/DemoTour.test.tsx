@@ -6,7 +6,7 @@
  * not involved or mocked.
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useState } from "react";
+import { act, useState } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -152,6 +152,20 @@ describe("DemoTour gating", () => {
     expect(screen.getByRole("button", { name: "Skip tour" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Restart tour" })).toBeEnabled();
   });
+
+  it("runs no polling or highlight side effects when the demo query is absent", async () => {
+    const { container } = render(<Harness initialEntries={["/"]} />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+    expect(container.querySelector(".demo-tour-target")).toBeNull();
+    const marker = container.querySelector('[data-tour="overview-signal"]');
+    expect(marker).not.toBeNull();
+    expect(marker).not.toHaveAttribute("aria-describedby");
+    expect(
+      screen.queryByRole("dialog", { name: "ConformDAG demo tour" }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("DemoTour navigation", () => {
@@ -170,6 +184,20 @@ describe("DemoTour navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Tour back" }));
     expectStepTitle(SECOND_STEP_TITLE);
     fireEvent.click(screen.getByRole("button", { name: "Tour back" }));
+    expectStepTitle(FIRST_STEP_TITLE);
+    expect(screen.getByRole("button", { name: "Tour back" })).toBeDisabled();
+  });
+
+  it("restores the prior tour route when Back crosses a page boundary", () => {
+    render(<Harness />);
+    clickNext();
+    clickNext();
+    expect(screen.getByTestId("location")).toHaveTextContent("/scans/scan-1?demo=1");
+    fireEvent.click(screen.getByRole("button", { name: "Tour back" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/repos/repo-1?demo=1");
+    expectStepTitle(SECOND_STEP_TITLE);
+    fireEvent.click(screen.getByRole("button", { name: "Tour back" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/?demo=1");
     expectStepTitle(FIRST_STEP_TITLE);
     expect(screen.getByRole("button", { name: "Tour back" })).toBeDisabled();
   });

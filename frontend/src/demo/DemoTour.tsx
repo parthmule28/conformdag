@@ -63,7 +63,7 @@ export function DemoTour({ maxWaitFrames = DEFAULT_MAX_WAIT_FRAMES }: DemoTourPr
   const target = step?.target;
 
   useEffect(() => {
-    if (state.dismissed || paused || target === undefined) {
+    if (!enabled || state.dismissed || paused || target === undefined) {
       return undefined;
     }
     let cancelled = false;
@@ -98,7 +98,20 @@ export function DemoTour({ maxWaitFrames = DEFAULT_MAX_WAIT_FRAMES }: DemoTourPr
       }
       restoreHighlight?.();
     };
-  }, [state.dismissed, state.stepIndex, paused, target, maxWaitFrames, bodyId]);
+  }, [enabled, state.dismissed, state.stepIndex, paused, target, maxWaitFrames, bodyId]);
+
+  // Remember the route each step starts on so Back can restore it; step zero
+  // is recorded once at activation from the current location.
+  useEffect(() => {
+    if (!enabled || state.dismissed || state.routes[0] !== undefined) {
+      return;
+    }
+    dispatch({
+      type: "record-route",
+      stepIndex: 0,
+      route: `${location.pathname}${location.search}`,
+    });
+  }, [enabled, state.dismissed, state.routes, location.pathname, location.search]);
 
   if (step === undefined) {
     return null;
@@ -115,8 +128,20 @@ export function DemoTour({ maxWaitFrames = DEFAULT_MAX_WAIT_FRAMES }: DemoTourPr
     dispatch({ type: "skip" });
   };
 
+  const handleBack = (): void => {
+    if (state.stepIndex === 0) {
+      return;
+    }
+    const previousRoute = state.routes[state.stepIndex - 1];
+    if (previousRoute !== undefined) {
+      navigate(previousRoute);
+    }
+    dispatch({ type: "back" });
+  };
+
   const handleNext = (): void => {
     const advance = step.advance;
+    let destination = `${location.pathname}${location.search}`;
     if (advance.kind === "follow-link") {
       const anchor = document.querySelector<HTMLAnchorElement>(markerSelector(advance.target));
       if (anchor === null) {
@@ -125,7 +150,8 @@ export function DemoTour({ maxWaitFrames = DEFAULT_MAX_WAIT_FRAMES }: DemoTourPr
       }
       const url = new URL(anchor.href, window.location.href);
       const to = toDemoLocation(url.pathname, url.search);
-      dispatch({ type: "record-link", target: advance.target, href: `${to.pathname}${to.search}` });
+      destination = `${to.pathname}${to.search}`;
+      dispatch({ type: "record-link", target: advance.target, href: destination });
       navigate(to);
     } else if (advance.kind === "press-button") {
       const button = document.querySelector<HTMLElement>(markerSelector(advance.target));
@@ -140,15 +166,18 @@ export function DemoTour({ maxWaitFrames = DEFAULT_MAX_WAIT_FRAMES }: DemoTourPr
         setPaused(true);
         return;
       }
+      destination = recalledHref;
       navigate(recalledHref);
     } else if (advance.kind === "navigate") {
-      navigate(toDemoLocation(advance.pathname, location.search));
+      const to = toDemoLocation(advance.pathname, location.search);
+      destination = `${to.pathname}${to.search}`;
+      navigate(to);
     }
     if (state.stepIndex === TOUR_STEPS.length - 1) {
       storeDismissed(true);
       dispatch({ type: "finish" });
     } else {
-      dispatch({ type: "next" });
+      dispatch({ type: "next", route: destination });
     }
   };
 
@@ -209,7 +238,7 @@ export function DemoTour({ maxWaitFrames = DEFAULT_MAX_WAIT_FRAMES }: DemoTourPr
               size="sm"
               variant="secondary"
               disabled={state.stepIndex === 0}
-              onClick={() => dispatch({ type: "back" })}
+              onClick={handleBack}
             >
               Tour back
             </Button>
