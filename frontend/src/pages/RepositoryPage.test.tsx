@@ -200,7 +200,7 @@ describe("RepositoryPage", () => {
     expect(within(rowForScan("scan-1")).getByText("2026-09-15 08:00 UTC")).toBeInTheDocument();
     expect(within(rowForScan("scan-3")).getByText("Not evaluated")).toBeInTheDocument();
 
-    expect(screen.getByText("2026-09-16")).toBeInTheDocument();
+    expect(screen.getAllByText("Sep 16").length).toBeGreaterThan(0);
     expect(screen.queryByText("2026-09-15")).not.toBeInTheDocument();
   });
 

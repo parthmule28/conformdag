@@ -16,8 +16,8 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: "px-2 py-1 text-xs",
-  md: "px-3 py-1.5 text-sm",
+  sm: "min-h-8 px-2.5 py-1 text-xs",
+  md: "min-h-9 px-3.5 py-1.5 text-sm",
 };
 
 function Spinner(): React.ReactElement {
@@ -51,7 +51,7 @@ export function Button({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cx(
-        "inline-flex items-center justify-center gap-1.5 rounded-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-raised disabled:cursor-not-allowed disabled:opacity-50",
         VARIANT_CLASSES[variant],
         SIZE_CLASSES[size],
         className,
@@ -86,7 +86,7 @@ export function IconButton({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cx(
-        "inline-flex h-8 w-8 items-center justify-center rounded-sm border border-line text-muted transition-colors hover:bg-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex h-9 w-9 items-center justify-center rounded-md border border-line text-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-raised hover:bg-sunken hover:text-ink disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...rest}

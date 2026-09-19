@@ -142,7 +142,7 @@ describe("OverviewPage", () => {
 
     expect(await screen.findByText("No trend data yet")).toBeInTheDocument();
     expect(screen.getByText(/No scans have run yet/)).toBeInTheDocument();
-    expect(screen.queryByText("2026-09-16")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sep 16")).not.toBeInTheDocument();
 
     const repositories = await screen.findByText("Repositories");
     expect(repositories.nextElementSibling).toHaveTextContent("0");
@@ -160,9 +160,13 @@ describe("OverviewPage", () => {
     expect(screen.getByText("Current errors").nextElementSibling).toHaveTextContent("1");
     expect(screen.getByText("New findings").nextElementSibling).toHaveTextContent("3");
 
-    expect(screen.getByText("2026-09-16")).toBeInTheDocument();
-    expect(screen.getByText("2026-09-17")).toBeInTheDocument();
-    expect(screen.queryByText("2026-09-15")).not.toBeInTheDocument();
+    const overviewSignal = screen.getByText("Repositories").closest("[data-tour='overview-signal']");
+    expect(overviewSignal).toHaveClass("min-w-0");
+    expect(overviewSignal?.parentElement).toHaveClass("grid-cols-1");
+
+    expect(screen.getAllByText("Sep 16").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Sep 17").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Sep 15")).not.toBeInTheDocument();
 
     expect(screen.getByRole("link", { name: "etl-core" })).toHaveAttribute("href", "/repos/repo-1");
     expect(screen.getByRole("link", { name: "reports-etl" })).toHaveAttribute("href", "/repos/repo-2");
