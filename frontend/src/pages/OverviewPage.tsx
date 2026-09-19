@@ -56,8 +56,8 @@ export default function OverviewPage() {
   ];
 
   return (
-    <div className="grid gap-5">
-      <div data-tour="overview-signal">
+    <div className="grid grid-cols-1 gap-6">
+      <div className="min-w-0" data-tour="overview-signal">
         <MetricStrip metrics={metrics} />
       </div>
       <Card

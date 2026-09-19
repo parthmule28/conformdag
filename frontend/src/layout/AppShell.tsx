@@ -164,15 +164,15 @@ export function AppShell({ banner }: AppShellProps) {
           Skip to content
         </a>
         <header className="border-b border-line bg-raised">
-          <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5">
-            <Link to="/" className="flex shrink-0 items-center gap-2">
+          <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
+            <Link to="/" className="flex shrink-0 items-center gap-2.5">
               <span
                 aria-hidden="true"
-                className="flex h-7 w-7 items-center justify-center rounded-sm bg-accent font-mono text-xs font-bold text-on-accent"
+                className="flex h-8 w-8 items-center justify-center rounded-md bg-accent font-mono text-xs font-bold text-on-accent shadow-sm"
               >
                 CD
               </span>
-              <span className="text-base font-semibold tracking-tight">ConformDAG Platform</span>
+              <span className="text-base font-semibold tracking-tight text-ink">ConformDAG Platform</span>
             </Link>
             <nav aria-label="Primary" className="ml-2 hidden items-center gap-1 md:flex">
               {NAV_ITEMS.map((item) => (
@@ -225,15 +225,15 @@ export function AppShell({ banner }: AppShellProps) {
           )}
         </header>
         {banner !== undefined && (
-          <div className="mx-auto max-w-6xl px-4 pt-4">{banner}</div>
+           <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6">{banner}</div>
         )}
-        <div className="mx-auto max-w-6xl px-4 pt-5">
-          {pageTitle !== "" && <h1 className="text-xl font-semibold tracking-tight">{pageTitle}</h1>}
+        <div className="mx-auto max-w-7xl px-4 pt-6 sm:px-6">
+          {pageTitle !== "" && <h1 className="text-2xl font-semibold tracking-tight text-ink">{pageTitle}</h1>}
         </div>
         <main
           id="main-content"
           tabIndex={-1}
-          className="mx-auto max-w-6xl px-4 pb-10 pt-3 focus:outline-none"
+          className="mx-auto max-w-7xl px-4 pb-12 pt-5 focus:outline-none sm:px-6"
         >
           <ShellErrorBoundary>
             <Outlet />

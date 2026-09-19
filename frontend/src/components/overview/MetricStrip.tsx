@@ -22,16 +22,16 @@ export interface MetricStripProps {
 
 export function MetricStrip({ metrics, className }: MetricStripProps) {
   return (
-    <dl className={cx("grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6", className)}>
+    <dl className={cx("grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6", className)}>
       {metrics.map((metric) => (
         <div
           key={metric.label}
-          className="rounded-md border border-line bg-raised px-3 py-2.5 shadow-card"
+          className="rounded-lg border border-line bg-raised px-3.5 py-3 shadow-card transition-colors hover:border-accent/40"
         >
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted">{metric.label}</dt>
+          <dt className="text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">{metric.label}</dt>
           <dd
             className={cx(
-              "mt-1 text-2xl font-semibold tabular-nums",
+              "mt-1.5 text-2xl font-semibold leading-none tabular-nums",
               VALUE_CLASSES[metric.tone ?? "neutral"],
             )}
           >
