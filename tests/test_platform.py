@@ -344,6 +344,10 @@ def test_demo_seed_suppressions_use_real_current_findings(tmp_path: Path) -> Non
         )
         assert active_finding is not None and active_finding.suppressed is True
         assert any(finding.status == "FAIL" and not finding.suppressed for finding in current_findings)
+        assert any(
+            finding.policy_id == "AIR-DET-003" and finding.status == "FAIL" and not finding.suppressed
+            for finding in current_findings
+        )
 
 
 def test_demo_worker_processes_interactive_scans_after_seed(tmp_path: Path) -> None:

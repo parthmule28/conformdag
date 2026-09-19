@@ -57,6 +57,8 @@ imports for the selected Airflow runtime profile.
 
 CONFORMING_DAG = '''"""A conforming demo DAG used as the repository baseline."""
 
+from datetime import timedelta
+
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from pendulum import datetime
@@ -67,10 +69,10 @@ with DAG(
     tags=["domain:data", "owner:platform"],
     start_date=datetime(2026, 1, 1, tz="UTC"),
 ) as dag:
-    EmptyOperator(task_id="start")
+    EmptyOperator(task_id="start", execution_timeout=timedelta(seconds=30))
 '''
 
-VIOLATING_DAG = '''"""A deliberately non-conforming demo DAG with two deterministic findings."""
+VIOLATING_DAG = '''"""A deliberately non-conforming demo DAG with three deterministic findings."""
 
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
@@ -154,6 +156,17 @@ policies:
     safe_path: Required metadata tags are present.
     enforcement: {{type: deterministic, deterministic_checks: [tags], blocking: true}}
     configuration: {{kind: required-tags, required_keys: [domain, owner], allowed_values: {{domain: [data, analytics, platform]}}}}
+  - id: AIR-DET-003
+    title: Task execution timeout is bounded
+    version: 1.0.0
+    status: ACTIVE
+    severity: high
+    ownership: {{owner: platform}}
+    source: {_provenance("Execution safety", source_hash)}
+    invariant: Task execution timeouts stay within the approved bounds.
+    safe_path: Every task has a statically verifiable execution timeout.
+    enforcement: {{type: deterministic, deterministic_checks: [effective-timeout], blocking: true}}
+    configuration: {{kind: execution-timeout, min_seconds: 1, max_seconds: 30}}
 quality_gates:
   - id: baseline-gate
     rules:
