@@ -200,7 +200,7 @@ def require_admin(request: Request, authorization: Annotated[str | None, Header(
             detail="platform admin token is not configured; mutations are disabled",
         )
     presented = (authorization or "").encode("utf-8")
-    expected = f"Bearer {settings.admin_token}".encode("utf-8")
+    expected = f"Bearer {settings.admin_token}".encode()
     if not hmac.compare_digest(presented, expected):
         raise HTTPException(status_code=401, detail="admin authentication required")
 
