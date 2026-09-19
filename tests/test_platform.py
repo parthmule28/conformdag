@@ -20,7 +20,7 @@ from typing import Any, NoReturn, cast
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from ruamel.yaml import YAML
@@ -2392,10 +2392,10 @@ def test_platform_rejects_wildcard_cors_with_credentials() -> None:
 def test_admin_auth_uses_constant_time_comparison(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.platform import app as app_module
 
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[bytes, bytes]] = []
     real_compare = app_module.hmac.compare_digest
 
-    def compare(left: str, right: str) -> bool:
+    def compare(left: bytes, right: bytes) -> bool:
         calls.append((left, right))
         return real_compare(left, right)
 
@@ -2403,7 +2403,17 @@ def test_admin_auth_uses_constant_time_comparison(client: TestClient, monkeypatc
     response = _post(client, "/api/v1/repos", json={"name": "x", "path": "."})
 
     assert response.status_code == 401
-    assert calls == [("", "Bearer secret-token")]
+    assert calls == [(b"", b"Bearer secret-token")]
+
+
+def test_admin_auth_rejects_non_ascii_header_without_server_error(client: TestClient) -> None:
+    from conformdag.platform import app as app_module
+
+    request = cast("Request", SimpleNamespace(app=cast("FastAPI", client.app)))
+    with pytest.raises(HTTPException) as raised:
+        app_module.require_admin(request, "Bearer café")
+
+    assert raised.value.status_code == 401
 
 
 def test_worker_does_not_put_dsn_in_runner_argv(
