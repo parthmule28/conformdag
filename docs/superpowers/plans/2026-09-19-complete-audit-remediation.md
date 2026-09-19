@@ -109,12 +109,12 @@
 
 ### Phase 8 — Cross-cutting verification
 
-- [ ] Adversarial repository fixture
-- [ ] Multi-worker platform scenario
-- [ ] Clean release build
-- [ ] Production browser suite
-- [ ] Complete Python/frontend/platform/integration verification
-- [ ] Final accounting for all 47 IDs and remaining risks
+- [x] Adversarial repository fixture — scanner/evaluator/fix regression set 96 passed
+- [x] Multi-worker platform scenario — platform state, migration, heartbeat, cancellation, and API suite 171 passed
+- [x] Clean release build — `mise run build`; wheel and sdist each contain 3 dashboard assets
+- [x] Production browser suite — frontend 6/6 journeys passed; fresh wheel install passed packaged deep-link/theme/tour/API/asset checks
+- [x] Complete Python/frontend/platform/integration verification — `mise run check` 455 passed; coverage 91.27%; runtime 15 passed; frontend 121 passed; security, privacy, schema, inventory, and benchmark gates passed
+- [x] Final accounting for all 47 IDs and remaining risks — 2 Critical + 10 Important + 35 Minor; every ID is closed in Phases 1–7
 
 ## Implementation Method
 

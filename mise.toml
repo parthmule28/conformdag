@@ -18,11 +18,11 @@ run = "uv run python scripts/demo.py"
 
 [tasks.lint]
 description = "Run Ruff lint checks"
-run = "uv run ruff check ."
+run = "uv run ruff check src tests scripts"
 
 [tasks."format-check"]
 description = "Verify Ruff formatting"
-run = "uv run ruff format --check ."
+run = "uv run ruff format --check src tests scripts"
 
 [tasks.format]
 description = "Format Python sources"

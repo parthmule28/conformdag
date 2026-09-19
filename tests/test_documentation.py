@@ -56,6 +56,13 @@ def test_architecture_documents_check_kind_and_legacy_registries() -> None:
     assert "`LEGACY_POLICY_EVALUATORS`" in architecture
 
 
+def test_quality_tasks_scope_ruff_to_repository_python_paths() -> None:
+    mise = (ROOT / "mise.toml").read_text(encoding="utf-8")
+
+    assert 'run = "uv run ruff check src tests scripts"' in mise
+    assert 'run = "uv run ruff format --check src tests scripts"' in mise
+
+
 def test_dependency_inventory_check_passes() -> None:
     result = subprocess.run(
         [sys.executable, "scripts/verify_dependency_inventory.py"],
