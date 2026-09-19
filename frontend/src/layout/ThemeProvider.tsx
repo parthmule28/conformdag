@@ -31,8 +31,20 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function storedTheme(): Theme | null {
-  const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
-  return raw === "light" || raw === "dark" ? raw : null;
+  try {
+    const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return raw === "light" || raw === "dark" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistTheme(theme: Theme): void {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // Storage can be unavailable in private or restricted browsing contexts.
+  }
 }
 
 function systemTheme(): Theme {
@@ -73,7 +85,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [override]);
 
   const setTheme = useCallback((theme: Theme): void => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    persistTheme(theme);
     setOverride(theme);
   }, []);
 

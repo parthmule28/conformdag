@@ -51,6 +51,7 @@ def test_pull_pack_from_local_git(tmp_path: Path) -> None:
     assert pulled.name == "org-policy"
     assert pulled.resolved_ref
     assert pulled.path.is_file()
+    assert (tmp_path / "cache" / "org-policy").is_symlink()
     manifest_path = (tmp_path / "cache" / "org-policy") / ".conformdag-pull.yaml"
     assert manifest_path_ok(manifest_path=manifest_path, resolved_ref=pulled.resolved_ref)
 
@@ -220,14 +221,16 @@ def test_production_compose_requires_database_credentials() -> None:
     )
     assert postgres_environment["POSTGRES_DB"] == "${CONFORMDAG_POSTGRES_DB:?set CONFORMDAG_POSTGRES_DB}"
     for service in ("api", "worker"):
-        assert (
-            "${CONFORMDAG_POSTGRES_USER:?set CONFORMDAG_POSTGRES_USER}"
-            in compose["services"][service]["environment"]["CONFORMDAG_PLATFORM_DSN"]
-        )
-        assert (
-            "${CONFORMDAG_POSTGRES_PASSWORD:?set CONFORMDAG_POSTGRES_PASSWORD}"
-            in compose["services"][service]["environment"]["CONFORMDAG_PLATFORM_DSN"]
-        )
+        environment = compose["services"][service]["environment"]
+        assert environment["CONFORMDAG_PLATFORM_DSN"] == "postgresql+psycopg://"
+        assert environment["PGHOST"] == "postgres"
+        assert environment["PGPORT"] == "5432"
+        assert environment["PGUSER"] == "${CONFORMDAG_POSTGRES_USER:?set CONFORMDAG_POSTGRES_USER}"
+        assert environment["PGPASSWORD"] == "${CONFORMDAG_POSTGRES_PASSWORD:?set CONFORMDAG_POSTGRES_PASSWORD}"
+        assert environment["PGDATABASE"] == "${CONFORMDAG_POSTGRES_DB:?set CONFORMDAG_POSTGRES_DB}"
+    healthcheck = compose["services"]["postgres"]["healthcheck"]["test"][1]
+    assert "$${POSTGRES_USER}" in healthcheck
+    assert "$${POSTGRES_DB}" in healthcheck
 
 
 def test_generated_superpowers_workspace_is_ignored_without_hiding_durable_plans() -> None:

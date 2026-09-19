@@ -179,6 +179,10 @@ def _empty_assignments() -> dict[str, object]:
     return {}
 
 
+def _empty_unresolved_assignments() -> dict[str, tuple[str, ...]]:
+    return {}
+
+
 @dataclass
 class SourceModel:
     source: SourceFile
@@ -187,6 +191,7 @@ class SourceModel:
     dags: list[DagRecord] = field(default_factory=_empty_dags)
     tasks: list[TaskRecord] = field(default_factory=_empty_tasks)
     assignments: dict[str, object] = field(default_factory=_empty_assignments)
+    unresolved_assignments: dict[str, tuple[str, ...]] = field(default_factory=_empty_unresolved_assignments)
     constants: list[ConstantAssignment] = field(default_factory=_empty_constants)
     secret_assignments: list[SecretAssignment] = field(default_factory=_empty_secrets)
     dynamic_dag_lines: list[int] = field(default_factory=_empty_dynamic_loops)
@@ -373,10 +378,20 @@ class _ModelVisitor(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self.generic_visit(node)
-        value = _literal_value(node.value)
-        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and value is not None:
-            self.model.assignments[node.targets[0].id] = value
-            if self._function_depth == 0:
+        value = self._resolve_value(node.value)
+        unresolved: tuple[str, ...] = ()
+        if isinstance(node.value, (ast.Dict, ast.Name)):
+            mapped_value, unresolved = self._resolve_mapping(node.value)
+            if unresolved or isinstance(value, dict):
+                value = mapped_value
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and value is not _UNRESOLVED_VALUE:
+            name = node.targets[0].id
+            self.model.assignments[name] = value
+            if unresolved:
+                self.model.unresolved_assignments[name] = unresolved
+            else:
+                self.model.unresolved_assignments.pop(name, None)
+            if self._function_depth == 0 and not unresolved:
                 self.model.constants.append(ConstantAssignment(node.lineno, node.targets[0].id, value))
                 if isinstance(value, str) and secret_like(node.targets[0].id):
                     self.model.secret_assignments.append(SecretAssignment(node.lineno, node.targets[0].id))
@@ -646,7 +661,8 @@ class _ModelVisitor(ast.NodeVisitor):
     def _resolve_mapping(self, node: ast.AST) -> tuple[dict[str, object], tuple[str, ...]]:
         value = self._resolve_value(node)
         if isinstance(value, dict):
-            return cast(dict[str, object], value), ()
+            unresolved_keys = self.model.unresolved_assignments.get(node.id, ()) if isinstance(node, ast.Name) else ()
+            return cast(dict[str, object], value), tuple(unresolved_keys)
         if isinstance(node, ast.Dict):
             resolved: dict[str, object] = {}
             unresolved: list[str] = []
@@ -758,7 +774,9 @@ class ParseCache:
             model = pickle.loads(entry.read_bytes())  # noqa: S301 - trusted local cache
         except (OSError, pickle.UnpicklingError, EOFError):
             return None
-        return model if isinstance(model, SourceModel) else None
+        if not isinstance(model, SourceModel) or not hasattr(model, "unresolved_assignments"):
+            return None
+        return model
 
     def put(self, content_hash: str, model: SourceModel) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)

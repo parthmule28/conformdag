@@ -32,7 +32,7 @@ RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
         airflow_profile=AirflowProfile.AIRFLOW_3_3_0,
         image=(
             "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
-            "sha256:b78c44154bc0112c2be67746ba70eef66a0f3c9b34b8ad43b398837f74f72481"
+            "sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b"
         ),
         provider_versions={
             "apache-airflow-providers-standard": "1.15.0",

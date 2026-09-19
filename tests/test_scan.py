@@ -298,10 +298,10 @@ def test_scan_runs_ruff_once_with_union_rules_and_filters_findings(
             "message": "owner is missing",
         },
     ]
-    calls: list[tuple[Path, list[str]]] = []
+    calls: list[tuple[Path, list[str], list[Path]]] = []
 
-    def fake_run_ruff(root: Path, rules: list[str]) -> list[dict[str, Any]]:
-        calls.append((root, rules))
+    def fake_run_ruff(root: Path, rules: list[str], files: list[Path]) -> list[dict[str, Any]]:
+        calls.append((root, rules, files))
         return payload
 
     monkeypatch.setattr("conformdag.scan.ruff_binary", lambda: "/usr/bin/ruff")
@@ -309,7 +309,7 @@ def test_scan_runs_ruff_once_with_union_rules_and_filters_findings(
 
     report = scan_repository(tmp_path, pack_path)
 
-    assert calls == [(tmp_path.resolve(), ["AIR002", "AIR003"])]
+    assert calls == [(tmp_path.resolve(), ["AIR002", "AIR003"], [tmp_path / "dags/dag.py"])]
     findings = {
         finding.policy_id: (finding.location.file, finding.explanation)
         for finding in report.findings
@@ -328,7 +328,7 @@ def test_scan_fails_closed_when_ruff_invocation_fails(tmp_path: Path, monkeypatc
 
     monkeypatch.setattr("conformdag.scan.ruff_binary", lambda: "/usr/bin/ruff")
 
-    def fake_run_ruff(_root: Path, _rules: list[str]) -> None:
+    def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> None:
         return None
 
     monkeypatch.setattr("conformdag.scan.run_ruff", fake_run_ruff)
@@ -355,7 +355,7 @@ def test_scan_keeps_ruff_findings_suppressible(tmp_path: Path, monkeypatch: pyte
 
     monkeypatch.setattr("conformdag.scan.ruff_binary", lambda: "/usr/bin/ruff")
 
-    def fake_run_ruff(_root: Path, _rules: list[str]) -> list[dict[str, Any]]:
+    def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> list[dict[str, Any]]:
         return payload
 
     monkeypatch.setattr("conformdag.scan.run_ruff", fake_run_ruff)

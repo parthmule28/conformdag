@@ -26,9 +26,13 @@ and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image
 - [x] Confirm the `Validate platform image` job: wheel contains the built dashboard
   static assets, `serve`/`worker` smoke, and the Trivy CRITICAL/HIGH gate passed.
 - [x] Confirm the published platform image carries SBOM and provenance attestations
-  and is tagged with the release ref and `latest`. The image tag is the full ref
-  name (`v1.0.0-beta.1`, matching the runtime image convention); the package was
-  flipped to Public visibility after first publish.
+   and is tagged with the release ref and `latest`. The image tag is the full ref
+   name (`v1.0.0-beta.1`, matching the runtime image convention); the package was
+   flipped to Public visibility after first publish.
+- [x] Record the maintained Airflow 3.3.0 runtime identity for the current release:
+  the `v1.0.0-beta.1` OCI index is pinned to
+  `sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b` in
+  `src/conformdag/runtime.py` and is checked against this evidence by the test suite.
 - [x] Confirm the `Run the composite action against the sample repository` self-test
   passed on the release commit, covering the community pack path and the
   `pack pull` git path.
@@ -56,6 +60,15 @@ and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image
 - A `pypi` environment tag policy must exist as `type: tag` before the tag
   push; a policy added before the tag exists is recorded as branch type and
   can be fixed via the API with an explicit `type=tag` on create.
+
+### Platform migration 0004 deployment note
+
+Deployments upgrading a pre-0004 platform database must allow migration 0004
+to finish before workers claim scans. The migration keeps the oldest existing
+suppression row for each `(policy_id, fingerprint)` identity, removes later
+duplicates, and then creates the unique index. This cleanup is retry-safe for
+databases that have not recorded 0004; databases already recorded at 0004 do
+not rerun the migration and already enforce the unique identity constraint.
 
 ## Historical 0.1.0b1 release evidence
 

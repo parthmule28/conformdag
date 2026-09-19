@@ -83,7 +83,7 @@ def test_supported_profile_resolves_pinned_image_and_providers(tmp_path: Path) -
     assert manifest.supported_profile is True
     assert manifest.image == (
         "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
-        "sha256:b78c44154bc0112c2be67746ba70eef66a0f3c9b34b8ad43b398837f74f72481"
+        "sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b"
     )
     assert manifest.provider_versions["apache-airflow-providers-google"] == "22.2.2"
 
@@ -93,7 +93,7 @@ def test_supported_profile_uses_the_reviewed_immutable_identity() -> None:
 
     assert profile.image == (
         "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
-        "sha256:b78c44154bc0112c2be67746ba70eef66a0f3c9b34b8ad43b398837f74f72481"
+        "sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b"
     )
 
 

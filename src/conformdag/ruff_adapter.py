@@ -11,6 +11,7 @@ import json
 import re
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -62,7 +63,26 @@ def ruff_rule_matches(code: str, selector: str) -> bool:
     return len(digits) < 3 and code_parts.group(2).startswith(digits) or normalized_code == normalized_selector
 
 
-def run_ruff(repository_root: Path, rules: list[str]) -> list[dict[str, Any]] | None:
+def _validated_source_paths(repository_root: Path, source_files: Sequence[Path]) -> list[str] | None:
+    root = repository_root.resolve()
+    validated: list[str] = []
+    seen: set[Path] = set()
+    for source_file in source_files:
+        try:
+            resolved = source_file.resolve(strict=True)
+            resolved.relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            return None
+        if not resolved.is_file() or resolved in seen:
+            if not resolved.is_file():
+                return None
+            continue
+        seen.add(resolved)
+        validated.append(str(resolved))
+    return validated
+
+
+def run_ruff(repository_root: Path, rules: list[str], source_files: Sequence[Path]) -> list[dict[str, Any]] | None:
     """Run Ruff without source fixes and return its JSON violations.
 
     ``None`` represents an unavailable, failed, timed-out, or malformed
@@ -72,18 +92,25 @@ def run_ruff(repository_root: Path, rules: list[str]) -> list[dict[str, Any]] | 
     if binary is None:
         return None
     normalized_rules = validate_ruff_selectors(rules)
+    validated_paths = _validated_source_paths(repository_root, source_files)
+    if validated_paths is None:
+        return None
+    if not validated_paths:
+        return []
     try:
         process = subprocess.run(  # noqa: S603 - fixed argv, no shell
             [
                 binary,
                 "check",
                 "--isolated",
+                "--no-respect-gitignore",
+                "--no-cache",
                 "--select",
                 ",".join(normalized_rules),
                 "--output-format",
                 "json",
                 "--no-fix",
-                str(repository_root),
+                *validated_paths,
             ],
             capture_output=True,
             text=True,

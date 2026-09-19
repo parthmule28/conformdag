@@ -72,6 +72,16 @@ in the release evidence.
 | `apache-airflow-providers-postgres` | `==6.8.0` | Maintained provider | Apache-2.0 |
 | `apache-airflow-providers-http` | `==6.0.4` | Maintained provider | Apache-2.0 |
 | `apache-airflow-providers-google` | `==22.2.2` | Maintained provider | Apache-2.0 |
+| `google-cloud-aiplatform` | `==1.155.0` | Runtime AI provider client | Apache-2.0 |
+| `gitpython` | `==3.1.58` | Runtime repository integration | BSD-3-Clause |
+| `litellm` | `==1.84.1` | Runtime semantic provider client | MIT |
+| `pyasn1` | `==0.6.4` | Runtime dependency compatibility pin | BSD-2-Clause |
+| `aiohttp` | `==3.14.3` | Runtime async HTTP dependency | Apache-2.0 |
+| `cryptography` | `==50.0.0` | Runtime TLS/cryptographic dependency | Apache-2.0 / BSD-3-Clause |
+| `snowflake-connector-python` | `==4.7.1` | Runtime Snowflake integration | Apache-2.0 |
+| `snowflake-sqlalchemy` | `==1.11.0` | Runtime Snowflake SQLAlchemy dialect | Apache-2.0 |
+| `sqlparse` | `==0.6.0` | Runtime SQL parsing dependency | BSD-3-Clause |
+| `tornado` | `==6.5.8` | Runtime web-server dependency | Apache-2.0 |
 
 The Docker CLI is an external system dependency for the explicit runtime boundary. The
 runtime image also carries its own transitive operating-system and Python dependency

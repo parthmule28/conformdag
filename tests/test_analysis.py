@@ -86,6 +86,21 @@ def test_operator_unresolved_kwargs_are_tracked_and_bindings_resolved() -> None:
     assert task.dag_line == 4
 
 
+def test_assigned_default_args_keep_unresolved_mapping_values_unresolved() -> None:
+    source = (
+        "from airflow import DAG\n"
+        "DEFAULT_ARGS = {'owner': OWNER, 'retries': RETRIES}\n"
+        "dag = DAG(default_args=DEFAULT_ARGS)\n"
+    )
+
+    model, issue = analyze_source(_source_file(source))
+
+    assert issue is None
+    assert model is not None
+    assert model.dags[0].defaults == {}
+    assert model.dags[0].unresolved_defaults == ("owner", "retries")
+
+
 def test_discovers_files_hashes_inputs_and_excludes_symlinks(tmp_path: Path) -> None:
     dags = tmp_path / "dags"
     dags.mkdir()

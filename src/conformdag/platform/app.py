@@ -672,7 +672,8 @@ def create_app(
         _pack_delete_gate
     )
 
-    app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
+    app.api_route("/api", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
+    app.api_route("/api/{rest:path}", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
     if STATIC_DIR.is_dir():
         app.mount("/", DashboardStaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
@@ -763,7 +764,7 @@ def _pack_delete_gate(request: Request, pack_name: str, gate_id: str) -> dict[st
     return {"status": "deleted", "gate_id": gate_id}
 
 
-def _api_fallback(rest: str) -> dict[str, str]:
+def _api_fallback(rest: str = "") -> dict[str, str]:
     """Return a JSON 404 for unknown API paths instead of the dashboard SPA."""
     raise HTTPException(status_code=404, detail=f"unknown API path: /api/{rest}")
 

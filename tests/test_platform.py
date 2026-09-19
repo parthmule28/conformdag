@@ -56,12 +56,14 @@ from conformdag.platform.db import (
     SuppressionRow,
     claim_queued_scan,
     create_session_factory,
+    heartbeat_running_scan,
     initialize_session_factory,
     new_id,
     new_suppression_id,
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
+    transition_running_scan,
     transition_scan_to_cancelled,
     utcnow,
 )
@@ -893,6 +895,107 @@ def test_first_boot_migrations_are_serialized(tmp_path: Path) -> None:
     assert errors == []
 
 
+def test_sqlite_migration_lock_is_shared_with_the_database_volume(tmp_path: Path) -> None:
+    from conformdag.platform.db import migration_lock_path
+
+    database = tmp_path / "first-boot.db"
+
+    assert migration_lock_path(f"sqlite:///{database}") == tmp_path / ".first-boot.db.conformdag-migrations.lock"
+
+
+def test_postgres_migration_lock_uses_database_advisory_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform import db
+
+    statements: list[str] = []
+
+    class FakeConnection:
+        def __enter__(self) -> "FakeConnection":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, statement: object, _parameters: object) -> None:
+            statements.append(str(statement))
+
+        def commit(self) -> None:
+            return None
+
+    class FakeEngine:
+        def connect(self) -> FakeConnection:
+            return FakeConnection()
+
+        def dispose(self) -> None:
+            return None
+
+    def fake_create_engine(*_args: object, **_kwargs: object) -> FakeEngine:
+        return FakeEngine()
+
+    def fake_upgrade(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(db, "create_engine", fake_create_engine)
+    monkeypatch.setattr("alembic.command.upgrade", fake_upgrade)
+
+    db.run_migrations("postgresql+psycopg://platform@db/conformdag")
+
+    assert any("pg_advisory_lock" in statement for statement in statements)
+    assert any("pg_advisory_unlock" in statement for statement in statements)
+
+
+def test_suppression_identity_migration_deduplicates_existing_rows(tmp_path: Path) -> None:
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    database = tmp_path / "duplicate-suppressions.db"
+    dsn = f"sqlite:///{database}"
+    config = Config(str(Path("src/conformdag/platform/alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("src/conformdag/platform/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", dsn)
+    command.upgrade(config, "0003")
+    engine = create_engine(dsn)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO suppressions "
+                "(id, policy_id, fingerprint, reason, owner, created_at, expires_at, source) "
+                "VALUES (:id, :policy_id, :fingerprint, :reason, :owner, :created_at, :expires_at, :source)"
+            ),
+            [
+                {
+                    "id": "suppression-1",
+                    "policy_id": "AIR-DET-001",
+                    "fingerprint": "a" * 64,
+                    "reason": "first",
+                    "owner": "platform",
+                    "created_at": "2026-01-01 00:00:00",
+                    "expires_at": "2099-01-01 00:00:00",
+                    "source": "platform",
+                },
+                {
+                    "id": "suppression-2",
+                    "policy_id": "AIR-DET-001",
+                    "fingerprint": "a" * 64,
+                    "reason": "duplicate",
+                    "owner": "platform",
+                    "created_at": "2026-01-02 00:00:00",
+                    "expires_at": "2099-01-01 00:00:00",
+                    "source": "platform",
+                },
+            ],
+        )
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        count = connection.scalar(
+            text("SELECT COUNT(*) FROM suppressions WHERE policy_id = 'AIR-DET-001' AND fingerprint = :fingerprint"),
+            {"fingerprint": "a" * 64},
+        )
+    assert count == 1
+
+
 def test_abandoned_running_scan_is_reclaimed_within_attempt_budget(platform_env: str) -> None:
     factory = initialize_session_factory(platform_env)
     with factory() as session:
@@ -939,6 +1042,23 @@ def test_abandoned_scan_fails_after_attempt_budget(platform_env: str) -> None:
         assert scan is not None
         assert scan.status == "failed"
         assert scan.error is not None and "abandoned" in scan.error
+
+
+def test_stale_worker_claim_cannot_refresh_or_finish_reclaimed_scan(platform_env: str) -> None:
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running", attempts=2))
+        session.commit()
+
+    with factory() as session:
+        assert heartbeat_running_scan(session, "scan1", expected_attempt=1) is False
+    with factory() as session:
+        assert transition_running_scan(session, "scan1", "succeeded", expected_attempt=1) is False
+
+    scan = only_scan(platform_env)
+    assert scan.status == "running"
+    assert scan.attempts == 2
 
 
 def test_cancel_transition_has_one_winner(platform_env: str) -> None:
@@ -3269,6 +3389,12 @@ def test_unknown_put_api_paths_return_json_404(client: TestClient) -> None:
     response = _as_httpx(client).put("/api/v1/not-a-route")
     assert response.status_code == 404
     assert response.json()["detail"].startswith("unknown API path")
+
+
+def test_unknown_api_head_and_root_paths_do_not_fall_back_to_the_dashboard(client: TestClient) -> None:
+    for path in ("/api", "/api/v1/not-a-route"):
+        response = _as_httpx(client).head(path)
+        assert response.status_code == 404, path
 
 
 def test_unknown_scan_findings_returns_404(client: TestClient) -> None:

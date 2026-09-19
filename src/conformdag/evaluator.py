@@ -882,7 +882,10 @@ class RuffAirEvaluator:
             return []
         violations = context.ruff_violations
         if violations is None:
-            violations = run_ruff(context.repository_root, configuration.rules) or []
+            violations = (
+                run_ruff(context.repository_root, configuration.rules, [model.source.path for model in context.models])
+                or []
+            )
         scanned = {model.source.relative_path for model in context.models}
         findings: list[Finding] = []
         for violation in violations:
@@ -1025,7 +1028,7 @@ def evaluate_deterministic(
     if shared_ruff_violations is None and repository_root is not None:
         rules = ruff_rules_for_policies(ordered_policies, airflow_profile)
         if rules:
-            shared_ruff_violations = run_ruff(repository_root, rules) or []
+            shared_ruff_violations = run_ruff(repository_root, rules, [model.source.path for model in models]) or []
     findings: list[Finding] = []
     evaluated: list[str] = []
     skipped: list[str] = []

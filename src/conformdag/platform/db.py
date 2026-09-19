@@ -24,10 +24,13 @@ from sqlalchemy import (
     create_engine,
     func,
     select,
+    text,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.pool import NullPool
 
 JSONVariant = JSON().with_variant(JSONB(), "postgresql")
 _MIGRATION_THREAD_LOCK = threading.Lock()
@@ -140,17 +143,46 @@ class PlatformError(RuntimeError):
     """Raised when the platform persistence layer cannot be used."""
 
 
+def migration_lock_path(url: str) -> Path:
+    """Return a lock path on the shared database volume for file databases."""
+    parsed = make_url(url)
+    database_name = parsed.database
+    if parsed.get_backend_name() == "sqlite" and isinstance(database_name, str) and database_name != ":memory:":
+        database = Path(database_name)
+        if not database.is_absolute():
+            database = Path.cwd() / database
+        database = database.resolve()
+        return database.parent / f".{database.name}.conformdag-migrations.lock"
+    lock_name = hashlib.sha256(url.encode("utf-8")).hexdigest()
+    return Path(tempfile.gettempdir()) / f"conformdag-migrations-{lock_name}.lock"
+
+
 @contextmanager
 def _migration_lock(url: str) -> Iterator[None]:
-    """Serialize first-boot migration attempts across threads and processes."""
-    lock_name = hashlib.sha256(url.encode("utf-8")).hexdigest()
-    lock_path = Path(tempfile.gettempdir()) / f"conformdag-migrations-{lock_name}.lock"
-    with _MIGRATION_THREAD_LOCK, lock_path.open("a+", encoding="utf-8") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    """Serialize first-boot migration attempts across threads, processes, and containers."""
+    with _MIGRATION_THREAD_LOCK:
+        if make_url(url).get_backend_name() == "postgresql":
+            engine = create_engine(url, poolclass=NullPool)
+            try:
+                with engine.connect() as connection:
+                    connection.execute(text("SELECT pg_advisory_lock(hashtext(:lock_key))"), {"lock_key": url})
+                    connection.commit()
+                    try:
+                        yield
+                    finally:
+                        connection.execute(text("SELECT pg_advisory_unlock(hashtext(:lock_key))"), {"lock_key": url})
+                        connection.commit()
+            finally:
+                engine.dispose()
+            return
+
+        lock_path = migration_lock_path(url)
+        with lock_path.open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def run_migrations(url: str) -> None:
@@ -237,7 +269,13 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
 
 
 def transition_running_scan(
-    session: Session, scan_id: str, status: str, error: str | None = None, *, requeue: bool = False
+    session: Session,
+    scan_id: str,
+    status: str,
+    error: str | None = None,
+    *,
+    requeue: bool = False,
+    expected_attempt: int | None = None,
 ) -> bool:
     """Conditionally transition a running scan to ``status``.
 
@@ -248,9 +286,10 @@ def transition_running_scan(
     Requeueing clears the claim timestamp so the scan re-enters the queue;
     terminal transitions stamp ``finished_at``.
     """
-    statement = (
-        update(ScanRow).where(ScanRow.id == scan_id, ScanRow.status == "running").values(status=status, error=error)
-    )
+    predicates = [ScanRow.id == scan_id, ScanRow.status == "running"]
+    if expected_attempt is not None:
+        predicates.append(ScanRow.attempts == expected_attempt)
+    statement = update(ScanRow).where(*predicates).values(status=status, error=error)
     statement = (
         statement.values(claimed_at=None) if requeue else statement.values(claimed_at=None, finished_at=utcnow())
     )
@@ -277,9 +316,12 @@ def transition_scan_to_cancelled(session: Session, scan_id: str) -> bool:
     return False
 
 
-def heartbeat_running_scan(session: Session, scan_id: str) -> bool:
-    """Refresh a running scan claim only while its status remains running."""
-    statement = update(ScanRow).where(ScanRow.id == scan_id, ScanRow.status == "running").values(claimed_at=utcnow())
+def heartbeat_running_scan(session: Session, scan_id: str, *, expected_attempt: int | None = None) -> bool:
+    """Refresh a running scan claim only while its status and attempt remain current."""
+    predicates = [ScanRow.id == scan_id, ScanRow.status == "running"]
+    if expected_attempt is not None:
+        predicates.append(ScanRow.attempts == expected_attempt)
+    statement = update(ScanRow).where(*predicates).values(claimed_at=utcnow())
     applied = cast("CursorResult[Any]", session.execute(statement))
     if applied.rowcount:
         session.commit()

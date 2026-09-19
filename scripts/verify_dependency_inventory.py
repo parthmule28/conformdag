@@ -13,6 +13,7 @@ from conformdag.runtime import runtime_profile
 
 _PACKAGE_NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
 _CONSTRAINT = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^]]+\])?==(.+)$")
+_DOCKER_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^]]+\])?==([^\s\\]+)$")
 _LOCK_COUNT = {
     "uv.lock": re.compile(r"`uv\.lock` currently records \*\*(\d+)\*\* resolved Python package records"),
     "frontend/package-lock.json": re.compile(
@@ -116,6 +117,27 @@ def _runtime_constraints(root: Path) -> dict[str, str]:
     return constraints
 
 
+def _dockerfile_runtime_packages(root: Path) -> dict[str, str]:
+    packages: dict[str, str] = {}
+    in_upgrade_block = False
+    dockerfile = root / "runtime/airflow-3.3.0/Dockerfile"
+    for raw_line in dockerfile.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if "python -m pip install --no-cache-dir --upgrade" in line:
+            in_upgrade_block = True
+            continue
+        if not in_upgrade_block:
+            continue
+        if line.startswith("&&"):
+            break
+        candidate = line.removesuffix("\\").strip()
+        match = _DOCKER_PIN.fullmatch(candidate)
+        if match is None:
+            raise ValueError(f"cannot parse runtime Dockerfile package {candidate!r}")
+        packages[normalize_package_name(match.group(1))] = f"=={match.group(2)}"
+    return packages
+
+
 def _missing(expected: set[str], actual: set[str], label: str) -> list[str]:
     return [f"{label} missing: {name}" for name in sorted(expected - actual)]
 
@@ -153,6 +175,7 @@ def check_dependency_inventory(root: Path) -> list[str]:
     issues.extend(_missing(set(frontend_specs), npm_packages, "package-lock.json"))
 
     runtime_constraints = _runtime_constraints(root)
+    dockerfile_packages = _dockerfile_runtime_packages(root)
     runtime_records = _table_records(inventory, "Runtime profile constraints", 1)
     if runtime_records != runtime_constraints:
         issues.extend(_missing(set(runtime_constraints), set(runtime_records), "Runtime inventory"))
@@ -160,6 +183,9 @@ def check_dependency_inventory(root: Path) -> list[str]:
         for name in sorted(set(runtime_records) & set(runtime_constraints)):
             if runtime_records[name] != runtime_constraints[name]:
                 issues.append(f"Runtime constraint drift: {name}")
+    for name, version in dockerfile_packages.items():
+        if runtime_constraints.get(name) != version:
+            issues.append(f"Dockerfile runtime package drift: {name}")
 
     profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
     profile_versions = {"apache-airflow": profile.airflow_profile.value, **profile.provider_versions}

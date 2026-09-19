@@ -124,7 +124,7 @@ def scan_repository(
                 )
             )
         else:
-            result = run_ruff(root, ruff_rules)
+            result = run_ruff(root, ruff_rules, [source.path for source in files])
             if result is None:
                 issues.append(
                     RunIssue(

@@ -13,6 +13,8 @@ from shutil import copy2
 from typing import cast
 
 from conformdag.benchmark import load_benchmark_manifest
+from conformdag.models import AirflowProfile
+from conformdag.runtime import runtime_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 _INVENTORY_SCRIPT = cast(
@@ -34,6 +36,15 @@ def test_current_release_references_are_distinguished_from_history() -> None:
     roadmap = (ROOT / "docs/roadmap.md").read_text(encoding="utf-8")
     assert "1.0.0b1" in roadmap
     assert "0.1.0b1" not in roadmap
+
+
+def test_current_runtime_identity_is_recorded_in_current_release_evidence() -> None:
+    release = (ROOT / "docs/release.md").read_text(encoding="utf-8")
+    current, _historical = release.split("## Historical 0.1.0b1 release evidence", maxsplit=1)
+    image = runtime_profile(AirflowProfile.AIRFLOW_3_3_0).image
+
+    assert "v1.0.0-beta.1" in current
+    assert image.split("@", maxsplit=1)[1] in current
 
 
 def test_benchmark_documentation_records_manifest_shape() -> None:
@@ -83,6 +94,7 @@ def test_dependency_inventory_check_reports_removed_package(tmp_path: Path) -> N
         "frontend/package.json",
         "frontend/package-lock.json",
         "runtime/airflow-3.3.0/constraints.txt",
+        "runtime/airflow-3.3.0/Dockerfile",
     ):
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +121,7 @@ def test_dependency_inventory_check_reports_frontend_manifest_drift(tmp_path: Pa
         "frontend/package.json",
         "frontend/package-lock.json",
         "runtime/airflow-3.3.0/constraints.txt",
+        "runtime/airflow-3.3.0/Dockerfile",
     ):
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -120,3 +133,26 @@ def test_dependency_inventory_check_reports_frontend_manifest_drift(tmp_path: Pa
     package_path.write_text(json.dumps(package), encoding="utf-8")
 
     assert "package-lock.json root declaration drift: react" in _INVENTORY_SCRIPT(tmp_path)
+
+
+def test_dependency_inventory_checks_runtime_dockerfile_pins(tmp_path: Path) -> None:
+    for relative in (
+        "docs/dependency-inventory.md",
+        "pyproject.toml",
+        "uv.lock",
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "runtime/airflow-3.3.0/constraints.txt",
+        "runtime/airflow-3.3.0/Dockerfile",
+    ):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        copy2(ROOT / relative, target)
+
+    dockerfile_path = tmp_path / "runtime/airflow-3.3.0/Dockerfile"
+    dockerfile_path.write_text(
+        dockerfile_path.read_text(encoding="utf-8").replace("tornado==6.5.8", "tornado==6.5.9"),
+        encoding="utf-8",
+    )
+
+    assert "Dockerfile runtime package drift: tornado" in _INVENTORY_SCRIPT(tmp_path)

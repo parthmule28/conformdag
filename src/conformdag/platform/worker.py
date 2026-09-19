@@ -99,10 +99,10 @@ def _scan_cancelled(session_factory: sessionmaker[Session], scan_id: str) -> boo
         return session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id)) == "cancelled"
 
 
-def _refresh_heartbeat(session_factory: sessionmaker[Session], scan_id: str) -> bool:
+def _refresh_heartbeat(session_factory: sessionmaker[Session], scan_id: str, claim_attempt: int | None = None) -> bool:
     """Refresh ownership in a short transaction while the runner remains healthy."""
     with session_factory() as session:
-        return heartbeat_running_scan(session, scan_id)
+        return heartbeat_running_scan(session, scan_id, expected_attempt=claim_attempt)
 
 
 def _terminate_child(process: subprocess.Popen[str]) -> None:
@@ -125,7 +125,11 @@ def _relay_stderr(stderr: str) -> None:
 
 
 def execute_claimed_scan(
-    session_factory: sessionmaker[Session], dsn: str, scan_id: str, settings: WorkerSettings
+    session_factory: sessionmaker[Session],
+    dsn: str,
+    scan_id: str,
+    settings: WorkerSettings,
+    claim_attempt: int | None = None,
 ) -> RunnerOutcome:
     """Execute one claimed scan in an isolated subprocess and return its outcome.
 
@@ -135,8 +139,11 @@ def execute_claimed_scan(
     result can never overwrite the cancellation.
     """
     try:
+        runner_arguments = [sys.executable, "-m", "conformdag.platform.runner", "--scan-id", scan_id]
+        if claim_attempt is not None:
+            runner_arguments.extend(["--claim-attempt", str(claim_attempt)])
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-            [sys.executable, "-m", "conformdag.platform.runner", "--scan-id", scan_id],
+            runner_arguments,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -160,7 +167,7 @@ def execute_claimed_scan(
                 stderr = process.communicate()[1]
                 _relay_stderr(stderr)
                 return RunnerOutcome(cancelled=True)
-            if not _refresh_heartbeat(session_factory, scan_id):
+            if not _refresh_heartbeat(session_factory, scan_id, claim_attempt):
                 _terminate_child(process)
                 stderr = process.communicate()[1]
                 _relay_stderr(stderr)
@@ -185,19 +192,33 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
             session.commit()
             return None
         scan_id = scan.id
+        claim_attempt = scan.attempts
         session.commit()
     logger.info("scan_claimed", extra={"scan_id": scan_id})
 
-    outcome = execute_claimed_scan(session_factory, dsn, scan_id, settings)
+    outcome = execute_claimed_scan(session_factory, dsn, scan_id, settings, claim_attempt)
 
     with session_factory() as session:
         final = session.get(ScanRow, scan_id)
         if final is not None:
             if final.status == "running" and not outcome.cancelled:
                 if outcome.retryable and final.attempts < settings.max_attempts:
-                    transition_running_scan(session, scan_id, "queued", outcome.error, requeue=True)
+                    transition_running_scan(
+                        session,
+                        scan_id,
+                        "queued",
+                        outcome.error,
+                        requeue=True,
+                        expected_attempt=claim_attempt,
+                    )
                 else:
-                    transition_running_scan(session, scan_id, "failed", outcome.error or _LOST_RUNNER_ERROR)
+                    transition_running_scan(
+                        session,
+                        scan_id,
+                        "failed",
+                        outcome.error or _LOST_RUNNER_ERROR,
+                        expected_attempt=claim_attempt,
+                    )
                     _apply_retention(session, final.repository_id, settings)
             else:
                 _apply_retention(session, final.repository_id, settings)

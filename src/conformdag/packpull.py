@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -130,19 +133,59 @@ def _remove_cache_entry(path: Path) -> None:
 
 
 def _install_staged_pack(staging: Path, destination: Path, root: Path, pack_name: str) -> None:
+    """Atomically publish a staged pack while preserving the previous pointer."""
+    lock_path = root / f".{pack_name}.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            _install_staged_pack_locked(staging, destination, root, pack_name)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _install_staged_pack_locked(staging: Path, destination: Path, root: Path, pack_name: str) -> None:
+    version = root / f".{pack_name}-version-{uuid.uuid4().hex}"
+    link = root / f".{pack_name}-link-{uuid.uuid4().hex}"
     backup: Path | None = None
-    if destination.exists() or destination.is_symlink():
-        backup = Path(tempfile.mkdtemp(prefix=f".{pack_name}-backup-", dir=root))
-        _remove_cache_entry(backup)
-        os.replace(destination, backup)
+    old_target: Path | None = None
+    swapped = False
     try:
-        os.replace(staging, destination)
+        os.replace(staging, version)
+        link.symlink_to(version.name, target_is_directory=True)
+        if destination.exists() or destination.is_symlink():
+            if destination.is_symlink():
+                old_target = destination.resolve(strict=False)
+            else:
+                backup = Path(tempfile.mkdtemp(prefix=f".{pack_name}-backup-", dir=root))
+                _remove_cache_entry(backup)
+                os.replace(destination, backup)
+        os.replace(link, destination)
+        swapped = True
     except OSError:
         if backup is not None and not (destination.exists() or destination.is_symlink()):
-            os.replace(backup, destination)
+            with suppress(OSError):
+                os.replace(backup, destination)
+        if link.exists() or link.is_symlink():
+            with suppress(OSError):
+                _remove_cache_entry(link)
+        if not swapped and (version.exists() or version.is_symlink()):
+            with suppress(OSError):
+                _remove_cache_entry(version)
         raise
+    finally:
+        if link.exists() or link.is_symlink():
+            with suppress(OSError):
+                _remove_cache_entry(link)
     if backup is not None and (backup.exists() or backup.is_symlink()):
-        _remove_cache_entry(backup)
+        with suppress(OSError):
+            _remove_cache_entry(backup)
+    if old_target is not None and old_target != version:
+        try:
+            old_target.relative_to(root.resolve())
+        except ValueError:
+            return
+        with suppress(OSError):
+            _remove_cache_entry(old_target)
 
 
 def _record_ref(destination: Path, source: str, ref: str) -> None:
