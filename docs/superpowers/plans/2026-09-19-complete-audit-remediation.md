@@ -63,19 +63,19 @@
 
 ### Phase 4 — Platform state, concurrency, database, API
 
-- [ ] IMP-5 atomic cancellation
-- [ ] IMP-6 worker heartbeat ownership
-- [ ] IMP-7 application-owned logging
-- [ ] MIN-12 serialized first-boot migrations
-- [ ] MIN-13 locked PackService snapshots
-- [ ] MIN-14 constant-time auth and safe CORS
-- [ ] MIN-15 DSN absent from subprocess argv
-- [ ] MIN-16 consistent unknown-scan 404 contract
-- [ ] MIN-17 airflow profile length validation
-- [ ] MIN-18 worker timing validation
-- [ ] MIN-19 retention ordering and claim indexes
-- [ ] MIN-20 unique suppression identity
-- [ ] Platform, migration, API, logging, and concurrency suites
+- [x] IMP-5 atomic cancellation
+- [x] IMP-6 worker heartbeat ownership
+- [x] IMP-7 application-owned logging
+- [x] MIN-12 serialized first-boot migrations
+- [x] MIN-13 locked PackService snapshots
+- [x] MIN-14 constant-time auth and safe CORS
+- [x] MIN-15 DSN absent from subprocess argv
+- [x] MIN-16 consistent unknown-scan 404 contract
+- [x] MIN-17 airflow profile length validation
+- [x] MIN-18 worker timing validation
+- [x] MIN-19 retention ordering and claim indexes
+- [x] MIN-20 unique suppression identity
+- [x] Platform, migration, API, logging, and concurrency suites — 169 passed; Ruff, format, and Pyright clean
 
 ### Phase 5 — Release, packaging, runtime, supply chain
 

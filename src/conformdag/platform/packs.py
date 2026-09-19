@@ -33,54 +33,57 @@ class PackService:
         self._lock = threading.RLock()
 
     def register(self, name: str, path: Path) -> None:
-        self.pack_paths[name] = path
+        with self._lock:
+            self.pack_paths[name] = path
 
     def list_packs(self) -> list[dict[str, Any]]:
-        packs: list[dict[str, Any]] = []
-        for name, path in sorted(self.pack_paths.items()):
-            entry: dict[str, Any] = {
-                "name": name,
-                "path": str(path),
-                "id": None,
-                "version": None,
-                "policy_count": 0,
-                "error": None,
-            }
-            try:
-                pack = load_policy_pack(path, path.parent)
-                entry["id"] = pack.id
-                entry["version"] = pack.version
-                entry["policy_count"] = len(pack.policies)
-            except PolicyValidationError as exc:
-                entry["error"] = str(exc)
-            packs.append(entry)
-        return packs
+        with self._lock:
+            packs: list[dict[str, Any]] = []
+            for name, path in sorted(self.pack_paths.items()):
+                entry: dict[str, Any] = {
+                    "name": name,
+                    "path": str(path),
+                    "id": None,
+                    "version": None,
+                    "policy_count": 0,
+                    "error": None,
+                }
+                try:
+                    pack = load_policy_pack(path, path.parent)
+                    entry["id"] = pack.id
+                    entry["version"] = pack.version
+                    entry["policy_count"] = len(pack.policies)
+                except PolicyValidationError as exc:
+                    entry["error"] = str(exc)
+                packs.append(entry)
+            return packs
 
     def list_policies(self, pack_name: str) -> list[dict[str, Any]]:
-        pack_path = self._require_pack(pack_name)
-        pack = load_policy_pack(pack_path, pack_path.parent)
-        return [
-            {
-                "id": policy.id,
-                "title": policy.title,
-                "version": policy.version,
-                "status": policy.status.value,
-                "severity": policy.severity.value,
-                "tags": policy.tags,
-                "check_kind": policy.configuration.kind,
-                "check_config": policy.configuration.model_dump(mode="json"),
-                "source_document": str(policy.source.document),
-                "source_section": policy.source.section,
-                "source_version": policy.source.version,
-                "invariant": policy.invariant,
-                "safe_path": policy.safe_path,
-                "ownership": policy.ownership.model_dump(mode="json"),
-                "scope": policy.scope.model_dump(mode="json"),
-                "exceptions": policy.exceptions.model_dump(mode="json"),
-                "enforcement": policy.enforcement.model_dump(mode="json"),
-            }
-            for policy in pack.policies
-        ]
+        with self._lock:
+            pack_path = self._require_pack(pack_name)
+            pack = load_policy_pack(pack_path, pack_path.parent)
+            return [
+                {
+                    "id": policy.id,
+                    "title": policy.title,
+                    "version": policy.version,
+                    "status": policy.status.value,
+                    "severity": policy.severity.value,
+                    "tags": policy.tags,
+                    "check_kind": policy.configuration.kind,
+                    "check_config": policy.configuration.model_dump(mode="json"),
+                    "source_document": str(policy.source.document),
+                    "source_section": policy.source.section,
+                    "source_version": policy.source.version,
+                    "invariant": policy.invariant,
+                    "safe_path": policy.safe_path,
+                    "ownership": policy.ownership.model_dump(mode="json"),
+                    "scope": policy.scope.model_dump(mode="json"),
+                    "exceptions": policy.exceptions.model_dump(mode="json"),
+                    "enforcement": policy.enforcement.model_dump(mode="json"),
+                }
+                for policy in pack.policies
+            ]
 
     def upsert_policy(self, pack_name: str, policy_id: str, policy_data: dict[str, Any]) -> None:
         with self._lock:
@@ -123,9 +126,10 @@ class PackService:
             _write_pack(pack, pack_path)
 
     def list_gates(self, pack_name: str) -> list[dict[str, Any]]:
-        pack_path = self._require_pack(pack_name)
-        pack = load_policy_pack(pack_path, pack_path.parent)
-        return [gate.model_dump(mode="json") for gate in pack.quality_gates]
+        with self._lock:
+            pack_path = self._require_pack(pack_name)
+            pack = load_policy_pack(pack_path, pack_path.parent)
+            return [gate.model_dump(mode="json") for gate in pack.quality_gates]
 
     def upsert_gate(self, pack_name: str, gate_id: str, gate_data: dict[str, Any]) -> None:
         with self._lock:
@@ -164,12 +168,13 @@ class PackService:
             _write_pack(pack, pack_path)
 
     def validate_pack(self, pack_name: str) -> dict[str, Any]:
-        pack_path = self._require_pack(pack_name)
-        try:
-            load_policy_pack(pack_path, pack_path.parent)
-        except PolicyValidationError as exc:
-            return {"valid": False, "errors": str(exc).split("; ")}
-        return {"valid": True, "errors": []}
+        with self._lock:
+            pack_path = self._require_pack(pack_name)
+            try:
+                load_policy_pack(pack_path, pack_path.parent)
+            except PolicyValidationError as exc:
+                return {"valid": False, "errors": str(exc).split("; ")}
+            return {"valid": True, "errors": []}
 
     def _require_pack(self, pack_name: str) -> Path:
         path = self.pack_paths.get(pack_name)

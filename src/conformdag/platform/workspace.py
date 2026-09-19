@@ -23,7 +23,7 @@ class WorkspaceRepository(ConformModel):
     name: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
     path: Path
     policy_pack: Path | None = None
-    airflow_profile: str | None = None
+    airflow_profile: str | None = Field(default=None, max_length=32)
 
 
 class WorkspacePolicyPack(ConformModel):

@@ -62,6 +62,7 @@ from conformdag.platform.db import (
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
+    transition_scan_to_cancelled,
     utcnow,
 )
 from conformdag.platform.demo import DemoWorkspace, build_demo_workspace, seed_demo_scenario, start_demo_worker
@@ -721,7 +722,8 @@ def test_json_formatter_emits_single_line_json() -> None:
 def test_platform_startup_installs_json_logging(client: TestClient) -> None:
     from conformdag.platform.logging import JsonFormatter
 
-    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
+    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger("conformdag").handlers)
+    assert not any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
 
 
 def test_request_middleware_logs_and_echoes_request_id(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
@@ -871,6 +873,26 @@ def test_create_app_registers_workspace_packs_at_startup(tmp_path: Path, monkeyp
     assert any(entry["name"] == "org" and entry["id"] == "org" for entry in entries)
 
 
+def test_first_boot_migrations_are_serialized(tmp_path: Path) -> None:
+    dsn = f"sqlite:///{tmp_path / 'first-boot.db'}"
+    errors: list[BaseException] = []
+
+    def initialize() -> None:
+        try:
+            initialize_session_factory(dsn)
+        except BaseException as exc:  # pragma: no cover - assertion captures any migration race
+            errors.append(exc)
+
+    threads = [threading.Thread(target=initialize) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+
+
 def test_abandoned_running_scan_is_reclaimed_within_attempt_budget(platform_env: str) -> None:
     factory = initialize_session_factory(platform_env)
     with factory() as session:
@@ -917,6 +939,44 @@ def test_abandoned_scan_fails_after_attempt_budget(platform_env: str) -> None:
         assert scan is not None
         assert scan.status == "failed"
         assert scan.error is not None and "abandoned" in scan.error
+
+
+def test_cancel_transition_has_one_winner(platform_env: str) -> None:
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    with factory() as session:
+        assert transition_scan_to_cancelled(session, "scan1") is True
+    with factory() as session:
+        assert transition_scan_to_cancelled(session, "scan1") is False
+
+    assert only_scan(platform_env).status == "cancelled"
+
+
+def test_worker_refreshes_claim_heartbeat(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_sleeper_runner(monkeypatch, tmp_path)
+    session_factory = factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(
+            ScanRow(
+                id="scan1",
+                repository_id="repo1",
+                status="running",
+                claimed_at=datetime.now(UTC) - timedelta(hours=2),
+            )
+        )
+        session.commit()
+
+    from conformdag.platform.worker import execute_claimed_scan
+
+    execute_claimed_scan(session_factory, platform_env, "scan1", settings(timeout_seconds=1, poll_seconds=0.05))
+
+    claimed = only_scan(platform_env).claimed_at
+    assert claimed is not None and claimed.replace(tzinfo=UTC) > datetime.now(UTC) - timedelta(minutes=1)
 
 
 def test_worker_executes_queued_scan_end_to_end(
@@ -1948,13 +2008,28 @@ def test_worker_skips_cancelled_scan(platform_env: str) -> None:
 
 
 def test_worker_settings_resolve_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-
     monkeypatch.setenv("CONFORMDAG_WORKER_POLL_SECONDS", "0.5")
     monkeypatch.setenv("CONFORMDAG_WORKER_MAX_ATTEMPTS", "7")
     settings = WorkerSettings.from_environment()
 
     assert settings.poll_seconds == 0.5
     assert settings.max_attempts == 7
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("CONFORMDAG_WORKER_POLL_SECONDS", "0"),
+        ("CONFORMDAG_WORKER_IDLE_SECONDS", "0"),
+        ("CONFORMDAG_WORKER_TIMEOUT_SECONDS", "0"),
+        ("CONFORMDAG_WORKER_MAX_ATTEMPTS", "0"),
+    ],
+)
+def test_worker_settings_reject_nonpositive_timing(monkeypatch: pytest.MonkeyPatch, variable: str, value: str) -> None:
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(ValueError, match="must be"):
+        WorkerSettings.from_environment()
 
 
 def test_worker_loop_sleeps_when_idle(platform_env: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2041,6 +2116,18 @@ def test_register_repository_rejects_missing_paths(client: TestClient) -> None:
         json={"name": "ghost", "path": "/nonexistent/path"},
         headers={"Authorization": "Bearer secret-token"},
     )
+    assert response.status_code == 422
+
+
+def test_register_repository_rejects_overlong_airflow_profile(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "repo").mkdir(exist_ok=True)
+    response = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": "profile-too-long", "path": str(tmp_path / "repo"), "airflow_profile": "x" * 33},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
     assert response.status_code == 422
 
 
@@ -2150,6 +2237,61 @@ def test_load_settings_requires_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
         load_settings()
 
 
+def test_platform_rejects_wildcard_cors_with_credentials() -> None:
+    with pytest.raises(ValidationError, match="wildcard"):
+        PlatformSettings(dsn="sqlite:///x", cors_origins=["*"])
+
+
+def test_admin_auth_uses_constant_time_comparison(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform import app as app_module
+
+    calls: list[tuple[str, str]] = []
+    real_compare = app_module.hmac.compare_digest
+
+    def compare(left: str, right: str) -> bool:
+        calls.append((left, right))
+        return real_compare(left, right)
+
+    monkeypatch.setattr(app_module.hmac, "compare_digest", compare)
+    response = _post(client, "/api/v1/repos", json={"name": "x", "path": "."})
+
+    assert response.status_code == 401
+    assert calls == [("", "Bearer secret-token")]
+
+
+def test_worker_does_not_put_dsn_in_runner_argv(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import conformdag.platform.worker as worker_module
+    from conformdag.platform.worker import execute_claimed_scan
+
+    seed_running_scan(platform_env, tmp_path)
+    captured: dict[str, Any] = {}
+
+    class CompletedProcess:
+        returncode = 0
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            _ = timeout
+            return "", ""
+
+        def poll(self) -> int:
+            return 0
+
+    def fake_popen(arguments: list[str], **kwargs: Any) -> CompletedProcess:
+        captured["arguments"] = arguments
+        captured.update(kwargs)
+        return CompletedProcess()
+
+    monkeypatch.setattr(worker_module.subprocess, "Popen", fake_popen)
+
+    assert (
+        execute_claimed_scan(factory(platform_env), platform_env, "scan1", settings()) == worker_module.RunnerOutcome()
+    )
+    assert "--dsn" not in captured["arguments"]
+    assert captured["env"]["CONFORMDAG_PLATFORM_DSN"] == platform_env
+
+
 def test_runner_persists_scan_failure(
     platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -2173,7 +2315,7 @@ def test_runner_persists_scan_failure(
     assert code == 1
     from conformdag.platform.logging import JsonFormatter
 
-    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
+    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger("conformdag").handlers)
     events = [record for record in caplog.records if record.name == "conformdag.runner"]
     assert [record.getMessage() for record in events] == ["scan_started", "scan_completed"]
     assert all(_log_extra(record, "scan_id") == "scan1" for record in events)
@@ -2992,6 +3134,23 @@ def test_worker_settings_reject_zero_retention_from_environment(monkeypatch: pyt
         WorkerSettings.from_environment()
 
 
+def test_suppression_identity_is_unique(client: TestClient) -> None:
+    payload = {
+        "policy_id": "AIR-DET-001",
+        "fingerprint": "u" * 64,
+        "reason": "duplicate test",
+        "owner": "platform",
+        "expires_at": "2027-01-01T00:00:00Z",
+    }
+    headers = {"Authorization": "Bearer secret-token"}
+
+    first = _post(client, "/api/v1/suppressions", json=payload, headers=headers)
+    second = _post(client, "/api/v1/suppressions", json=payload, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+
+
 def test_retention_target_scan_ids_protect_newest_with_zero_keep(platform_env: str) -> None:
     with factory(platform_env)() as session:
         session.add(RepositoryRow(id="repo1", name="r", path="."))
@@ -3089,6 +3248,12 @@ def test_unknown_put_api_paths_return_json_404(client: TestClient) -> None:
     assert response.json()["detail"].startswith("unknown API path")
 
 
+def test_unknown_scan_findings_returns_404(client: TestClient) -> None:
+    response = _get(client, "/api/v1/scans/missing/findings")
+
+    assert response.status_code == 404
+
+
 @pytest.mark.skipif(
     not (Path(__file__).resolve().parents[1] / "src/conformdag/platform/static/index.html").is_file(),
     reason="dashboard static assets are not built",
@@ -3126,6 +3291,36 @@ def test_retention_clears_artifacts_and_keeps_findings(platform_env: str) -> Non
         assert scans["scan2"].report_json is not None
         assert scans["scan3"].report_json is not None
         assert len(scans) == 4
+
+
+def test_retention_order_is_deterministic_for_equal_timestamps(platform_env: str) -> None:
+    created = datetime(2026, 1, 1, tzinfo=UTC)
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        for scan_id in ("scan-a", "scan-c", "scan-b"):
+            session.add(
+                ScanRow(
+                    id=scan_id,
+                    repository_id="repo1",
+                    status="succeeded",
+                    created_at=created,
+                    report_json={"report_version": "2"},
+                )
+            )
+        session.commit()
+
+        targets = retention_target_scan_ids(session, "repo1", keep=1)
+
+    assert targets == ["scan-a", "scan-b"]
+
+
+def test_scan_claim_indexes_exist(platform_env: str) -> None:
+    with factory(platform_env)() as session:
+        indexes = sa_inspect(session.get_bind()).get_indexes("scans")
+
+    index_columns = {tuple(index["column_names"]) for index in indexes}
+    assert ("status", "created_at") in index_columns
+    assert ("status", "claimed_at") in index_columns
 
 
 def testworker_parse_cache_env_controls_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -3318,6 +3513,47 @@ def test_write_pack_cleans_temp_when_temp_write_fails(tmp_path: Path, monkeypatc
     assert pack_path.read_text(encoding="utf-8") == "original content\n"
     assert all(entry.parent == tmp_path for entry in created)
     assert not list(tmp_path.glob(".pack.yaml.*"))
+
+
+def test_pack_service_serializes_snapshot_reads_with_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform.packs import PackService
+
+    pack_path = tmp_path / "pack.yaml"
+    pack_path.write_text("schema_version: '1'\nid: x\nversion: '1'\npolicies: []\n", encoding="utf-8")
+    service = PackService({"test": pack_path})
+    entered = threading.Event()
+    release = threading.Event()
+    read_done = threading.Event()
+    real_write = _write_pack
+
+    def blocked_write(pack: PolicyPack, path: Path) -> None:
+        entered.set()
+        assert release.wait(timeout=5)
+        real_write(pack, path)
+
+    monkeypatch.setattr(packs_module, "_write_pack", blocked_write)
+
+    writer = threading.Thread(
+        target=service.upsert_gate,
+        args=("test", "release", {"rules": [{"type": "no-new-findings"}]}),
+    )
+    writer.start()
+    assert entered.wait(timeout=5)
+
+    def read() -> None:
+        service.list_gates("test")
+        read_done.set()
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    assert not read_done.wait(timeout=0.2)
+    release.set()
+    writer.join(timeout=5)
+    reader.join(timeout=5)
+
+    assert not writer.is_alive()
+    assert not reader.is_alive()
+    assert read_done.is_set()
 
 
 def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:

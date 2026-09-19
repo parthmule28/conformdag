@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from conformdag.platform.db import (
     ScanRow,
     claim_queued_scan,
+    heartbeat_running_scan,
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
@@ -67,6 +68,18 @@ class WorkerSettings:
     max_attempts: int = DEFAULT_MAX_ATTEMPTS
     retention_keep: int = DEFAULT_RETENTION_KEEP
 
+    def __post_init__(self) -> None:
+        if self.poll_seconds <= 0:
+            raise ValueError("CONFORMDAG_WORKER_POLL_SECONDS must be greater than zero")
+        if self.idle_seconds <= 0:
+            raise ValueError("CONFORMDAG_WORKER_IDLE_SECONDS must be greater than zero")
+        if self.timeout_seconds <= 0:
+            raise ValueError("CONFORMDAG_WORKER_TIMEOUT_SECONDS must be greater than zero")
+        if self.max_attempts < 1:
+            raise ValueError("CONFORMDAG_WORKER_MAX_ATTEMPTS must be at least one")
+        if self.retention_keep < 1:
+            raise ValueError("CONFORMDAG_PLATFORM_RETENTION_KEEP must keep at least one scan artifact")
+
     @classmethod
     def from_environment(cls) -> WorkerSettings:
         """Resolve worker settings from environment variables with defaults."""
@@ -77,8 +90,6 @@ class WorkerSettings:
             max_attempts=int(os.environ.get("CONFORMDAG_WORKER_MAX_ATTEMPTS", str(DEFAULT_MAX_ATTEMPTS))),
             retention_keep=int(os.environ.get("CONFORMDAG_PLATFORM_RETENTION_KEEP", str(DEFAULT_RETENTION_KEEP))),
         )
-        if settings.retention_keep < 1:
-            raise ValueError("CONFORMDAG_PLATFORM_RETENTION_KEEP must keep at least one scan artifact")
         return settings
 
 
@@ -86,6 +97,12 @@ def _scan_cancelled(session_factory: sessionmaker[Session], scan_id: str) -> boo
     """Return whether the scan was cancelled, read from a fresh session."""
     with session_factory() as session:
         return session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id)) == "cancelled"
+
+
+def _refresh_heartbeat(session_factory: sessionmaker[Session], scan_id: str) -> bool:
+    """Refresh ownership in a short transaction while the runner remains healthy."""
+    with session_factory() as session:
+        return heartbeat_running_scan(session, scan_id)
 
 
 def _terminate_child(process: subprocess.Popen[str]) -> None:
@@ -119,10 +136,11 @@ def execute_claimed_scan(
     """
     try:
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-            [sys.executable, "-m", "conformdag.platform.runner", "--scan-id", scan_id, "--dsn", dsn],
+            [sys.executable, "-m", "conformdag.platform.runner", "--scan-id", scan_id],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env={**os.environ, "CONFORMDAG_PLATFORM_DSN": dsn},
         )
     except OSError as exc:
         return RunnerOutcome(error=f"worker failed to launch the runner: {exc}", retryable=True)
@@ -142,6 +160,11 @@ def execute_claimed_scan(
                 stderr = process.communicate()[1]
                 _relay_stderr(stderr)
                 return RunnerOutcome(cancelled=True)
+            if not _refresh_heartbeat(session_factory, scan_id):
+                _terminate_child(process)
+                stderr = process.communicate()[1]
+                _relay_stderr(stderr)
+                return RunnerOutcome(error=_LOST_RUNNER_ERROR)
             continue
         break
     _relay_stderr(stderr)

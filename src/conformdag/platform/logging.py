@@ -54,12 +54,12 @@ class JsonFormatter(logging.Formatter):
 
 
 def install_json_logging() -> None:
-    """Attach the JSON formatter to the root logger exactly once."""
-    root = logging.getLogger()
-    for handler in root.handlers:
+    """Attach the JSON formatter to ConformDAG's logger namespace exactly once."""
+    logger = logging.getLogger("conformdag")
+    for handler in logger.handlers:
         if isinstance(handler.formatter, JsonFormatter):
             return
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)

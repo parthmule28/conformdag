@@ -207,9 +207,12 @@ def main() -> None:
     """Entry point for the subprocess scan runner."""
     parser = argparse.ArgumentParser(description="Execute one platform scan.")
     parser.add_argument("--scan-id", required=True)
-    parser.add_argument("--dsn", required=True)
+    parser.add_argument("--dsn")
     args = parser.parse_args()
-    raise SystemExit(execute_scan(args.scan_id, args.dsn))
+    dsn = args.dsn or os.environ.get("CONFORMDAG_PLATFORM_DSN")
+    if not dsn:
+        parser.error("--dsn or CONFORMDAG_PLATFORM_DSN is required")
+    raise SystemExit(execute_scan(args.scan_id, dsn))
 
 
 if __name__ == "__main__":

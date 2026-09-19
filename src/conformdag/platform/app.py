@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -11,12 +12,14 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import ColumnElement, false, func, nullslast, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import PlainTextResponse
 
@@ -38,6 +41,7 @@ from conformdag.platform.db import (
     count_scans,
     eligible_baseline,
     new_id,
+    transition_scan_to_cancelled,
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
@@ -56,8 +60,27 @@ class PlatformSettings(BaseModel):
     dsn: str
     admin_token: str | None = None
     retention_keep: int = Field(default=50, ge=1)
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     workspace: Path | None = None
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, origins: list[str]) -> list[str]:
+        for origin in origins:
+            if origin == "*":
+                raise ValueError("wildcard CORS origins are unsafe when credentials are enabled")
+            parsed = urlsplit(origin)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or parsed.path not in {"", "/"}
+            ):
+                raise ValueError(f"invalid CORS origin: {origin}")
+        return origins
 
 
 def load_settings() -> PlatformSettings:
@@ -82,7 +105,7 @@ class RepositoryCreate(BaseModel):
     name: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
     path: str
     policy_pack: str | None = None
-    airflow_profile: str | None = None
+    airflow_profile: str | None = Field(default=None, max_length=32)
 
 
 class WorkspaceLoadRequest(BaseModel):
@@ -151,7 +174,7 @@ def require_admin(request: Request, authorization: Annotated[str | None, Header(
             status_code=503,
             detail="platform admin token is not configured; mutations are disabled",
         )
-    if authorization != f"Bearer {settings.admin_token}":
+    if not hmac.compare_digest(authorization or "", f"Bearer {settings.admin_token}"):
         raise HTTPException(status_code=401, detail="admin authentication required")
 
 
@@ -258,11 +281,10 @@ def cancel_scan(request: Request, scan_id: str) -> dict[str, str]:
         scan = session.get(ScanRow, scan_id)
         if scan is None:
             raise HTTPException(status_code=404, detail="scan not found")
-        if scan.status not in {"queued", "running"}:
-            raise HTTPException(status_code=409, detail=f"scan already {scan.status}")
-        scan.status = "cancelled"
-        scan.finished_at = utcnow()
-        session.commit()
+        if not transition_scan_to_cancelled(session, scan_id):
+            current = session.get(ScanRow, scan_id)
+            status = current.status if current is not None else "gone"
+            raise HTTPException(status_code=409, detail=f"scan already {status}")
         return {"scan_id": scan_id, "status": "cancelled"}
 
 
@@ -380,11 +402,13 @@ def scan_findings(
     factory = _factory(request)
     with factory() as session:
         scan = session.get(ScanRow, scan_id)
-        repository = session.get(RepositoryRow, scan.repository_id) if scan is not None else None
+        if scan is None:
+            raise HTTPException(status_code=404, detail="scan not found")
+        repository = session.get(RepositoryRow, scan.repository_id)
         baseline_fingerprints: set[str] | None = None
         baseline = (
             eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
-            if scan is not None and repository is not None and repository.baseline_scan_id
+            if repository is not None and repository.baseline_scan_id
             else None
         )
         if baseline is not None:
@@ -461,7 +485,11 @@ def create_suppression(request: Request, payload: SuppressionCreate) -> dict[str
             source="platform",
         )
         session.add(row)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="suppression already exists for this policy finding") from exc
         return _suppression_payload(row)
 
 
