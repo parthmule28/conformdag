@@ -31,6 +31,7 @@ from conformdag.models import (
     Severity,
 )
 from conformdag.policy import load_policy_pack, resolve_policy_pack_path
+from conformdag.ruff_adapter import ruff_rule_matches, validate_ruff_selector
 
 
 def _model(source: str, relative_path: str = "dag.py"):
@@ -166,8 +167,24 @@ def test_run_ruff_disables_source_fixes(tmp_path: Path, monkeypatch: pytest.Monk
     assert len(calls) == 1
     arguments, kwargs = calls[0]
     assert "--no-fix" in arguments
+    assert "--isolated" in arguments
     assert arguments[arguments.index("--select") + 1] == "AIR002"
     assert kwargs["check"] is False
+
+
+def test_ruff_selector_supports_exact_family_and_bounded_prefix_matching() -> None:
+    assert ruff_rule_matches("AIR002", "AIR002")
+    assert not ruff_rule_matches("AIR003", "AIR002")
+    assert ruff_rule_matches("AIR002", "AIR")
+    assert ruff_rule_matches("AIR002", "AIR0")
+    assert not ruff_rule_matches("AIRFLOW002", "AIR")
+    assert not ruff_rule_matches("A002", "AIR")
+
+
+@pytest.mark.parametrize("selector", ["", "AIR*", "AIR-002", "2AIR", "AIR 002"])
+def test_ruff_selector_rejects_invalid_values(selector: str) -> None:
+    with pytest.raises(ValueError, match="invalid Ruff selector"):
+        validate_ruff_selector(selector)
 
 
 def test_run_ruff_returns_none_on_invocation_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -43,7 +43,7 @@ from conformdag.models import (
     StartDateFreshnessConfig,
     TopLevelIOConfig,
 )
-from conformdag.ruff_adapter import run_ruff
+from conformdag.ruff_adapter import ruff_rule_matches, run_ruff
 
 
 class EvaluationPhaseError(RuntimeError):
@@ -819,10 +819,27 @@ def _ruff_path(repository_root: Path, filename: object) -> str | None:
         return None
 
 
-def _ruff_rule_matches(code: str, selector: str) -> bool:
-    normalized_code = code.upper()
-    normalized_selector = selector.upper()
-    return normalized_code == normalized_selector or normalized_code.startswith(normalized_selector)
+def ruff_policies_for_scan(policies: Iterable[Policy], airflow_profile: AirflowProfile | None) -> list[Policy]:
+    """Return active policies that contribute Ruff rules to this scan."""
+    return [
+        policy
+        for policy in policies
+        if policy.status.value == "ACTIVE"
+        and policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
+        and policy_applies(policy, airflow_profile)
+        and ("ruff-air" in policy.enforcement.deterministic_checks or policy.id == "AIR-DET-012")
+    ]
+
+
+def ruff_rules_for_policies(policies: Iterable[Policy], airflow_profile: AirflowProfile | None) -> list[str]:
+    """Build one deterministic, sorted Ruff selector list for a scan."""
+    return sorted(
+        {
+            rule
+            for policy in ruff_policies_for_scan(policies, airflow_profile)
+            for rule in cast(RuffAirConfig, policy.configuration).rules
+        }
+    )
 
 
 class RuffAirEvaluator:
@@ -842,7 +859,7 @@ class RuffAirEvaluator:
         for violation in violations:
             code = violation.get("code")
             if not isinstance(code, str) or not any(
-                _ruff_rule_matches(code, selector) for selector in configuration.rules
+                ruff_rule_matches(code, selector) for selector in configuration.rules
             ):
                 continue
             relative = _ruff_path(context.repository_root, violation.get("filename"))
@@ -928,18 +945,8 @@ def evaluate_deterministic(
     ordered_policies = sorted(policies, key=lambda item: item.id)
     shared_ruff_violations = ruff_violations
     if shared_ruff_violations is None and repository_root is not None:
-        ruff_policies = [
-            policy
-            for policy in ordered_policies
-            if policy.status.value == "ACTIVE"
-            and policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
-            and policy_applies(policy, airflow_profile)
-            and ("ruff-air" in policy.enforcement.deterministic_checks or policy.id == "AIR-DET-012")
-        ]
-        if ruff_policies:
-            rules = sorted(
-                {rule for policy in ruff_policies for rule in cast(RuffAirConfig, policy.configuration).rules}
-            )
+        rules = ruff_rules_for_policies(ordered_policies, airflow_profile)
+        if rules:
             shared_ruff_violations = run_ruff(repository_root, rules) or []
     findings: list[Finding] = []
     evaluated: list[str] = []

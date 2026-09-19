@@ -4,13 +4,40 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import os
 import pickle
+import re
+import tempfile
 from collections.abc import Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
+from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
 DEFAULT_EXCLUDES = ("**/.venv/**", "**/.git/**", "**/vendor/**", "**/generated/**")
+
+
+class ParseIssueCode(StrEnum):
+    """Stable categories for source-discovery and parsing failures."""
+
+    SYMLINK_EXCLUDED = "SYMLINK_EXCLUDED"
+    EXTERNAL_SYMLINK_EXCLUDED = "EXTERNAL_SYMLINK_EXCLUDED"
+    BROKEN_SYMLINK_EXCLUDED = "BROKEN_SYMLINK_EXCLUDED"
+    SYMLINK_RESOLUTION_ERROR = "SYMLINK_RESOLUTION_ERROR"
+    READ_ERROR = "READ_ERROR"
+    INVALID_SOURCE = "INVALID_SOURCE"
+
+
+NON_FATAL_DISCOVERY_ISSUES = frozenset(
+    {
+        ParseIssueCode.SYMLINK_EXCLUDED,
+        ParseIssueCode.EXTERNAL_SYMLINK_EXCLUDED,
+        ParseIssueCode.BROKEN_SYMLINK_EXCLUDED,
+        ParseIssueCode.SYMLINK_RESOLUTION_ERROR,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +55,7 @@ class ParseIssue:
     path: str
     message: str
     line: int | None = None
+    code: ParseIssueCode = ParseIssueCode.INVALID_SOURCE
 
 
 @dataclass(frozen=True)
@@ -147,9 +175,72 @@ class SourceModel:
     dynamic_dag_lines: list[int] = field(default_factory=_empty_dynamic_loops)
 
 
-def _matches(relative_path: str, patterns: tuple[str, ...]) -> bool:
-    path = Path(relative_path)
-    return any(path.match(pattern) for pattern in patterns)
+def _normalize_relative_path(value: str) -> str:
+    normalized = value.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+@lru_cache(maxsize=256)
+def _exclude_regex(pattern: str) -> re.Pattern[str]:
+    """Compile a repository-relative glob with explicit ``**`` semantics."""
+    normalized = _normalize_relative_path(pattern)
+    expression: list[str] = []
+    index = 0
+    while index < len(normalized):
+        if normalized.startswith("**/", index):
+            expression.append("(?:.*/)?")
+            index += 3
+        elif normalized.startswith("/**", index):
+            expression.append("(?:/.*)?")
+            index += 3
+        elif normalized.startswith("**", index):
+            expression.append(".*")
+            index += 2
+        elif normalized[index] == "*":
+            expression.append("[^/]*")
+            index += 1
+        elif normalized[index] == "?":
+            expression.append("[^/]")
+            index += 1
+        else:
+            expression.append(re.escape(normalized[index]))
+            index += 1
+    return re.compile("^" + "".join(expression) + "$")
+
+
+def matches_exclude(relative_path: str, patterns: tuple[str, ...] | list[str]) -> bool:
+    """Match normalized repository-relative paths with recursive glob semantics."""
+    candidate = _normalize_relative_path(relative_path)
+    return any(_exclude_regex(_normalize_relative_path(pattern)).fullmatch(candidate) for pattern in patterns)
+
+
+def _contains_symlink(candidate: Path, root: Path) -> bool:
+    try:
+        relative_parts = candidate.relative_to(root).parts
+    except ValueError:
+        return True
+    current = root
+    for part in relative_parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _append_discovery_issue(
+    issues: list[ParseIssue],
+    seen: set[tuple[str, ParseIssueCode]],
+    path: str,
+    message: str,
+    code: ParseIssueCode,
+) -> None:
+    key = (path, code)
+    if key in seen:
+        return
+    seen.add(key)
+    issues.append(ParseIssue(path, message, code=code))
 
 
 def discover_python_files(
@@ -163,15 +254,59 @@ def discover_python_files(
     excluded = tuple(DEFAULT_EXCLUDES) + tuple(exclude or [])
     selected: dict[str, Path] = {}
     issues: list[ParseIssue] = []
+    issue_keys: set[tuple[str, ParseIssueCode]] = set()
     for pattern in include:
         for candidate in root.glob(pattern):
+            try:
+                relative = candidate.relative_to(root).as_posix()
+            except ValueError:
+                continue
+            if matches_exclude(relative, excluded):
+                continue
+            contains_symlink = _contains_symlink(candidate, root)
+            try:
+                resolved = candidate.resolve(strict=False)
+            except (OSError, RuntimeError) as exc:
+                _append_discovery_issue(
+                    issues,
+                    issue_keys,
+                    relative,
+                    f"symlink target could not be resolved: {exc}",
+                    ParseIssueCode.SYMLINK_RESOLUTION_ERROR,
+                )
+                continue
+            try:
+                resolved.relative_to(root)
+            except ValueError:
+                if contains_symlink:
+                    _append_discovery_issue(
+                        issues,
+                        issue_keys,
+                        relative,
+                        "symlink target is outside the repository root",
+                        ParseIssueCode.EXTERNAL_SYMLINK_EXCLUDED,
+                    )
+                continue
+            if contains_symlink:
+                if not follow_internal_symlinks:
+                    _append_discovery_issue(
+                        issues,
+                        issue_keys,
+                        relative,
+                        "symlink excluded by scan configuration",
+                        ParseIssueCode.SYMLINK_EXCLUDED,
+                    )
+                    continue
+                if not resolved.exists():
+                    _append_discovery_issue(
+                        issues,
+                        issue_keys,
+                        relative,
+                        "symlink target does not exist",
+                        ParseIssueCode.BROKEN_SYMLINK_EXCLUDED,
+                    )
+                    continue
             if not candidate.is_file():
-                continue
-            if candidate.is_symlink() and not follow_internal_symlinks:
-                issues.append(ParseIssue(candidate.relative_to(root).as_posix(), "symlink excluded"))
-                continue
-            relative = candidate.relative_to(root).as_posix()
-            if _matches(relative, excluded):
                 continue
             selected[relative] = candidate
 
@@ -180,7 +315,7 @@ def discover_python_files(
         try:
             content = candidate.read_text(encoding="utf-8")
         except OSError as exc:
-            issues.append(ParseIssue(relative, f"unreadable source: {exc}"))
+            issues.append(ParseIssue(relative, f"unreadable source: {exc}", code=ParseIssueCode.READ_ERROR))
             continue
         files.append(
             SourceFile(
@@ -524,7 +659,7 @@ def analyze_source(source: SourceFile, cache: ParseCache | None = None) -> tuple
     try:
         tree = ast.parse(source.content, filename=source.relative_path)
     except SyntaxError as exc:
-        return None, ParseIssue(source.relative_path, exc.msg, exc.lineno)
+        return None, ParseIssue(source.relative_path, exc.msg, exc.lineno, ParseIssueCode.INVALID_SOURCE)
     visitor = _ModelVisitor(source)
     visitor.visit(tree)
     model = visitor.model
@@ -551,26 +686,49 @@ class ParseCache:
         entry = self.directory / f"{content_hash}.pkl"
         try:
             model = pickle.loads(entry.read_bytes())  # noqa: S301 - trusted local cache
-        except (OSError, pickle.UnpicklingError):
+        except (OSError, pickle.UnpicklingError, EOFError):
             return None
         return model if isinstance(model, SourceModel) else None
 
     def put(self, content_hash: str, model: SourceModel) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
         entry = self.directory / f"{content_hash}.pkl"
+        payload = pickle.dumps(model)
+        temporary_path: Path | None = None
         try:
-            entry.write_bytes(pickle.dumps(model))
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=self.directory,
+                prefix=f".{entry.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary_path = Path(stream.name)
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary_path.replace(entry)
         except OSError:
             return
+        finally:
+            if temporary_path is not None:
+                with suppress(OSError):
+                    temporary_path.unlink(missing_ok=True)
         self._puts_since_prune += 1
         if self._puts_since_prune >= 500:
             self._puts_since_prune = 0
             self._prune()
 
     def _prune(self) -> None:
-        entries = sorted(self.directory.glob("*.pkl"), key=lambda entry: entry.stat().st_mtime, reverse=True)
+        try:
+            entries = sorted(self.directory.glob("*.pkl"), key=lambda entry: entry.stat().st_mtime, reverse=True)
+        except OSError:
+            return
         for stale in entries[self.max_entries :]:
-            stale.unlink(missing_ok=True)
+            try:
+                stale.unlink(missing_ok=True)
+            except OSError:
+                continue
 
 
 def iter_module_scope_calls(model: SourceModel) -> Iterator[CallRecord]:

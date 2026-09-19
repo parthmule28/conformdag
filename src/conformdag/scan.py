@@ -6,12 +6,18 @@ import hashlib
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from conformdag import __version__
-from conformdag.analysis import ParseCache, SourceModel, analyze_source, discover_python_files
+from conformdag.analysis import (
+    NON_FATAL_DISCOVERY_ISSUES,
+    ParseCache,
+    SourceModel,
+    analyze_source,
+    discover_python_files,
+)
 from conformdag.config import load_project_config
-from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic, policy_applies
+from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic, ruff_rules_for_policies
 from conformdag.models import (
     AirflowProfile,
     EnforcementType,
@@ -19,7 +25,6 @@ from conformdag.models import (
     FindingStatus,
     PolicyPack,
     ProjectConfig,
-    RuffAirConfig,
     RunIssue,
     RunMetadata,
     ScanReport,
@@ -81,11 +86,11 @@ def scan_repository(
     findings: list[Finding] = []
     issues = [
         RunIssue(
-            code="DISCOVERY",
+            code=issue.code.value,
             message=issue.message,
             path=Path(issue.path),
             phase="discovery",
-            fatal=issue.message != "symlink excluded",
+            fatal=issue.code not in NON_FATAL_DISCOVERY_ISSUES,
         )
         for issue in discovery_issues
     ]
@@ -106,16 +111,9 @@ def scan_repository(
             models.append(model)
 
     selected_airflow_profile = airflow_profile or config.runtime.airflow_version
-    ruff_policies = [
-        policy
-        for policy in pack.policies
-        if policy.status.value == "ACTIVE"
-        and policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
-        and policy_applies(policy, selected_airflow_profile)
-        and ("ruff-air" in policy.enforcement.deterministic_checks or policy.id == "AIR-DET-012")
-    ]
+    ruff_rules = ruff_rules_for_policies(pack.policies, selected_airflow_profile)
     ruff_violations: list[dict[str, Any]] | None = None
-    if ruff_policies:
+    if ruff_rules:
         ruff_violations = []
         if ruff_binary() is None:
             issues.append(
@@ -123,21 +121,18 @@ def scan_repository(
                     code="RUFF_UNAVAILABLE",
                     message="ruff binary not found; the ruff-air check was skipped",
                     phase="deterministic",
-                    fatal=False,
+                    fatal=True,
                 )
             )
         else:
-            rules = sorted(
-                {rule for policy in ruff_policies for rule in cast(RuffAirConfig, policy.configuration).rules}
-            )
-            result = run_ruff(root, rules)
+            result = run_ruff(root, ruff_rules)
             if result is None:
                 issues.append(
                     RunIssue(
                         code="RUFF_UNAVAILABLE",
                         message="ruff invocation failed; the ruff-air check was skipped",
                         phase="deterministic",
-                        fatal=False,
+                        fatal=True,
                     )
                 )
             else:

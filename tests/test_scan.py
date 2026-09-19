@@ -222,7 +222,7 @@ def test_scan_accepts_bundled_community_pack_from_any_working_directory(tmp_path
     assert report.policies_evaluated == ["COM-DET-001", "COM-DET-002", "COM-DET-003"]
 
 
-def test_scan_reports_ruff_unavailable_issue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scan_fails_closed_when_ruff_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
     _ruff_source(tmp_path)
 
@@ -232,8 +232,8 @@ def test_scan_reports_ruff_unavailable_issue(tmp_path: Path, monkeypatch: pytest
 
     unavailable = [issue for issue in report.issues if issue.code == "RUFF_UNAVAILABLE"]
     assert len(unavailable) == 1
-    assert unavailable[0].fatal is False
-    assert report.complete is True
+    assert unavailable[0].fatal is True
+    assert report.complete is False
 
 
 def test_scan_runs_ruff_once_with_union_rules_and_filters_findings(
@@ -282,7 +282,7 @@ def test_scan_runs_ruff_once_with_union_rules_and_filters_findings(
     assert not any(issue.code == "RUFF_UNAVAILABLE" for issue in report.issues)
 
 
-def test_scan_reports_ruff_invocation_failure_as_nonfatal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scan_fails_closed_when_ruff_invocation_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
     _ruff_source(tmp_path)
 
@@ -297,8 +297,8 @@ def test_scan_reports_ruff_invocation_failure_as_nonfatal(tmp_path: Path, monkey
 
     unavailable = [issue for issue in report.issues if issue.code == "RUFF_UNAVAILABLE"]
     assert len(unavailable) == 1
-    assert unavailable[0].fatal is False
-    assert report.complete is True
+    assert unavailable[0].fatal is True
+    assert report.complete is False
 
 
 def test_scan_keeps_ruff_findings_suppressible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -355,6 +355,19 @@ def test_ruff_air_integration_catches_air002(tmp_path: Path) -> None:
 
     ruff_findings = [finding for finding in report.findings if finding.policy_id == "AIR-TST-002"]
     assert any("AIR002" in (finding.explanation or "") for finding in ruff_findings)
+
+
+@pytest.mark.skipif(which("ruff") is None, reason="ruff binary not installed")
+def test_scan_ignores_repository_ruff_configuration(tmp_path: Path) -> None:
+    pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
+    _ruff_source(tmp_path)
+    (tmp_path / "ruff.toml").write_text('exclude = ["dags"]\nignore = ["AIR002"]\n', encoding="utf-8")
+
+    report = scan_repository(tmp_path, pack_path)
+
+    ruff_findings = [finding for finding in report.findings if finding.policy_id == "AIR-TST-002"]
+    assert len(ruff_findings) == 1
+    assert ruff_findings[0].status is FindingStatus.FAIL
 
 
 @pytest.mark.skipif(which("ruff") is None, reason="ruff binary not installed")

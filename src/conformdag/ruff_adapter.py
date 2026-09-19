@@ -8,17 +8,58 @@ deterministic check; Ruff never writes to source files.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, cast
 
 RUNNER_TIMEOUT_SECONDS = 120.0
+_RUFF_SELECTOR_PATTERN = re.compile(r"^[A-Z]+(?:[0-9]{1,3})?$")
+_RUFF_CODE_PATTERN = re.compile(r"^([A-Z]+)([0-9]{3})$")
 
 
 def ruff_binary() -> str | None:
     """Return the resolved Ruff binary path, or None when unavailable."""
     return shutil.which("ruff")
+
+
+def validate_ruff_selector(selector: str) -> str:
+    """Normalize one exact, family, or bounded-prefix Ruff selector."""
+    normalized = selector.strip().upper()
+    if not _RUFF_SELECTOR_PATTERN.fullmatch(normalized):
+        raise ValueError(f"invalid Ruff selector {selector!r}")
+    return normalized
+
+
+def validate_ruff_selectors(selectors: list[str]) -> list[str]:
+    """Normalize a non-empty list of Ruff selectors."""
+    if not selectors:
+        raise ValueError("at least one Ruff selector is required")
+    return [validate_ruff_selector(selector) for selector in selectors]
+
+
+def ruff_rule_matches(code: str, selector: str) -> bool:
+    """Return whether a Ruff code matches an exact, family, or numeric prefix.
+
+    A selector containing three digits is exact (``AIR002``). An alphabetic
+    selector selects one rule family (``AIR``), while one or two digits after
+    the family select a bounded numeric prefix (``AIR0`` or ``AIR00``).
+    """
+    normalized_selector = validate_ruff_selector(selector)
+    normalized_code = code.strip().upper()
+    code_parts = _RUFF_CODE_PATTERN.fullmatch(normalized_code)
+    if code_parts is None:
+        return normalized_code == normalized_selector
+    if normalized_selector.isalpha():
+        return code_parts.group(1) == normalized_selector
+    selector_parts = re.fullmatch(r"([A-Z]+)([0-9]{1,3})", normalized_selector)
+    if selector_parts is None:
+        return False
+    family, digits = selector_parts.groups()
+    if code_parts.group(1) != family:
+        return False
+    return len(digits) < 3 and code_parts.group(2).startswith(digits) or normalized_code == normalized_selector
 
 
 def run_ruff(repository_root: Path, rules: list[str]) -> list[dict[str, Any]] | None:
@@ -30,13 +71,15 @@ def run_ruff(repository_root: Path, rules: list[str]) -> list[dict[str, Any]] | 
     binary = ruff_binary()
     if binary is None:
         return None
+    normalized_rules = validate_ruff_selectors(rules)
     try:
         process = subprocess.run(  # noqa: S603 - fixed argv, no shell
             [
                 binary,
                 "check",
+                "--isolated",
                 "--select",
-                ",".join(rules),
+                ",".join(normalized_rules),
                 "--output-format",
                 "json",
                 "--no-fix",
