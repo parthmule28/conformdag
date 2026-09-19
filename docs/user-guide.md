@@ -26,6 +26,42 @@ mise exec -- uvx --from conformdag==1.0.0b1 conformdag init
 This creates `conformdag.yaml`, a policy-pack scaffold, authoring standards, and an
 empty suppression file. Review and populate the policy pack before scanning.
 
+## Local product demo
+
+From a source checkout with the development environment installed, run the
+entire product with realistic seeded data — no Docker, credentials, or network
+access required:
+
+```bash
+mise run setup
+mise run demo
+```
+
+The launcher builds a temporary SQLite database and workspace directory,
+seeds realistic repositories, scans, findings, suppressions, and policies
+through the real platform worker, and serves the production dashboard. The
+server binds to the loopback interface only (`http://127.0.0.1:8642` by
+default) and is never reachable from the network.
+
+Demo controls:
+
+```bash
+mise run demo -- --no-open --port 8765
+```
+
+- `--port` overrides the bind port (default `8642`); `--host` overrides the
+  loopback bind address.
+- `--open`/`--no-open` controls whether the browser opens automatically; the
+  demo URL and single-admin demo token are always printed to the terminal.
+- Press Ctrl-C to stop the server. The temporary SQLite database and every
+  seeded workspace file are removed automatically on exit — nothing is left
+  behind to clean up, and each run starts from a fresh seed.
+
+The demo is not a production deployment path. The durable team server is
+deployed with Docker Compose and persistent storage; see the
+[governance platform](#governance-platform) section and the
+[platform deploy guide](platform-deploy.md).
+
 ## Policy-pack review
 
 ```bash

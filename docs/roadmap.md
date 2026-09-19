@@ -47,7 +47,7 @@ P2  Design system + UI surface
     findings. Quality-gate configuration + reporting UI. Domain tags on policies.
     Golden journeys as Playwright e2e.
 
-P3  Demo story
+P3  Demo story (shipped)
     mise run demo: seeded realistic repos + scans + suppressions. Guided tour
     overlay (finding → policy → fix payload → suppression → export). README
     rewrite leading with the demo.
@@ -89,3 +89,6 @@ P4/P5/P6/P7/P8 are independent of the UI work and interleave once P1 is stable.
 - Policy management backend (PackService + /api/v1/packs CRUD + auto-hash)
 - Dashboard 2.0: dark theme, navigation, policies page, suppression management
 - AGENTS.md for OpenCode sessions
+- P3 demo story: `mise run demo` disposable local launcher, seeded platform
+  scenario (repos, scans, findings, gates, suppressions), guided browser tour,
+  and demo-first documentation (README + user guide)
