@@ -479,6 +479,17 @@ def test_runtime_execution_failure_is_a_structured_incomplete_report() -> None:
     assert payload["issues"][-1]["code"] == "RUNTIME_EXECUTION_ERROR"
 
 
+def test_agent_run_preserves_blocked_verifier_as_cli_failure(tmp_path: Path) -> None:
+    from conformdag.agent import AgentOutcome
+
+    blocked = AgentOutcome(changed=True, diff="verified diff", blocked=True)
+    with patch("conformdag.agent.run_agent_pipeline", return_value=blocked):
+        result = CliRunner().invoke(app, ["agent", "run", "--path", str(tmp_path), "--no-verifier"])
+
+    assert result.exit_code == 1
+    assert "pull request blocked by verifier verdict" in result.stderr
+
+
 def test_scan_exits_three_when_static_evaluation_is_unresolved(tmp_path: Path) -> None:
     (tmp_path / "policies").mkdir()
     (tmp_path / "standards").mkdir()

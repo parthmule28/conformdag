@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,44 +107,48 @@ class DockerRunner:
         image: str,
         timeout_seconds: int,
     ) -> list[RuntimeObservation]:
-        manifest_path = manifest.repository_root / ".conformdag" / "runtime-manifest.json"
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
-        command = [
-            "run",
-            "--rm",
-            "--network=none",
-            "--read-only",
-            "--user=airflow",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true",
-            "--cpus=1",
-            "--memory=512m",
-            "--pids-limit=128",
-            "--mount",
-            f"type=bind,src={manifest.repository_root},dst=/workspace,readonly",
-            "--mount",
-            f"type=bind,src={manifest_path},dst=/conformdag/runtime-manifest.json,readonly",
-            "--tmpfs",
-            "/tmp:rw,noexec,nosuid,size=64m",  # noqa: S108 - bounded container tmpfs
-            image,
-            "--manifest",
-            "/conformdag/runtime-manifest.json",
-        ]
-        result = self.run(command, timeout_seconds)
-        if result.returncode != 0:
-            detail = result.stderr.strip() or "runtime container failed"
-            raise RuntimePhaseError(detail)
-        try:
-            payload = json.loads(result.stdout)
-            raw_observations: list[Any]
-            if isinstance(payload, list):
-                raw_observations = cast(list[Any], payload)
-            else:
-                raw_observations = cast(dict[str, Any], payload)["observations"]
-            return [RuntimeObservation.model_validate(item) for item in raw_observations]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise RuntimePhaseError(f"invalid runtime observation output: {exc}") from exc
+        repository_root = manifest.repository_root.resolve()
+        with tempfile.TemporaryDirectory(prefix="conformdag-runtime-") as temporary_directory:
+            manifest_root = Path(temporary_directory).resolve()
+            if manifest_root == repository_root or manifest_root.is_relative_to(repository_root):
+                raise RuntimePhaseError("runtime manifest staging directory must be outside the scanned repository")
+            manifest_path = manifest_root / "runtime-manifest.json"
+            manifest_path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
+            command = [
+                "run",
+                "--rm",
+                "--network=none",
+                "--read-only",
+                "--user=airflow",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges:true",
+                "--cpus=1",
+                "--memory=512m",
+                "--pids-limit=128",
+                "--mount",
+                f"type=bind,src={repository_root},dst=/workspace,readonly",
+                "--mount",
+                f"type=bind,src={manifest_path},dst=/conformdag/runtime-manifest.json,readonly",
+                "--tmpfs",
+                "/tmp:rw,noexec,nosuid,size=64m",  # noqa: S108 - bounded container tmpfs
+                image,
+                "--manifest",
+                "/conformdag/runtime-manifest.json",
+            ]
+            result = self.run(command, timeout_seconds)
+            if result.returncode != 0:
+                detail = result.stderr.strip() or "runtime container failed"
+                raise RuntimePhaseError(detail)
+            try:
+                payload = json.loads(result.stdout)
+                raw_observations: list[Any]
+                if isinstance(payload, list):
+                    raw_observations = cast(list[Any], payload)
+                else:
+                    raw_observations = cast(dict[str, Any], payload)["observations"]
+                return [RuntimeObservation.model_validate(item) for item in raw_observations]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimePhaseError(f"invalid runtime observation output: {exc}") from exc
 
 
 def build_runtime_manifest(

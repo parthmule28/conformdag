@@ -113,6 +113,9 @@ def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path)
     assert "/tmp:rw,noexec,nosuid,size=64m" in command  # noqa: S108 - boundary assertion
     assert command[-2:] == ["--manifest", "/conformdag/runtime-manifest.json"]
     assert mocked.call_args.kwargs["shell"] is False
+    assert not (tmp_path / ".conformdag" / "runtime-manifest.json").exists()
+    manifest_mount = next(item for item in command if "runtime-manifest.json" in item and item.startswith("type=bind"))
+    assert f"src={tmp_path}" not in manifest_mount
 
 
 def test_runtime_import_failure_is_returned_as_structured_error(tmp_path: Path) -> None:

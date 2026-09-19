@@ -8,6 +8,7 @@ or force-push capability in this module by construction.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -59,7 +60,15 @@ class PrClient:
     api_url: str = API_URL
     transport: httpx.BaseTransport | None = None
 
-    def open_pull_request(self, root: Path, head_branch: str, title: str, body: str) -> str:
+    def open_pull_request(
+        self,
+        root: Path,
+        head_branch: str,
+        title: str,
+        body: str,
+        *,
+        verified_files: Sequence[str],
+    ) -> str:
         """Commit the current working tree changes, push the branch, and open a PR.
 
         Args:
@@ -67,6 +76,7 @@ class PrClient:
             head_branch: Branch name to create and push.
             title: PR title.
             body: PR body with the interpretability evidence.
+            verified_files: Repository-relative files already verified by the fix engine.
 
         Returns:
             The created pull request URL.
@@ -74,9 +84,24 @@ class PrClient:
         Raises:
             PrError: If any git step fails or the REST call is rejected.
         """
+        if not verified_files:
+            raise PrError("refusing to open a PR without verified files")
+        repository_root = root.resolve()
+        paths: list[str] = []
+        for relative in sorted(set(verified_files)):
+            path = Path(relative)
+            resolved = (repository_root / path).resolve()
+            if (
+                path.is_absolute()
+                or not path.parts
+                or ".." in path.parts
+                or not resolved.is_relative_to(repository_root)
+            ):
+                raise PrError(f"verified file is not repository-relative: {relative}")
+            paths.append(path.as_posix())
         _git(root, ["checkout", "-B", head_branch])
-        _git(root, ["add", "-A"])
-        _git(root, ["commit", "-m", title], tolerate="nothing to commit")
+        _git(root, ["add", "--", *paths])
+        _git(root, ["commit", "--only", "-m", title, "--", *paths], tolerate="nothing to commit")
         _git(root, ["push", "-u", "origin", head_branch])
         with _build_client(self.api_url, self.token, transport=self.transport) as client:
             response = client.post(

@@ -247,6 +247,11 @@ def test_verifier_redacts_credentials(build_repository: Callable[[Path], Path], 
 
 def test_pipeline_opens_pr_after_approval(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
     root = _git_repo(build_repository(tmp_path))
+    unverified = root / "unverified.txt"
+    unverified.write_text("must not enter the agent commit\n", encoding="utf-8")
+    staged_unverified = root / "staged-unverified.txt"
+    staged_unverified.write_text("must not enter the agent commit either\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", staged_unverified.name], cwd=root, check=True, capture_output=True)
     pr_calls: list[httpx.Request] = []
     pull_requests = PrClient(token="t", repo="acme/repo", transport=_pr_transport(pr_calls))
     verifier = Verifier(
@@ -267,6 +272,10 @@ def test_pipeline_opens_pr_after_approval(build_repository: Callable[[Path], Pat
     assert "AIR-DET-" in body["body"]
     pushed = _git_output(root, ["branch", "-r"])
     assert "origin/conformdag/fix" in pushed
+    committed_files = _git_output(root, ["ls-tree", "-r", "--name-only", "HEAD"])
+    assert "unverified.txt" not in committed_files.splitlines()
+    assert "staged-unverified.txt" not in committed_files.splitlines()
+    assert unverified.is_file()
 
 
 def test_pipeline_without_pr_client_applies_locally(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:

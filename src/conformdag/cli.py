@@ -885,6 +885,7 @@ def agent_run(
         typer.echo(f"pull request: {outcome.pull_request_url}", err=True)
     elif outcome.blocked:
         typer.echo("pull request blocked by verifier verdict", err=True)
+        raise typer.Exit(code=1)
     if not outcome.changed:
         typer.echo("agent run: nothing to fix", err=True)
 

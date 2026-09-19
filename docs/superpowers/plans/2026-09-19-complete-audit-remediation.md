@@ -55,11 +55,11 @@
 
 ### Phase 3 — Agent, pack-pull, CLI, runtime isolation
 
-- [ ] IMP-9 explicit verified-file staging
-- [ ] MIN-2 preserved intentional CLI failures
-- [ ] MIN-5 pack name/timeout/last-known-good hardening
-- [ ] MIN-11 runtime manifests outside scanned repositories
-- [ ] Agent, CLI, pack-pull, runtime, and integration tests
+- [x] IMP-9 explicit verified-file staging
+- [x] MIN-2 preserved intentional CLI failures
+- [x] MIN-5 pack name/timeout/last-known-good hardening
+- [x] MIN-11 runtime manifests outside scanned repositories
+- [x] Agent, CLI, pack-pull, runtime, and integration tests
 
 ### Phase 4 — Platform state, concurrency, database, API
 

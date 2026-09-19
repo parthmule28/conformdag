@@ -1,8 +1,11 @@
 """Distribution tests: pack pull from git and the composite action definition."""
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from shutil import copyfile
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from ruamel.yaml import YAML
@@ -68,6 +71,63 @@ def test_pull_pack_is_idempotent_and_updates_on_repull(tmp_path: Path) -> None:
 
     assert first.resolved_ref == second.resolved_ref
     assert second.name == first.name
+
+
+def test_pull_pack_preserves_last_known_good_on_invalid_update(tmp_path: Path) -> None:
+    source_repo = _make_pack_repository(tmp_path / "org")
+    remote = tmp_path / "org.git"
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(source_repo), str(remote)],
+        check=True,
+        capture_output=True,
+    )
+    cache = tmp_path / "cache"
+    first = pull_pack(str(remote), cache_root=cache)
+    cached_pack = cache / "org" / "policies" / "pack.yaml"
+    original_pack = cached_pack.read_text(encoding="utf-8")
+
+    cached_source = source_repo / "policies" / "pack.yaml"
+    cached_source.write_text("schema_version: '1'\nid: broken\nversion: '1'\npolicies: invalid\n", encoding="utf-8")
+    for arguments in (
+        ["add", "-A"],
+        ["commit", "-q", "-m", "broken update"],
+        ["push", "-q", str(remote), "HEAD:main"],
+    ):
+        subprocess.run(["git", *arguments], cwd=source_repo, check=True, capture_output=True)
+
+    with pytest.raises(PackPullError, match="failed validation"):
+        pull_pack(str(remote), cache_root=cache)
+
+    assert cached_pack.read_text(encoding="utf-8") == original_pack
+    assert (cache / "org" / ".conformdag-pull.yaml").read_text(encoding="utf-8").find(first.resolved_ref) >= 0
+
+
+def test_pull_pack_rejects_unsafe_explicit_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag import packpull
+
+    def unexpected_git(*_arguments: str, **_kwargs: object) -> str:
+        pytest.fail("unsafe pack names must be rejected before invoking git")
+
+    monkeypatch.setattr(packpull, "_git", unexpected_git)
+    for unsafe_name in ("../escape", str(tmp_path / "escape"), "nested/name", "..", "bad name", "bad\\name"):
+        with pytest.raises(PackPullError, match="name"):
+            pull_pack("https://example.test/org.git", cache_root=tmp_path, name=unsafe_name)
+
+
+def test_pack_git_commands_have_a_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag import packpull
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run(_command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(packpull.subprocess, "run", fake_run)
+
+    git = cast("Callable[..., str]", packpull.__dict__["_git"])
+    assert git("status", cwd=tmp_path) == ""
+    assert calls[0]["timeout"] == 120
 
 
 def test_pack_name_derivation_and_reserved_schemes() -> None:
