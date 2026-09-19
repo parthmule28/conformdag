@@ -282,11 +282,30 @@ def test_baseline_eligibility_rejects_ineligible_scan(tmp_path: Path, monkeypatc
 
         assert result.exit_code == 2
         assert "eligible" in result.stderr
+        assert result.stderr.count("error:") == 1, "intentional exits must not be re-caught and re-failed"
 
     with factory() as session:
         repository = session.get(RepositoryRow, "repo1")
         assert repository is not None
         assert repository.baseline_scan_id is None
+
+
+def test_baseline_set_missing_scan_reports_single_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform.db import RepositoryRow, initialize_session_factory
+
+    dsn = f"sqlite:///{tmp_path / 'platform.db'}"
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", dsn)
+    monkeypatch.setenv("CONFORMDAG_PLATFORM_TOKEN", "secret-token")
+    factory = initialize_session_factory(dsn)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="core-dags", path=str(tmp_path)))
+        session.commit()
+
+    result = CliRunner().invoke(app, ["baseline", "set", "missing-scan"])
+
+    assert result.exit_code == 2
+    assert result.stderr.count("error:") == 1
+    assert "scan not found: missing-scan" in result.stderr
 
 
 def test_validate_policies_accepts_bundled_community_alias() -> None:

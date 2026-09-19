@@ -143,7 +143,6 @@ def semantic_finding(
         "finding_kind": "semantic",
         "status": status.value,
         "source_path": source_path.as_posix() if source_path is not None else None,
-        "context_hash": context.context_hash,
         "citations": sorted(
             [
                 {

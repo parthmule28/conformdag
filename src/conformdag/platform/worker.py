@@ -73,6 +73,14 @@ class WorkerSettings:
             raise ValueError("CONFORMDAG_WORKER_POLL_SECONDS must be greater than zero")
         if self.idle_seconds <= 0:
             raise ValueError("CONFORMDAG_WORKER_IDLE_SECONDS must be greater than zero")
+        # Heartbeats refresh after each bounded poll timeout, so the reclaim
+        # window must span at least two poll cycles for a healthy runner to
+        # refresh ownership before another worker reclaims the scan.
+        if self.idle_seconds < 2 * self.poll_seconds:
+            raise ValueError(
+                "CONFORMDAG_WORKER_IDLE_SECONDS must be at least twice poll_seconds "
+                "so heartbeat refreshes outrun stale-scan reclaiming"
+            )
         if self.timeout_seconds <= 0:
             raise ValueError("CONFORMDAG_WORKER_TIMEOUT_SECONDS must be greater than zero")
         if self.max_attempts < 1:
@@ -185,6 +193,7 @@ def execute_claimed_scan(
 
 def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: WorkerSettings) -> str | None:
     """Claim and execute at most one scan; return the handled scan id or None."""
+    logging.getLogger("conformdag").propagate = False
     logger = logging.getLogger("conformdag.worker")
     with session_factory() as session:
         scan = claim_queued_scan(session, stale_running_cutoff(settings.idle_seconds), settings.max_attempts)

@@ -120,6 +120,13 @@ jobs:
             dockerfile: runtime/airflow-3.3.0/Dockerfile
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+        with:
+          cache: true
+      - name: Verify the runtime profile review covers this release
+        env:
+          CONFORMDAG_RELEASE_REF: ${{ github.ref_name }}
+        run: uv run python scripts/verify_runtime_release.py "$CONFORMDAG_RELEASE_REF"
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:

@@ -398,6 +398,31 @@ def test_ruff_air_integration_catches_air002(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(which("ruff") is None, reason="ruff binary not installed")
+def test_ruff_air_catches_violation_reachable_only_through_internal_symlink(tmp_path: Path) -> None:
+    pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
+    (tmp_path / "legacy").mkdir()
+    (tmp_path / "legacy/target.py").write_text(
+        "from airflow import DAG\ndag = DAG(dag_id='x')\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "dags/link.py").symlink_to(tmp_path / "legacy/target.py")
+    (tmp_path / "conformdag.yaml").write_text(
+        'config_version: "1"\nscan:\n  follow_internal_symlinks: true\n',
+        encoding="utf-8",
+    )
+
+    report = scan_repository(tmp_path, pack_path)
+
+    assert report.complete is True
+    assert report.files_scanned == [Path("dags/link.py")]
+    ruff_findings = [finding for finding in report.findings if finding.policy_id == "AIR-TST-002"]
+    assert len(ruff_findings) == 1
+    assert ruff_findings[0].status is FindingStatus.FAIL
+    assert ruff_findings[0].location.file == Path("dags/link.py")
+    assert "AIR002" in (ruff_findings[0].explanation or "")
+
+
+@pytest.mark.skipif(which("ruff") is None, reason="ruff binary not installed")
 def test_scan_ignores_repository_ruff_configuration(tmp_path: Path) -> None:
     pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
     _ruff_source(tmp_path)

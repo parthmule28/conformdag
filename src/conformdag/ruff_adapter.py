@@ -8,6 +8,7 @@ deterministic check; Ruff never writes to source files.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -63,23 +64,51 @@ def ruff_rule_matches(code: str, selector: str) -> bool:
     return len(digits) < 3 and code_parts.group(2).startswith(digits) or normalized_code == normalized_selector
 
 
-def _validated_source_paths(repository_root: Path, source_files: Sequence[Path]) -> list[str] | None:
+def _validated_source_paths(
+    repository_root: Path, source_files: Sequence[Path]
+) -> tuple[list[str], dict[str, str]] | None:
+    """Return validated Ruff inputs and the scan identity behind each one.
+
+    Ruff receives fully resolved absolute paths so symlinked inputs cannot
+    escape the repository root, and deduplication keys on the resolved path.
+    The returned mapping records, for each resolved path, the scan-relative
+    identity discovery selected for that file (for example ``dags/link.py``
+    for a link to ``real/target.py``), so violations can be reported under
+    the identity every other check uses. ``None`` means validation failed.
+    """
     root = repository_root.resolve()
     validated: list[str] = []
-    seen: set[Path] = set()
+    identities: dict[str, str] = {}
     for source_file in source_files:
         try:
             resolved = source_file.resolve(strict=True)
             resolved.relative_to(root)
         except (OSError, RuntimeError, ValueError):
             return None
-        if not resolved.is_file() or resolved in seen:
-            if not resolved.is_file():
-                return None
+        if not resolved.is_file():
+            return None
+        absolute = Path(os.path.abspath(source_file))
+        try:
+            identity = absolute.relative_to(root).as_posix()
+        except ValueError:
+            identity = resolved.relative_to(root).as_posix()
+        key = str(resolved)
+        if key in identities:
             continue
-        seen.add(resolved)
-        validated.append(str(resolved))
-    return validated
+        identities[key] = identity
+        validated.append(key)
+    return validated, identities
+
+
+def _with_scan_identity(violation: dict[str, Any], identities: dict[str, str]) -> dict[str, Any]:
+    """Rewrite one violation's filename onto its scan-relative identity."""
+    filename = violation.get("filename")
+    if not isinstance(filename, str):
+        return violation
+    identity = identities.get(filename) or identities.get(str(Path(filename)))
+    if identity is None:
+        return violation
+    return {**violation, "filename": identity}
 
 
 def run_ruff(repository_root: Path, rules: list[str], source_files: Sequence[Path]) -> list[dict[str, Any]] | None:
@@ -92,9 +121,10 @@ def run_ruff(repository_root: Path, rules: list[str], source_files: Sequence[Pat
     if binary is None:
         return None
     normalized_rules = validate_ruff_selectors(rules)
-    validated_paths = _validated_source_paths(repository_root, source_files)
-    if validated_paths is None:
+    validated = _validated_source_paths(repository_root, source_files)
+    if validated is None:
         return None
+    validated_paths, identities = validated
     if not validated_paths:
         return []
     try:
@@ -130,4 +160,4 @@ def run_ruff(repository_root: Path, rules: list[str], source_files: Sequence[Pat
     items = cast(list[object], parsed)
     if not all(isinstance(item, dict) for item in items):
         return None
-    return [cast(dict[str, Any], item) for item in items]
+    return [_with_scan_identity(cast(dict[str, Any], item), identities) for item in items]

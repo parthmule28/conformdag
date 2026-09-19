@@ -1,7 +1,9 @@
 """Tests for the validated Docker runtime boundary."""
 
+import re
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,11 +12,14 @@ import pytest
 
 from conformdag.models import AirflowProfile, ProjectRuntimeConfig
 from conformdag.runtime import (
+    RUNTIME_PROFILES,
     DockerRunner,
     RuntimePhaseError,
+    RuntimeReleaseError,
     build_runtime_manifest,
     execute_runtime,
     runtime_profile,
+    validate_runtime_release,
 )
 
 pytestmark = pytest.mark.runtime
@@ -291,3 +296,35 @@ def test_digest_resolution_rejects_tag_only_images() -> None:
         pytest.raises(RuntimePhaseError, match="immutable digest"),
     ):
         runner.resolve_digest("airflow:latest")
+
+
+def test_release_validation_accepts_the_reviewed_release_ref() -> None:
+    profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
+
+    validate_runtime_release(profile.reviewed_release)
+
+
+def test_release_validation_rejects_an_unreviewed_release_ref() -> None:
+    unreviewed = "v9.9.9-rc.999"
+
+    with pytest.raises(
+        RuntimeReleaseError,
+        match=f"refusing unreviewed release {re.escape(unreviewed)}",
+    ):
+        validate_runtime_release(unreviewed)
+
+
+def test_release_validation_names_the_recorded_review_in_the_error() -> None:
+    profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
+
+    with pytest.raises(RuntimeReleaseError, match=re.escape(profile.reviewed_release)):
+        validate_runtime_release("v9.9.9-rc.999")
+
+
+def test_release_validation_requires_an_immutable_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
+    tag_pinned = replace(profile, image="ghcr.io/parthmule28/conformdag/airflow-3.3.0:v9.9.9")
+    monkeypatch.setitem(RUNTIME_PROFILES, AirflowProfile.AIRFLOW_3_3_0, tag_pinned)
+
+    with pytest.raises(RuntimeReleaseError, match="immutable sha256 digest"):
+        validate_runtime_release(profile.reviewed_release)

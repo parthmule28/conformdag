@@ -682,6 +682,7 @@ def test_cors_preflight_allows_configured_origin(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert "access-control-allow-credentials" not in response.headers
 
 
 def test_cors_rejects_unknown_origin(client: TestClient) -> None:
@@ -730,6 +731,37 @@ def test_platform_startup_installs_json_logging(client: TestClient) -> None:
 
     assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger("conformdag").handlers)
     assert not any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
+
+
+def test_migrations_and_startup_emit_application_event_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root_logger = logging.getLogger()
+    conformdag_logger = logging.getLogger("conformdag")
+    previous_root_handlers = list(root_logger.handlers)
+    try:
+        for handler in previous_root_handlers:
+            root_logger.removeHandler(handler)
+        for handler in list(conformdag_logger.handlers):
+            conformdag_logger.removeHandler(handler)
+        dsn = f"sqlite:///{tmp_path / 'platform.db'}"
+        factory = initialize_session_factory(dsn)
+        create_app(factory, PlatformSettings(dsn=dsn, admin_token="secret-token"))
+        capsys.readouterr()
+
+        marker = "migration-startup-log-once"
+        assert conformdag_logger.propagate is False
+        logging.getLogger("conformdag.platform.test").info(marker)
+        matching_lines = [line for line in capsys.readouterr().err.splitlines() if marker in line]
+
+        assert len(matching_lines) == 1
+        assert matching_lines[0].startswith("{")
+    finally:
+        for handler in list(root_logger.handlers):
+            root_logger.removeHandler(handler)
+        for handler in list(conformdag_logger.handlers):
+            conformdag_logger.removeHandler(handler)
+        for handler in previous_root_handlers:
+            root_logger.addHandler(handler)
+        conformdag_logger.propagate = False
 
 
 def test_request_middleware_logs_and_echoes_request_id(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
@@ -1127,12 +1159,16 @@ def test_worker_executes_queued_scan_end_to_end(
 
     settings = WorkerSettings(retention_keep=50)
     worker_logger = logging.getLogger("conformdag.worker")
-    worker_logger.addHandler(caplog.handler)
+    conformdag_logger = logging.getLogger("conformdag")
+    direct_capture = caplog.handler not in conformdag_logger.handlers
+    if direct_capture:
+        worker_logger.addHandler(caplog.handler)
     try:
         with caplog.at_level(logging.INFO, logger="conformdag.worker"):
             handled = run_worker_once(factory, platform_env, settings)
     finally:
-        worker_logger.removeHandler(caplog.handler)
+        if direct_capture:
+            worker_logger.removeHandler(caplog.handler)
 
     assert handled == "scan1"
     events = [record for record in caplog.records if record.name == "conformdag.worker"]
@@ -2179,6 +2215,11 @@ def test_worker_settings_reject_nonpositive_timing(monkeypatch: pytest.MonkeyPat
         WorkerSettings.from_environment()
 
 
+def test_worker_settings_reject_idle_window_without_heartbeat_margin() -> None:
+    with pytest.raises(ValueError, match="CONFORMDAG_WORKER_IDLE_SECONDS must be at least twice poll_seconds"):
+        WorkerSettings(poll_seconds=10.0, idle_seconds=2)
+
+
 def test_worker_loop_sleeps_when_idle(platform_env: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.platform import worker as worker_module
 
@@ -2384,7 +2425,7 @@ def test_load_settings_requires_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
         load_settings()
 
 
-def test_platform_rejects_wildcard_cors_with_credentials() -> None:
+def test_platform_rejects_wildcard_cors_origins() -> None:
     with pytest.raises(ValidationError, match="wildcard"):
         PlatformSettings(dsn="sqlite:///x", cors_origins=["*"])
 
@@ -2462,12 +2503,16 @@ def test_runner_persists_scan_failure(
 
     monkeypatch.chdir(tmp_path)
     runner_logger = logging.getLogger("conformdag.runner")
-    runner_logger.addHandler(caplog.handler)
+    conformdag_logger = logging.getLogger("conformdag")
+    direct_capture = caplog.handler not in conformdag_logger.handlers
+    if direct_capture:
+        runner_logger.addHandler(caplog.handler)
     try:
         with caplog.at_level(logging.INFO, logger="conformdag.runner"):
             code = execute_scan("scan1", platform_env)
     finally:
-        runner_logger.removeHandler(caplog.handler)
+        if direct_capture:
+            runner_logger.removeHandler(caplog.handler)
 
     assert code == 1
     from conformdag.platform.logging import JsonFormatter

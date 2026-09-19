@@ -3,6 +3,7 @@
 import re
 import runpy
 import subprocess
+import sys
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -13,7 +14,9 @@ from typing import cast
 import pytest
 from ruamel.yaml import YAML
 
+from conformdag.models import AirflowProfile
 from conformdag.packpull import PackPullError, pack_name_from_source, pull_pack
+from conformdag.runtime import runtime_profile
 
 
 def _make_pack_repository(root: Path) -> Path:
@@ -219,6 +222,62 @@ def test_release_workflow_uses_reviewed_sha_pins() -> None:
 
     assert uses
     assert all(re.fullmatch(r"[^/@]+/[^/@]+@[0-9a-f]{40}", action) for action in uses)
+
+
+def test_runtime_release_check_passes_for_the_reviewed_release() -> None:
+    reviewed = runtime_profile(AirflowProfile.AIRFLOW_3_3_0).reviewed_release
+
+    result = subprocess.run(
+        [sys.executable, "scripts/verify_runtime_release.py", reviewed],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"reviewed for release {reviewed}" in result.stdout
+
+
+def test_runtime_release_check_fails_for_an_unreviewed_release() -> None:
+    reviewed = runtime_profile(AirflowProfile.AIRFLOW_3_3_0).reviewed_release
+    unreviewed = "v9.9.9-rc.999"
+
+    result = subprocess.run(
+        [sys.executable, "scripts/verify_runtime_release.py", unreviewed],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert f"refusing unreviewed release {unreviewed}" in result.stderr
+    assert reviewed in result.stderr
+
+
+def test_runtime_release_check_requires_a_release_ref() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/verify_runtime_release.py"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "usage: verify_runtime_release.py" in result.stderr
+
+
+def test_release_workflow_gates_runtime_publish_on_review_validation() -> None:
+    workflow = YAML(typ="safe").load(Path(".github/workflows/release.yml").read_text(encoding="utf-8"))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    steps = workflow["jobs"]["runtime-images"]["steps"]
+
+    validation = [index for index, step in enumerate(steps) if "verify_runtime_release.py" in str(step.get("run", ""))]
+    assert len(validation) == 1
+    step = steps[validation[0]]
+    assert step["env"]["CONFORMDAG_RELEASE_REF"] == "${{ github.ref_name }}"
+    publish = next(
+        index for index, candidate in enumerate(steps) if "build-push-action" in str(candidate.get("uses", ""))
+    )
+    assert validation[0] < publish
 
 
 def test_production_compose_requires_database_credentials() -> None:

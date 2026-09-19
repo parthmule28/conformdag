@@ -952,6 +952,10 @@ def baseline_set(scan_id: str) -> None:
             repository.baseline_scan_id = scan_id
             session.commit()
             repository_id = repository.id
+    except typer.Exit:
+        # typer.Exit derives from RuntimeError; intentional CLI exits must not be
+        # re-caught and reported as a second (empty) error line.
+        raise
     except (OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:
         _fail(exc)
     typer.echo(f"baseline set: {scan_id} (repository {repository_id})")

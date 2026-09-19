@@ -1,5 +1,6 @@
 """Tests for typed deterministic evaluators and stable evidence."""
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,6 +100,43 @@ def test_ruff_air_evaluator_maps_violations_to_findings(tmp_path: Path, monkeypa
     assert "AIR002" in finding.explanation
 
 
+def test_ruff_air_evaluator_reports_symlinked_violation_under_scan_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    target = dags / "target.py"
+    source_text = "from airflow import DAG\ndag = DAG(dag_id='x')\n"
+    target.write_text(source_text, encoding="utf-8")
+    link = dags / "link.py"
+    link.symlink_to(target)
+    source_file = SourceFile(link, "dags/link.py", source_text, "input-hash")
+    model, issue = analyze_source(source_file)
+    assert issue is None
+    assert model is not None
+    policy = _ruff_policy()
+    context = EvaluationContext(policy, [model], repository_root=tmp_path)
+    payload: list[dict[str, Any]] = [
+        {
+            "filename": "dags/link.py",
+            "location": {"row": 2, "column": 7},
+            "code": "AIR002",
+            "message": "`DAG` or `@dag` should have an explicit `schedule` argument",
+        }
+    ]
+
+    def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> list[dict[str, Any]]:
+        return payload
+
+    monkeypatch.setattr("conformdag.evaluator.run_ruff", fake_run_ruff)
+
+    findings = CHECK_EVALUATORS["ruff-air"].evaluate(context)
+
+    assert len(findings) == 1
+    assert findings[0].location.file == Path("dags/link.py")
+    assert findings[0].location.start_line == 2
+
+
 def test_ruff_air_evaluator_skips_when_binary_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     model = _model("from airflow import DAG\ndag = DAG(dag_id='x')\n")
     policy = _ruff_policy()
@@ -175,6 +213,42 @@ def test_run_ruff_disables_source_fixes(tmp_path: Path, monkeypatch: pytest.Monk
     assert arguments[arguments.index("--select") + 1] == "AIR002"
     assert arguments[-1] == str(source)
     assert kwargs["check"] is False
+
+
+def test_run_ruff_reports_internal_symlink_sources_under_scan_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.ruff_adapter import run_ruff
+
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    target = legacy / "target.py"
+    target.write_text("from airflow import DAG\ndag = DAG(dag_id='x')\n", encoding="utf-8")
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    link = dags / "link.py"
+    link.symlink_to(target)
+    payload = json.dumps(
+        [
+            {
+                "filename": str(target.resolve()),
+                "location": {"row": 2, "column": 7},
+                "code": "AIR002",
+                "message": "`DAG` or `@dag` should have an explicit `schedule` argument",
+            }
+        ]
+    )
+
+    def fake_run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(arguments, 1, stdout=payload, stderr="")
+
+    monkeypatch.setattr("conformdag.ruff_adapter.ruff_binary", lambda: "/usr/bin/ruff")
+    monkeypatch.setattr("conformdag.ruff_adapter.subprocess.run", fake_run)
+
+    violations = run_ruff(tmp_path, ["AIR002"], [link])
+
+    assert violations is not None
+    assert [item["filename"] for item in violations] == ["dags/link.py"]
 
 
 def test_run_ruff_rejects_source_paths_outside_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

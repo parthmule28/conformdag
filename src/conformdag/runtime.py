@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from collections.abc import Sequence
@@ -17,6 +18,8 @@ from conformdag.models import (
     RuntimeObservation,
 )
 
+_IMMUTABLE_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+
 
 @dataclass(frozen=True)
 class RuntimeProfile:
@@ -25,6 +28,10 @@ class RuntimeProfile:
     airflow_profile: AirflowProfile
     image: str
     provider_versions: dict[str, str]
+    # Release tag/ref whose review approved the pinned image identity. Release
+    # publishing validates this against the pushed tag, so a new release cannot
+    # publish a runtime profile that has not been explicitly re-reviewed.
+    reviewed_release: str
 
 
 RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
@@ -40,6 +47,7 @@ RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
             "apache-airflow-providers-http": "6.0.4",
             "apache-airflow-providers-google": "22.2.2",
         },
+        reviewed_release="v1.0.0-beta.1",
     ),
 }
 
@@ -47,6 +55,25 @@ RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
 def runtime_profile(profile: AirflowProfile) -> RuntimeProfile:
     """Return the immutable profile definition for a supported Airflow version."""
     return RUNTIME_PROFILES[profile]
+
+
+class RuntimeReleaseError(RuntimeError):
+    """Raised when a release ref was not reconciled with the reviewed runtime profiles."""
+
+
+def validate_runtime_release(release_ref: str) -> None:
+    """Fail unless every published runtime profile was reviewed for ``release_ref``."""
+    for profile in RUNTIME_PROFILES.values():
+        name = profile.airflow_profile.value
+        if _IMMUTABLE_DIGEST.search(profile.image) is None:
+            raise RuntimeReleaseError(
+                f"runtime profile {name} must pin an immutable sha256 digest, got {profile.image}"
+            )
+        if profile.reviewed_release != release_ref:
+            raise RuntimeReleaseError(
+                f"runtime profile {name} was last reviewed for release {profile.reviewed_release}; "
+                f"refusing unreviewed release {release_ref} until RUNTIME_PROFILES records its review"
+            )
 
 
 class RuntimePhaseError(RuntimeError):

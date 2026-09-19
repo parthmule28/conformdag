@@ -93,7 +93,7 @@ class PlatformSettings(BaseModel):
     def validate_cors_origins(cls, origins: list[str]) -> list[str]:
         for origin in origins:
             if origin == "*":
-                raise ValueError("wildcard CORS origins are unsafe when credentials are enabled")
+                raise ValueError("wildcard CORS origins are not supported; configure explicit origins")
             parsed = urlsplit(origin)
             if (
                 parsed.scheme not in {"http", "https"}
@@ -576,7 +576,7 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["X-Total-Count"],

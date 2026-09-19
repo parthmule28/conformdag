@@ -838,14 +838,24 @@ class DynamicDagFactoryEvaluator:
 
 
 def _ruff_path(repository_root: Path, filename: object) -> str | None:
+    """Normalize a Ruff filename to the scan-relative identity of its source.
+
+    Violations carry the scan identity recorded by the Ruff adapter, so
+    filenames are matched textually against the repository root: resolving
+    them here would collapse an internal symlink such as ``dags/link.py``
+    back onto its target and lose the identity the file was scanned under.
+    """
     if not isinstance(filename, str) or not filename:
         return None
     path = Path(filename)
-    candidate = path if path.is_absolute() else repository_root / path
     try:
-        return candidate.resolve().relative_to(repository_root.resolve()).as_posix()
-    except (OSError, ValueError):
+        if path.is_absolute():
+            return path.relative_to(repository_root.resolve()).as_posix()
+    except ValueError:
         return None
+    if path.parts and path.parts[0] == "..":
+        return None
+    return path.as_posix()
 
 
 def ruff_policies_for_scan(policies: Iterable[Policy], airflow_profile: AirflowProfile | None) -> list[Policy]:

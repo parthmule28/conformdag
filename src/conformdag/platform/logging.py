@@ -56,6 +56,7 @@ class JsonFormatter(logging.Formatter):
 def install_json_logging() -> None:
     """Attach the JSON formatter to ConformDAG's logger namespace exactly once."""
     logger = logging.getLogger("conformdag")
+    logger.propagate = False
     for handler in logger.handlers:
         if isinstance(handler.formatter, JsonFormatter):
             return
