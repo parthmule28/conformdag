@@ -4,7 +4,6 @@ import { BrowserRouter } from "react-router-dom";
 import { DemoTour } from "./demo/DemoTour";
 import { ThemeProvider } from "./layout/ThemeProvider";
 import { AppRoutes } from "./routes";
-import { DemoTour } from "./demo/DemoTour";
 
 const queryClient = new QueryClient();
 
