@@ -308,10 +308,7 @@ def test_demo_seed_makes_the_healthy_current_scan_newest(tmp_path: Path) -> None
     demo_factory = create_session_factory(workspace.dsn)
 
     with demo_factory() as session:
-        newest = (
-            session.scalars(select(ScanRow).order_by(ScanRow.created_at.desc(), ScanRow.id.desc()))
-            .first()
-        )
+        newest = session.scalars(select(ScanRow).order_by(ScanRow.created_at.desc(), ScanRow.id.desc())).first()
         assert newest is not None
         assert newest.id == scenario.ids["current_scan"]
         assert newest.repository_id == scenario.ids["repository"]
