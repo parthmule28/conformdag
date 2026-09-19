@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ConformDAG Platform</title>
+    <script>
+      (() => {
+        try {
+          const theme = window.localStorage.getItem("conformdag-theme");
+          if (theme === "light" || theme === "dark") {
+            document.documentElement.setAttribute("data-theme", theme);
+          }
+        } catch {
+          // Storage can be unavailable; the stylesheet still follows the OS theme.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1171,6 +1171,29 @@ def test_scan_history_emits_complete_and_gate_passed(client: TestClient, tmp_pat
     assert entry["status"] == "succeeded"
     assert entry["complete"] is True
     assert entry["gate_passed"] is True
+    assert entry["artifact_available"] is True
+
+
+def test_scan_history_marks_pruned_artifacts_unavailable(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(
+                id="scan-pruned",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="p" * 64,
+                report_json=None,
+            )
+        )
+        session.commit()
+
+    entry = next(
+        row for row in _get(client, f"/api/v1/repos/{repository_id}/scans").json() if row["scan_id"] == "scan-pruned"
+    )
+
+    assert entry["artifact_available"] is False
 
 
 def test_scan_history_returns_total_and_deterministic_tie_order(client: TestClient, tmp_path: Path) -> None:
@@ -3262,6 +3285,22 @@ def test_dashboard_index_is_served(client: TestClient) -> None:
     response = _get(client, "/")
     assert response.status_code == 200
     assert "ConformDAG Platform" in response.text
+
+
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "src/conformdag/platform/static/index.html").is_file(),
+    reason="dashboard static assets are not built",
+)
+def test_dashboard_deep_links_fall_back_without_masking_assets_or_api(client: TestClient) -> None:
+    deep_link = _get(client, "/repos/repo-1")
+    missing_asset = _get(client, "/assets/does-not-exist.js")
+    unknown_api = _get(client, "/api/v1/not-a-route")
+
+    assert deep_link.status_code == 200
+    assert "ConformDAG Platform" in deep_link.text
+    assert missing_asset.status_code == 404
+    assert unknown_api.status_code == 404
+    assert unknown_api.json()["detail"].startswith("unknown API path")
 
 
 def test_retention_clears_artifacts_and_keeps_findings(platform_env: str) -> None:

@@ -89,15 +89,15 @@
 
 ### Phase 6 — Production SPA and frontend
 
-- [ ] IMP-10 production SPA fallback preserving APIs/assets
-- [ ] MIN-21 artifact-aware report/export actions
-- [ ] MIN-22 demo-tour restart route handling
-- [ ] MIN-23 modal initial focus
-- [ ] MIN-24 real React act environment/test fixes
-- [ ] MIN-25 FieldShell ID contract
-- [ ] MIN-26 pre-paint theme bootstrap
-- [ ] MIN-27 frontend consistency cleanup
-- [ ] Frontend tests and packaged-server Playwright verification
+- [x] IMP-10 production SPA fallback preserving APIs/assets
+- [x] MIN-21 artifact-aware report/export actions
+- [x] MIN-22 demo-tour restart route handling
+- [x] MIN-23 modal initial focus
+- [x] MIN-24 real React act environment/test fixes
+- [x] MIN-25 FieldShell ID contract
+- [x] MIN-26 pre-paint theme bootstrap
+- [x] MIN-27 frontend consistency cleanup
+- [x] Frontend tests and packaged-server Playwright verification — platform 171 passed; frontend 121 passed; build, Ruff, Pyright, and packaged Playwright checks passed
 
 ### Phase 7 — Documentation and source of truth
 

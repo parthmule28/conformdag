@@ -21,7 +21,9 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import ColumnElement, false, func, nullslast, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
+from starlette.types import Scope
 
 from conformdag.models import ScanReport
 from conformdag.platform.aggregates import build_overview, build_repository_trends
@@ -52,6 +54,29 @@ from conformdag.reporting import render_html, render_sarif
 
 API_PREFIX = "/api/v1"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _is_spa_route(path: str) -> bool:
+    """Return whether a missing static path is eligible for the SPA shell."""
+    normalized = path.strip("/")
+    if normalized == "" or normalized.startswith("assets/"):
+        return normalized == ""
+    return "." not in normalized.rsplit("/", maxsplit=1)[-1]
+
+
+class DashboardStaticFiles(StaticFiles):
+    """Serve the built dashboard while preserving missing-asset 404 responses."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or not _is_spa_route(path):
+                raise
+            return await super().get_response("index.html", scope)
+        if response.status_code == 404 and _is_spa_route(path):
+            return await super().get_response("index.html", scope)
+        return response
 
 
 class PlatformSettings(BaseModel):
@@ -347,6 +372,7 @@ def scan_history(
                     result_fingerprint=row.result_fingerprint,
                     complete=row.complete,
                     gate_passed=cast("bool | None", gate_result.get("passed")),
+                    artifact_available=row.report_json is not None,
                 )
             )
         return summaries
@@ -648,7 +674,7 @@ def create_app(
 
     app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
     if STATIC_DIR.is_dir():
-        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
+        app.mount("/", DashboardStaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
 
 

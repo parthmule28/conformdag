@@ -42,7 +42,7 @@ interface FieldExtras {
   error?: string;
 }
 
-function fieldAria(inputId: string, extras: FieldExtras): {
+function fieldAria(inputId: string, extras: Pick<FieldExtras, "hint" | "error">, externalDescribedBy?: string): {
   hintId: string;
   errorId: string;
   describedBy: string | undefined;
@@ -52,26 +52,35 @@ function fieldAria(inputId: string, extras: FieldExtras): {
   const describedBy = [
     extras.hint !== undefined ? hintId : null,
     extras.error !== undefined ? errorId : null,
+    externalDescribedBy?.trim() || null,
   ]
-    .filter(Boolean)
+    .filter((value): value is string => value !== null)
     .join(" ");
   return { hintId, errorId, describedBy: describedBy === "" ? undefined : describedBy };
 }
 
 export interface InputProps extends ComponentPropsWithoutRef<"input">, FieldExtras {}
 
-export function Input({ label, hint, error, id, className, ...rest }: InputProps) {
+export function Input({
+  label,
+  hint,
+  error,
+  id,
+  className,
+  "aria-describedby": externalDescribedBy,
+  ...rest
+}: InputProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
-  const { hintId, errorId, describedBy } = fieldAria(inputId, { label, hint, error });
+  const { hintId, errorId, describedBy } = fieldAria(inputId, { hint, error }, externalDescribedBy);
   return (
     <FieldShell id={inputId} label={label} hint={hint} hintId={hintId} error={error} errorId={errorId}>
       <input
+        {...rest}
         id={inputId}
         aria-invalid={error !== undefined || undefined}
         aria-describedby={describedBy}
         className={cx(FIELD_CLASSES, error !== undefined ? "border-fail" : "border-line", className)}
-        {...rest}
       />
     </FieldShell>
   );
@@ -79,18 +88,27 @@ export function Input({ label, hint, error, id, className, ...rest }: InputProps
 
 export interface SelectProps extends ComponentPropsWithoutRef<"select">, FieldExtras {}
 
-export function Select({ label, hint, error, id, className, children, ...rest }: SelectProps) {
+export function Select({
+  label,
+  hint,
+  error,
+  id,
+  className,
+  children,
+  "aria-describedby": externalDescribedBy,
+  ...rest
+}: SelectProps) {
   const generatedId = useId();
   const selectId = id ?? generatedId;
-  const { hintId, errorId, describedBy } = fieldAria(selectId, { label, hint, error });
+  const { hintId, errorId, describedBy } = fieldAria(selectId, { hint, error }, externalDescribedBy);
   return (
     <FieldShell id={selectId} label={label} hint={hint} hintId={hintId} error={error} errorId={errorId}>
       <select
+        {...rest}
         id={selectId}
         aria-invalid={error !== undefined || undefined}
         aria-describedby={describedBy}
         className={cx(FIELD_CLASSES, error !== undefined ? "border-fail" : "border-line", className)}
-        {...rest}
       >
         {children}
       </select>
@@ -100,19 +118,28 @@ export function Select({ label, hint, error, id, className, children, ...rest }:
 
 export interface TextareaProps extends ComponentPropsWithoutRef<"textarea">, FieldExtras {}
 
-export function Textarea({ label, hint, error, id, className, rows = 3, ...rest }: TextareaProps) {
+export function Textarea({
+  label,
+  hint,
+  error,
+  id,
+  className,
+  rows = 3,
+  "aria-describedby": externalDescribedBy,
+  ...rest
+}: TextareaProps) {
   const generatedId = useId();
   const textareaId = id ?? generatedId;
-  const { hintId, errorId, describedBy } = fieldAria(textareaId, { label, hint, error });
+  const { hintId, errorId, describedBy } = fieldAria(textareaId, { hint, error }, externalDescribedBy);
   return (
     <FieldShell id={textareaId} label={label} hint={hint} hintId={hintId} error={error} errorId={errorId}>
       <textarea
+        {...rest}
         id={textareaId}
         rows={rows}
         aria-invalid={error !== undefined || undefined}
         aria-describedby={describedBy}
         className={cx(FIELD_CLASSES, error !== undefined ? "border-fail" : "border-line", className)}
-        {...rest}
       />
     </FieldShell>
   );

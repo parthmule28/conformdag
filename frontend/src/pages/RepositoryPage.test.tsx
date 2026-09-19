@@ -77,6 +77,7 @@ const HISTORY: Page<ScanSummary> = {
       result_fingerprint: "fp-1",
       complete: true,
       gate_passed: true,
+      artifact_available: true,
     },
     {
       scan_id: "scan-2",
@@ -86,6 +87,7 @@ const HISTORY: Page<ScanSummary> = {
       result_fingerprint: "fp-2",
       complete: true,
       gate_passed: false,
+      artifact_available: true,
     },
     {
       scan_id: "scan-3",
@@ -95,6 +97,7 @@ const HISTORY: Page<ScanSummary> = {
       result_fingerprint: null,
       complete: null,
       gate_passed: null,
+      artifact_available: false,
     },
     {
       scan_id: "scan-4",
@@ -104,6 +107,7 @@ const HISTORY: Page<ScanSummary> = {
       result_fingerprint: null,
       complete: false,
       gate_passed: null,
+      artifact_available: false,
     },
   ],
 };
@@ -202,6 +206,26 @@ describe("RepositoryPage", () => {
 
     expect(screen.getAllByText("Sep 16").length).toBeGreaterThan(0);
     expect(screen.queryByText("2026-09-15")).not.toBeInTheDocument();
+  });
+
+  it("does not offer exports when the retained report artifact was pruned", async () => {
+    const historyWithPrunedArtifact = {
+      ...HISTORY,
+      items: HISTORY.items.map((scan, index) => ({
+        ...scan,
+        artifact_available: index !== 1,
+      })),
+    } as Page<ScanSummary>;
+    listRepositoriesMock.mockResolvedValue([REPOSITORY]);
+    scanHistoryMock.mockResolvedValue(historyWithPrunedArtifact);
+    getRepositoryTrendsMock.mockResolvedValue({ repository_id: "repo-1", points: TREND_POINTS });
+
+    renderRepositoryPage();
+
+    await screen.findByText("etl-core");
+    expect(within(rowForScan("scan-1")).getByRole("link", { name: "JSON" })).toBeInTheDocument();
+    expect(within(rowForScan("scan-2")).queryByRole("link", { name: "JSON" })).not.toBeInTheDocument();
+    expect(within(rowForScan("scan-2")).getByText("Artifact unavailable")).toBeInTheDocument();
   });
 
   it("pages through scan history using the server total", async () => {
