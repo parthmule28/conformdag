@@ -32,10 +32,21 @@ class SemanticProviderError(RuntimeError):
 def strict_semantic_response_schema() -> dict[str, Any]:
     """Return the canonical response schema adapted for strict JSON-schema providers."""
     schema = deepcopy(SemanticResponse.model_json_schema())
+    provider_fields = (
+        "status",
+        "evidence",
+        "explanation",
+        "remediation",
+        "confidence",
+        "audit_evidence",
+    )
+    root_properties = cast(dict[str, Any], schema["properties"])
+    schema["properties"] = {name: root_properties[name] for name in provider_fields}
 
     def close_objects(value: Any) -> None:
         if isinstance(value, dict):
             mapping = cast(dict[str, Any], value)
+            mapping.pop("default", None)
             properties = mapping.get("properties")
             if mapping.get("type") == "object" and isinstance(properties, dict):
                 property_map = cast(dict[str, Any], properties)
@@ -48,6 +59,7 @@ def strict_semantic_response_schema() -> dict[str, Any]:
                 close_objects(child)
 
     close_objects(schema)
+    schema["required"] = list(provider_fields)
     return schema
 
 
@@ -247,6 +259,9 @@ class OpenAICompatibleProvider:
                         "usage": usage,
                         "retries": attempts,
                         "latency_ms": max(0, round((monotonic() - started) * 1000)),
+                        "cache_hit": False,
+                        "repeatability": "not-measured",
+                        "pricing_provenance": None,
                     }
                 )
             except (KeyError, IndexError, TypeError, ValueError) as exc:

@@ -217,13 +217,58 @@ def test_native_structured_output_is_opt_in_and_schema_constrained() -> None:
 def test_strict_semantic_schema_requires_all_properties_and_closes_objects() -> None:
     schema = strict_semantic_response_schema()
 
+    assert set(schema["properties"]) == {
+        "status",
+        "evidence",
+        "explanation",
+        "remediation",
+        "confidence",
+        "audit_evidence",
+    }
     assert set(schema["required"]) == set(schema["properties"])
     assert schema["additionalProperties"] is False
     assert "anyOf" in schema["properties"]["remediation"]
+    assert "default" not in schema["properties"]["remediation"]
     assert schema["$defs"]["SemanticAuditEvidence"]["additionalProperties"] is False
     assert set(schema["$defs"]["SemanticAuditEvidence"]["required"]) == set(
         schema["$defs"]["SemanticAuditEvidence"]["properties"]
     )
+
+
+def test_provider_owns_telemetry_fields_even_if_non_strict_response_supplies_them() -> None:
+    provider = OpenAICompatibleProvider("https://model.example/v1", "test-model", "key")
+    response = httpx.Response(
+        200,
+        json={
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "status": "PASS",
+                                "evidence": "bounded",
+                                "explanation": "safe",
+                                "remediation": None,
+                                "confidence": "high",
+                                "audit_evidence": [],
+                                "cache_hit": True,
+                                "repeatability": "varied",
+                                "pricing_provenance": "model-claimed",
+                            }
+                        )
+                    }
+                }
+            ]
+        },
+        request=httpx.Request("POST", "https://model.example/v1/chat/completions"),
+    )
+
+    with patch.object(provider, "_request", return_value=response):
+        result = provider.evaluate(_request())
+
+    assert result.cache_hit is False
+    assert result.repeatability == "not-measured"
+    assert result.pricing_provenance is None
 
 
 def test_served_model_mismatch_is_rejected() -> None:
