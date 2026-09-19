@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-from conformdag.models import Confidence, FindingStatus, SemanticRequest, SemanticResponse
+from conformdag.models import Confidence, FindingStatus, Policy, SemanticRequest, SemanticResponse
 from conformdag.scan import scan_repository
 
 
@@ -190,6 +190,46 @@ def test_scan_merges_opt_in_semantic_findings_and_audit_metadata(tmp_path: Path)
     assert all(policy_id not in report.policies_skipped for policy_id in report.run.prompt_hashes)
 
 
+def test_scan_delegates_semantic_execution_to_canonical_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "standards").mkdir()
+    (tmp_path / "dags").mkdir()
+    copyfile("policies/pack.yaml", tmp_path / "policies/pack.yaml")
+    copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
+    (tmp_path / "dags" / "example.py").write_text(
+        "from airflow import DAG\ndag = DAG(owner='platform')\n", encoding="utf-8"
+    )
+    calls: list[int] = []
+    from conformdag.semantic import SemanticContext
+    from conformdag.semantic_evaluator import SemanticEvaluationResult, SemanticProvider, run_semantic_evaluation
+
+    def wrapped(
+        policies: Sequence[Policy],
+        context: SemanticContext,
+        provider: SemanticProvider,
+        source_path: Path | None = None,
+        max_concurrency: int = 4,
+        temperature: float = 0.0,
+        max_output_tokens: int = 4000,
+    ) -> SemanticEvaluationResult:
+        calls.append(1)
+        return run_semantic_evaluation(
+            policies, context, provider, source_path, max_concurrency, temperature, max_output_tokens
+        )
+
+    monkeypatch.setattr("conformdag.scan.run_semantic_evaluation", wrapped)
+
+    report = scan_repository(
+        tmp_path,
+        semantic_provider=_SemanticProvider(),
+        semantic_provider_name="provider",
+        semantic_model="model",
+    )
+
+    assert report.complete is True
+    assert calls == [1]
+
+
 def test_scan_accepts_external_policy_pack_from_working_directory(tmp_path: Path) -> None:
     foreign = tmp_path / "foreign-repo"
     (foreign / "dags").mkdir(parents=True)
@@ -222,7 +262,7 @@ def test_scan_accepts_bundled_community_pack_from_any_working_directory(tmp_path
     assert report.policies_evaluated == ["COM-DET-001", "COM-DET-002", "COM-DET-003"]
 
 
-def test_scan_reports_ruff_unavailable_issue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scan_fails_closed_when_ruff_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
     _ruff_source(tmp_path)
 
@@ -232,8 +272,8 @@ def test_scan_reports_ruff_unavailable_issue(tmp_path: Path, monkeypatch: pytest
 
     unavailable = [issue for issue in report.issues if issue.code == "RUFF_UNAVAILABLE"]
     assert len(unavailable) == 1
-    assert unavailable[0].fatal is False
-    assert report.complete is True
+    assert unavailable[0].fatal is True
+    assert report.complete is False
 
 
 def test_scan_runs_ruff_once_with_union_rules_and_filters_findings(
@@ -258,10 +298,10 @@ def test_scan_runs_ruff_once_with_union_rules_and_filters_findings(
             "message": "owner is missing",
         },
     ]
-    calls: list[tuple[Path, list[str]]] = []
+    calls: list[tuple[Path, list[str], list[Path]]] = []
 
-    def fake_run_ruff(root: Path, rules: list[str]) -> list[dict[str, Any]]:
-        calls.append((root, rules))
+    def fake_run_ruff(root: Path, rules: list[str], files: list[Path]) -> list[dict[str, Any]]:
+        calls.append((root, rules, files))
         return payload
 
     monkeypatch.setattr("conformdag.scan.ruff_binary", lambda: "/usr/bin/ruff")
@@ -269,7 +309,7 @@ def test_scan_runs_ruff_once_with_union_rules_and_filters_findings(
 
     report = scan_repository(tmp_path, pack_path)
 
-    assert calls == [(tmp_path.resolve(), ["AIR002", "AIR003"])]
+    assert calls == [(tmp_path.resolve(), ["AIR002", "AIR003"], [tmp_path / "dags/dag.py"])]
     findings = {
         finding.policy_id: (finding.location.file, finding.explanation)
         for finding in report.findings
@@ -282,13 +322,13 @@ def test_scan_runs_ruff_once_with_union_rules_and_filters_findings(
     assert not any(issue.code == "RUFF_UNAVAILABLE" for issue in report.issues)
 
 
-def test_scan_reports_ruff_invocation_failure_as_nonfatal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scan_fails_closed_when_ruff_invocation_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
     _ruff_source(tmp_path)
 
     monkeypatch.setattr("conformdag.scan.ruff_binary", lambda: "/usr/bin/ruff")
 
-    def fake_run_ruff(_root: Path, _rules: list[str]) -> None:
+    def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> None:
         return None
 
     monkeypatch.setattr("conformdag.scan.run_ruff", fake_run_ruff)
@@ -297,8 +337,8 @@ def test_scan_reports_ruff_invocation_failure_as_nonfatal(tmp_path: Path, monkey
 
     unavailable = [issue for issue in report.issues if issue.code == "RUFF_UNAVAILABLE"]
     assert len(unavailable) == 1
-    assert unavailable[0].fatal is False
-    assert report.complete is True
+    assert unavailable[0].fatal is True
+    assert report.complete is False
 
 
 def test_scan_keeps_ruff_findings_suppressible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -315,7 +355,7 @@ def test_scan_keeps_ruff_findings_suppressible(tmp_path: Path, monkeypatch: pyte
 
     monkeypatch.setattr("conformdag.scan.ruff_binary", lambda: "/usr/bin/ruff")
 
-    def fake_run_ruff(_root: Path, _rules: list[str]) -> list[dict[str, Any]]:
+    def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> list[dict[str, Any]]:
         return payload
 
     monkeypatch.setattr("conformdag.scan.run_ruff", fake_run_ruff)
@@ -355,6 +395,44 @@ def test_ruff_air_integration_catches_air002(tmp_path: Path) -> None:
 
     ruff_findings = [finding for finding in report.findings if finding.policy_id == "AIR-TST-002"]
     assert any("AIR002" in (finding.explanation or "") for finding in ruff_findings)
+
+
+@pytest.mark.skipif(which("ruff") is None, reason="ruff binary not installed")
+def test_ruff_air_catches_violation_reachable_only_through_internal_symlink(tmp_path: Path) -> None:
+    pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
+    (tmp_path / "legacy").mkdir()
+    (tmp_path / "legacy/target.py").write_text(
+        "from airflow import DAG\ndag = DAG(dag_id='x')\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "dags/link.py").symlink_to(tmp_path / "legacy/target.py")
+    (tmp_path / "conformdag.yaml").write_text(
+        'config_version: "1"\nscan:\n  follow_internal_symlinks: true\n',
+        encoding="utf-8",
+    )
+
+    report = scan_repository(tmp_path, pack_path)
+
+    assert report.complete is True
+    assert report.files_scanned == [Path("dags/link.py")]
+    ruff_findings = [finding for finding in report.findings if finding.policy_id == "AIR-TST-002"]
+    assert len(ruff_findings) == 1
+    assert ruff_findings[0].status is FindingStatus.FAIL
+    assert ruff_findings[0].location.file == Path("dags/link.py")
+    assert "AIR002" in (ruff_findings[0].explanation or "")
+
+
+@pytest.mark.skipif(which("ruff") is None, reason="ruff binary not installed")
+def test_scan_ignores_repository_ruff_configuration(tmp_path: Path) -> None:
+    pack_path = _ruff_repository(tmp_path, [("AIR-TST-002", ["AIR002"])])
+    _ruff_source(tmp_path)
+    (tmp_path / "ruff.toml").write_text('exclude = ["dags"]\nignore = ["AIR002"]\n', encoding="utf-8")
+
+    report = scan_repository(tmp_path, pack_path)
+
+    ruff_findings = [finding for finding in report.findings if finding.policy_id == "AIR-TST-002"]
+    assert len(ruff_findings) == 1
+    assert ruff_findings[0].status is FindingStatus.FAIL
 
 
 @pytest.mark.skipif(which("ruff") is None, reason="ruff binary not installed")

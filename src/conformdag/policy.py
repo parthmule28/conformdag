@@ -10,7 +10,7 @@ from typing import Any, cast
 from ruamel.yaml import YAML
 
 from conformdag.bundled import is_bundled_pack_reference, resolve_bundled_pack_path
-from conformdag.models import LifecycleStatus, Policy, PolicyPack, Suppression
+from conformdag.models import LifecycleStatus, Policy, PolicyPack, RuffAirConfig, Suppression
 
 
 class PolicyValidationError(ValueError):
@@ -107,11 +107,18 @@ def load_policy_pack(path: Path, repository_root: Path | None = None) -> PolicyP
 
 def validate_policy_pack(pack: PolicyPack) -> list[str]:
     """Return registry and quality-gate issues that make a pack unrunnable."""
-    from conformdag.evaluator import CHECK_EVALUATORS
+    from conformdag.evaluator import CHECK_EVALUATORS, policy_configuration_issues
     from conformdag.gates import validate_quality_gates
+    from conformdag.ruff_adapter import validate_ruff_selectors
 
     issues = validate_quality_gates(pack)
     for policy in pack.policies:
+        issues.extend(policy_configuration_issues(policy))
+        if isinstance(policy.configuration, RuffAirConfig):
+            try:
+                validate_ruff_selectors(policy.configuration.rules)
+            except ValueError as exc:
+                issues.append(f"{policy.id}: {exc}")
         for check in policy.enforcement.deterministic_checks:
             if check not in CHECK_EVALUATORS:
                 issues.append(f"{policy.id}: unknown deterministic check {check!r}")
@@ -153,7 +160,11 @@ def validate_policy_provenance(
             issues.append(f"{policy.id}: source document does not exist: {source_path}")
             continue
 
-        source_text = source_path.read_text(encoding="utf-8")
+        try:
+            source_text = source_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            issues.append(f"{policy.id}: cannot read source document {source_path}: {exc}")
+            continue
         if policy.source.section not in source_text:
             issues.append(f"{policy.id}: source section {policy.source.section!r} was not found in {source_path}")
 

@@ -214,7 +214,10 @@ function scaledHeight(value: number, max: number): number {
 }
 
 function tickValues(max: number): number[] {
-  return [...new Set([max, Math.ceil(max / 2), 0])];
+  // Finding counts are integers: prefer a readable whole-number midpoint
+  // (5 → 2, 4 → 2) and remove duplicates for very small scales.
+  const midpoint = Math.floor(max / 2);
+  return [...new Set([max, midpoint, 0])];
 }
 
 function formatTrendDate(value: string): string {

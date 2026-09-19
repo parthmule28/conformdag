@@ -15,7 +15,9 @@ from conformdag.analysis import (
     CallRecord,
     DagRecord,
     SourceModel,
+    StaticValue,
     TaskRecord,
+    ValueState,
     secret_like,
 )
 from conformdag.models import (
@@ -43,7 +45,7 @@ from conformdag.models import (
     StartDateFreshnessConfig,
     TopLevelIOConfig,
 )
-from conformdag.ruff_adapter import run_ruff
+from conformdag.ruff_adapter import ruff_rule_matches, run_ruff
 
 
 class EvaluationPhaseError(RuntimeError):
@@ -268,21 +270,30 @@ class TagEvaluator:
         return findings
 
 
-def _dag_defaults(model: SourceModel, task: TaskRecord) -> dict[str, object]:
+def _dag_for_task(model: SourceModel, task: TaskRecord) -> DagRecord | None:
     if task.dag_line is not None:
         for dag in model.dags:
             if dag.line == task.dag_line:
-                return dag.defaults
+                return dag
     for dag in model.dags:
         if task.dag_name is None or task.dag_name == dag.variable_name:
-            return dag.defaults
-    return {}
+            return dag
+    return None
 
 
-def _effective_value(model: SourceModel, task: TaskRecord, name: str) -> object:
+def _effective_value(model: SourceModel, task: TaskRecord, name: str) -> StaticValue:
+    if name in task.unresolved_kwargs:
+        return StaticValue(ValueState.UNRESOLVED)
     if name in task.values:
-        return task.values[name]
-    return _dag_defaults(model, task).get(name)
+        return StaticValue(ValueState.RESOLVED, task.values[name])
+    dag = _dag_for_task(model, task)
+    if dag is None:
+        return StaticValue(ValueState.ABSENT)
+    if name in dag.unresolved_defaults:
+        return StaticValue(ValueState.UNRESOLVED)
+    if name in dag.defaults:
+        return StaticValue(ValueState.RESOLVED, dag.defaults[name])
+    return StaticValue(ValueState.ABSENT)
 
 
 class TimeoutEvaluator:
@@ -293,8 +304,22 @@ class TimeoutEvaluator:
         findings: list[Finding] = []
         for model in context.models:
             for task in model.tasks:
-                value = _effective_value(model, task, "execution_timeout")
-                if value is None:
+                resolved = _effective_value(model, task, "execution_timeout")
+                if resolved.state is ValueState.UNRESOLVED:
+                    findings.append(
+                        _finding(
+                            context.policy,
+                            model,
+                            task.line,
+                            FindingStatus.ERROR,
+                            f"task {task.task_id or task.qualified_name} has an unresolved execution_timeout; "
+                            "the effective value cannot be verified statically",
+                            f"task:{task.task_id or task.line}:timeout:unresolved",
+                        )
+                    )
+                    continue
+                value = resolved.value if resolved.state is ValueState.RESOLVED else None
+                if resolved.state is ValueState.ABSENT:
                     value = configuration.approved_default_seconds
                 seconds = float(value) if isinstance(value, (int, float)) else None
                 valid = (
@@ -362,14 +387,18 @@ class RetryEvaluator:
         findings: list[Finding] = []
         for model in context.models:
             for task in model.tasks:
-                unresolved = sorted(name for name in ("retries", "retry_delay") if name in task.unresolved_kwargs)
+                retries_value = _effective_value(model, task, "retries")
+                delay_value = _effective_value(model, task, "retry_delay")
+                unresolved = [
+                    name
+                    for name, value in (("retries", retries_value), ("retry_delay", delay_value))
+                    if value.state is ValueState.UNRESOLVED
+                ]
                 if unresolved:
-                    findings.append(self._unresolved_finding(context, model, task, unresolved))
+                    findings.append(self._unresolved_finding(context, model, task, sorted(unresolved)))
                     continue
-                retries = _effective_value(model, task, "retries")
-                delay = _effective_value(model, task, "retry_delay")
-                retries = 0 if retries is None else retries
-                delay = 0 if delay is None else delay
+                retries = retries_value.value if retries_value.state is ValueState.RESOLVED else 0
+                delay = delay_value.value if delay_value.state is ValueState.RESOLVED else 0
                 valid = (
                     isinstance(retries, (int, float))
                     and configuration.min_retries <= retries <= configuration.max_retries
@@ -809,20 +838,47 @@ class DynamicDagFactoryEvaluator:
 
 
 def _ruff_path(repository_root: Path, filename: object) -> str | None:
+    """Normalize a Ruff filename to the scan-relative identity of its source.
+
+    Violations carry the scan identity recorded by the Ruff adapter, so
+    filenames are matched textually against the repository root: resolving
+    them here would collapse an internal symlink such as ``dags/link.py``
+    back onto its target and lose the identity the file was scanned under.
+    """
     if not isinstance(filename, str) or not filename:
         return None
     path = Path(filename)
-    candidate = path if path.is_absolute() else repository_root / path
     try:
-        return candidate.resolve().relative_to(repository_root.resolve()).as_posix()
-    except (OSError, ValueError):
+        if path.is_absolute():
+            return path.relative_to(repository_root.resolve()).as_posix()
+    except ValueError:
         return None
+    if path.parts and path.parts[0] == "..":
+        return None
+    return path.as_posix()
 
 
-def _ruff_rule_matches(code: str, selector: str) -> bool:
-    normalized_code = code.upper()
-    normalized_selector = selector.upper()
-    return normalized_code == normalized_selector or normalized_code.startswith(normalized_selector)
+def ruff_policies_for_scan(policies: Iterable[Policy], airflow_profile: AirflowProfile | None) -> list[Policy]:
+    """Return active policies that contribute Ruff rules to this scan."""
+    return [
+        policy
+        for policy in policies
+        if policy.status.value == "ACTIVE"
+        and policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
+        and policy_applies(policy, airflow_profile)
+        and ("ruff-air" in policy.enforcement.deterministic_checks or policy.id == "AIR-DET-012")
+    ]
+
+
+def ruff_rules_for_policies(policies: Iterable[Policy], airflow_profile: AirflowProfile | None) -> list[str]:
+    """Build one deterministic, sorted Ruff selector list for a scan."""
+    return sorted(
+        {
+            rule
+            for policy in ruff_policies_for_scan(policies, airflow_profile)
+            for rule in cast(RuffAirConfig, policy.configuration).rules
+        }
+    )
 
 
 class RuffAirEvaluator:
@@ -836,13 +892,16 @@ class RuffAirEvaluator:
             return []
         violations = context.ruff_violations
         if violations is None:
-            violations = run_ruff(context.repository_root, configuration.rules) or []
+            violations = (
+                run_ruff(context.repository_root, configuration.rules, [model.source.path for model in context.models])
+                or []
+            )
         scanned = {model.source.relative_path for model in context.models}
         findings: list[Finding] = []
         for violation in violations:
             code = violation.get("code")
             if not isinstance(code, str) or not any(
-                _ruff_rule_matches(code, selector) for selector in configuration.rules
+                ruff_rule_matches(code, selector) for selector in configuration.rules
             ):
                 continue
             relative = _ruff_path(context.repository_root, violation.get("filename"))
@@ -898,6 +957,21 @@ CHECK_EVALUATORS: dict[str, DeterministicEvaluator] = {
     "ruff-air": RuffAirEvaluator(),
 }
 
+CHECK_CONFIGURATION_KINDS: dict[str, str] = {
+    "effective-owner": "required-owner",
+    "tags": "required-tags",
+    "effective-timeout": "execution-timeout",
+    "retry-bounds": "retry-bounds",
+    "module-scope-io": "top-level-io",
+    "operator-allow-list": "forbidden-operators",
+    "start-date-freshness": "start-date-freshness",
+    "catchup-policy": "catchup-policy",
+    "module-scope-variables": "module-scope-variables",
+    "sensitive-logging": "sensitive-logging",
+    "dynamic-dag-factory": "dynamic-dag-factory",
+    "ruff-air": "ruff-air",
+}
+
 LEGACY_POLICY_EVALUATORS: dict[str, DeterministicEvaluator] = {
     "AIR-DET-001": CHECK_EVALUATORS["effective-owner"],
     "AIR-DET-002": CHECK_EVALUATORS["tags"],
@@ -907,6 +981,37 @@ LEGACY_POLICY_EVALUATORS: dict[str, DeterministicEvaluator] = {
     "AIR-DET-006": CHECK_EVALUATORS["operator-allow-list"],
     "AIR-DET-012": CHECK_EVALUATORS["ruff-air"],
 }
+
+LEGACY_POLICY_CONFIGURATION_KINDS: dict[str, str] = {
+    "AIR-DET-001": "required-owner",
+    "AIR-DET-002": "required-tags",
+    "AIR-DET-003": "execution-timeout",
+    "AIR-DET-004": "retry-bounds",
+    "AIR-DET-005": "top-level-io",
+    "AIR-DET-006": "forbidden-operators",
+    "AIR-DET-012": "ruff-air",
+}
+
+
+def policy_configuration_issues(policy: Policy) -> list[str]:
+    """Return configuration-shape errors before an evaluator can run."""
+    if policy.status.value != "ACTIVE":
+        return []
+    checks = policy.enforcement.deterministic_checks
+    actual_kind = getattr(policy.configuration, "kind", None)
+    issues = [
+        f"{policy.id}: deterministic check {check!r} requires configuration kind {expected!r}, got {actual_kind!r}"
+        for check in checks
+        for expected in [CHECK_CONFIGURATION_KINDS.get(check)]
+        if expected is not None and actual_kind != expected
+    ]
+    if not checks and policy.id in LEGACY_POLICY_CONFIGURATION_KINDS:
+        expected = LEGACY_POLICY_CONFIGURATION_KINDS[policy.id]
+        if actual_kind != expected:
+            issues.append(
+                f"{policy.id}: legacy evaluator requires configuration kind {expected!r}, got {actual_kind!r}"
+            )
+    return issues
 
 
 def _evaluator_for_policy(policy: Policy) -> DeterministicEvaluator | None:
@@ -926,21 +1031,14 @@ def evaluate_deterministic(
 ) -> tuple[list[Finding], list[str], list[str]]:
     """Evaluate supported deterministic policies with stable policy/file ordering."""
     ordered_policies = sorted(policies, key=lambda item: item.id)
+    configuration_issues = [issue for policy in ordered_policies for issue in policy_configuration_issues(policy)]
+    if configuration_issues:
+        raise EvaluationPhaseError("; ".join(configuration_issues))
     shared_ruff_violations = ruff_violations
     if shared_ruff_violations is None and repository_root is not None:
-        ruff_policies = [
-            policy
-            for policy in ordered_policies
-            if policy.status.value == "ACTIVE"
-            and policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
-            and policy_applies(policy, airflow_profile)
-            and ("ruff-air" in policy.enforcement.deterministic_checks or policy.id == "AIR-DET-012")
-        ]
-        if ruff_policies:
-            rules = sorted(
-                {rule for policy in ruff_policies for rule in cast(RuffAirConfig, policy.configuration).rules}
-            )
-            shared_ruff_violations = run_ruff(repository_root, rules) or []
+        rules = ruff_rules_for_policies(ordered_policies, airflow_profile)
+        if rules:
+            shared_ruff_violations = run_ruff(repository_root, rules, [model.source.path for model in models]) or []
     findings: list[Finding] = []
     evaluated: list[str] = []
     skipped: list[str] = []

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +18,8 @@ from conformdag.models import (
     RuntimeObservation,
 )
 
+_IMMUTABLE_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+
 
 @dataclass(frozen=True)
 class RuntimeProfile:
@@ -24,18 +28,26 @@ class RuntimeProfile:
     airflow_profile: AirflowProfile
     image: str
     provider_versions: dict[str, str]
+    # Release tag/ref whose review approved the pinned image identity. Release
+    # publishing validates this against the pushed tag, so a new release cannot
+    # publish a runtime profile that has not been explicitly re-reviewed.
+    reviewed_release: str
 
 
 RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
     AirflowProfile.AIRFLOW_3_3_0: RuntimeProfile(
         airflow_profile=AirflowProfile.AIRFLOW_3_3_0,
-        image="ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1",
+        image=(
+            "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
+            "sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b"
+        ),
         provider_versions={
             "apache-airflow-providers-standard": "1.15.0",
             "apache-airflow-providers-postgres": "6.8.0",
             "apache-airflow-providers-http": "6.0.4",
             "apache-airflow-providers-google": "22.2.2",
         },
+        reviewed_release="v1.0.0-beta.1",
     ),
 }
 
@@ -43,6 +55,25 @@ RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
 def runtime_profile(profile: AirflowProfile) -> RuntimeProfile:
     """Return the immutable profile definition for a supported Airflow version."""
     return RUNTIME_PROFILES[profile]
+
+
+class RuntimeReleaseError(RuntimeError):
+    """Raised when a release ref was not reconciled with the reviewed runtime profiles."""
+
+
+def validate_runtime_release(release_ref: str) -> None:
+    """Fail unless every published runtime profile was reviewed for ``release_ref``."""
+    for profile in RUNTIME_PROFILES.values():
+        name = profile.airflow_profile.value
+        if _IMMUTABLE_DIGEST.search(profile.image) is None:
+            raise RuntimeReleaseError(
+                f"runtime profile {name} must pin an immutable sha256 digest, got {profile.image}"
+            )
+        if profile.reviewed_release != release_ref:
+            raise RuntimeReleaseError(
+                f"runtime profile {name} was last reviewed for release {profile.reviewed_release}; "
+                f"refusing unreviewed release {release_ref} until RUNTIME_PROFILES records its review"
+            )
 
 
 class RuntimePhaseError(RuntimeError):
@@ -106,44 +137,48 @@ class DockerRunner:
         image: str,
         timeout_seconds: int,
     ) -> list[RuntimeObservation]:
-        manifest_path = manifest.repository_root / ".conformdag" / "runtime-manifest.json"
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
-        command = [
-            "run",
-            "--rm",
-            "--network=none",
-            "--read-only",
-            "--user=airflow",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true",
-            "--cpus=1",
-            "--memory=512m",
-            "--pids-limit=128",
-            "--mount",
-            f"type=bind,src={manifest.repository_root},dst=/workspace,readonly",
-            "--mount",
-            f"type=bind,src={manifest_path},dst=/conformdag/runtime-manifest.json,readonly",
-            "--tmpfs",
-            "/tmp:rw,noexec,nosuid,size=64m",  # noqa: S108 - bounded container tmpfs
-            image,
-            "--manifest",
-            "/conformdag/runtime-manifest.json",
-        ]
-        result = self.run(command, timeout_seconds)
-        if result.returncode != 0:
-            detail = result.stderr.strip() or "runtime container failed"
-            raise RuntimePhaseError(detail)
-        try:
-            payload = json.loads(result.stdout)
-            raw_observations: list[Any]
-            if isinstance(payload, list):
-                raw_observations = cast(list[Any], payload)
-            else:
-                raw_observations = cast(dict[str, Any], payload)["observations"]
-            return [RuntimeObservation.model_validate(item) for item in raw_observations]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise RuntimePhaseError(f"invalid runtime observation output: {exc}") from exc
+        repository_root = manifest.repository_root.resolve()
+        with tempfile.TemporaryDirectory(prefix="conformdag-runtime-") as temporary_directory:
+            manifest_root = Path(temporary_directory).resolve()
+            if manifest_root == repository_root or manifest_root.is_relative_to(repository_root):
+                raise RuntimePhaseError("runtime manifest staging directory must be outside the scanned repository")
+            manifest_path = manifest_root / "runtime-manifest.json"
+            manifest_path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
+            command = [
+                "run",
+                "--rm",
+                "--network=none",
+                "--read-only",
+                "--user=airflow",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges:true",
+                "--cpus=1",
+                "--memory=512m",
+                "--pids-limit=128",
+                "--mount",
+                f"type=bind,src={repository_root},dst=/workspace,readonly",
+                "--mount",
+                f"type=bind,src={manifest_path},dst=/conformdag/runtime-manifest.json,readonly",
+                "--tmpfs",
+                "/tmp:rw,noexec,nosuid,size=64m",  # noqa: S108 - bounded container tmpfs
+                image,
+                "--manifest",
+                "/conformdag/runtime-manifest.json",
+            ]
+            result = self.run(command, timeout_seconds)
+            if result.returncode != 0:
+                detail = result.stderr.strip() or "runtime container failed"
+                raise RuntimePhaseError(detail)
+            try:
+                payload = json.loads(result.stdout)
+                raw_observations: list[Any]
+                if isinstance(payload, list):
+                    raw_observations = cast(list[Any], payload)
+                else:
+                    raw_observations = cast(dict[str, Any], payload)["observations"]
+                return [RuntimeObservation.model_validate(item) for item in raw_observations]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimePhaseError(f"invalid runtime observation output: {exc}") from exc
 
 
 def build_runtime_manifest(
@@ -205,6 +240,11 @@ def execute_runtime(
     if manifest.supported_profile:
         docker.pull_image(selected_image, timeout_seconds=config.timeout_seconds)
         image_digest = docker.resolve_digest(selected_image)
+        if image_digest != selected_image:
+            raise RuntimePhaseError(
+                "runtime image does not match the reviewed runtime profile identity: "
+                f"expected {selected_image}, got {image_digest}"
+            )
     else:
         image_digest = selected_image
     immutable_manifest = manifest.model_copy(update={"image": image_digest})

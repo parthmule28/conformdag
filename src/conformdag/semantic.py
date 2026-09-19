@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import logging
+import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+import tempfile
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, suppress
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic, sleep
@@ -16,9 +22,45 @@ import httpx
 
 from conformdag.models import SemanticRequest, SemanticResponse
 
+LOGGER = logging.getLogger(__name__)
+
 
 class SemanticProviderError(RuntimeError):
     """Raised for unavailable providers or invalid structured responses."""
+
+
+def strict_semantic_response_schema() -> dict[str, Any]:
+    """Return the canonical response schema adapted for strict JSON-schema providers."""
+    schema = deepcopy(SemanticResponse.model_json_schema())
+    provider_fields = (
+        "status",
+        "evidence",
+        "explanation",
+        "remediation",
+        "confidence",
+        "audit_evidence",
+    )
+    root_properties = cast(dict[str, Any], schema["properties"])
+    schema["properties"] = {name: root_properties[name] for name in provider_fields}
+
+    def close_objects(value: Any) -> None:
+        if isinstance(value, dict):
+            mapping = cast(dict[str, Any], value)
+            mapping.pop("default", None)
+            properties = mapping.get("properties")
+            if mapping.get("type") == "object" and isinstance(properties, dict):
+                property_map = cast(dict[str, Any], properties)
+                mapping["required"] = list(property_map)
+                mapping["additionalProperties"] = False
+            for child in mapping.values():
+                close_objects(child)
+        elif isinstance(value, list):
+            for child in cast(list[Any], value):
+                close_objects(child)
+
+    close_objects(schema)
+    schema["required"] = list(provider_fields)
+    return schema
 
 
 DEFAULT_SECRET_PATTERNS = (
@@ -178,7 +220,7 @@ class OpenAICompatibleProvider:
                 "json_schema": {
                     "name": "conformdag_semantic_response",
                     "strict": True,
-                    "schema": SemanticResponse.model_json_schema(),
+                    "schema": strict_semantic_response_schema(),
                 },
             }
         headers = {"Authorization": f"Bearer {self.api_key}"}
@@ -217,6 +259,9 @@ class OpenAICompatibleProvider:
                         "usage": usage,
                         "retries": attempts,
                         "latency_ms": max(0, round((monotonic() - started) * 1000)),
+                        "cache_hit": False,
+                        "repeatability": "not-measured",
+                        "pricing_provenance": None,
                     }
                 )
             except (KeyError, IndexError, TypeError, ValueError) as exc:
@@ -263,7 +308,7 @@ def semantic_cache_key(
         "enforcement_hash": request.enforcement_hash,
         "prompt_version": request.prompt_version,
         "response_schema_hash": hashlib.sha256(
-            json.dumps(SemanticResponse.model_json_schema(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+            json.dumps(strict_semantic_response_schema(), sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
         "context_hash": request.context_hash,
         "model": model,
@@ -278,25 +323,39 @@ class SemanticCache:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def get(self, key: str) -> SemanticResponse | None:
-        if not self.path.exists():
-            return None
+    @property
+    def lock_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".lock")
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+    def _load_unlocked(self) -> dict[str, object]:
+        if not self.path.is_file():
+            return {}
         try:
-            payload: Any = json.loads(self.path.read_text(encoding="utf-8"))
-            value = payload.get(key)
-            return SemanticResponse.model_validate(value).model_copy(update={"cache_hit": True}) if value else None
+            loaded: Any = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError):
+            return {}
+        return cast(dict[str, object], loaded) if isinstance(loaded, dict) else {}
+
+    def get(self, key: str) -> SemanticResponse | None:
+        try:
+            with self._locked():
+                value = self._load_unlocked().get(key)
+                return SemanticResponse.model_validate(value).model_copy(update={"cache_hit": True}) if value else None
         except (OSError, TypeError, ValueError):
             return None
 
-    def put(self, key: str, response: SemanticResponse) -> None:
-        payload: dict[str, object] = {}
-        if self.path.exists():
-            try:
-                loaded: Any = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    payload = cast(dict[str, object], loaded)
-            except (OSError, TypeError, ValueError):
-                payload = {}
+    def put(self, key: str, response: SemanticResponse) -> bool:
+        """Persist a normalized response without making persistence a scan prerequisite."""
         sanitized = response.model_copy(
             update={
                 "evidence": redact_text(response.evidence),
@@ -307,12 +366,33 @@ class SemanticCache:
                 ],
             }
         )
-        payload[key] = sanitized.model_dump(mode="json")
+        temporary_path: Path | None = None
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        except OSError as exc:
-            raise SemanticProviderError(f"semantic cache write failed: {exc}") from exc
+            with self._locked():
+                payload = self._load_unlocked()
+                payload[key] = sanitized.model_dump(mode="json")
+                encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=self.path.parent,
+                    prefix=f".{self.path.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as stream:
+                    temporary_path = Path(stream.name)
+                    stream.write(encoded)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                temporary_path.replace(self.path)
+        except (OSError, TypeError, ValueError) as exc:
+            LOGGER.warning("semantic cache persistence failed for %s: %s", self.path, exc)
+            return False
+        finally:
+            if temporary_path is not None:
+                with suppress(OSError):
+                    temporary_path.unlink(missing_ok=True)
+        return True
 
 
 class CachedSemanticProvider:

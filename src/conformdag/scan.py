@@ -6,20 +6,24 @@ import hashlib
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from conformdag import __version__
-from conformdag.analysis import ParseCache, SourceModel, analyze_source, discover_python_files
+from conformdag.analysis import (
+    NON_FATAL_DISCOVERY_ISSUES,
+    ParseCache,
+    SourceModel,
+    analyze_source,
+    discover_python_files,
+)
 from conformdag.config import load_project_config
-from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic, policy_applies
+from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic, ruff_rules_for_policies
 from conformdag.models import (
     AirflowProfile,
-    EnforcementType,
     Finding,
     FindingStatus,
     PolicyPack,
     ProjectConfig,
-    RuffAirConfig,
     RunIssue,
     RunMetadata,
     ScanReport,
@@ -31,7 +35,7 @@ from conformdag.policy import load_suppressions, resolve_configured_policy_pack,
 from conformdag.reporting import apply_suppressions, normalize_report
 from conformdag.ruff_adapter import ruff_binary, run_ruff
 from conformdag.semantic import SemanticContext, SemanticProviderError, build_context
-from conformdag.semantic_evaluator import build_semantic_request, semantic_finding
+from conformdag.semantic_evaluator import run_semantic_evaluation, select_semantic_policies
 
 
 class SemanticProvider(Protocol):
@@ -81,11 +85,11 @@ def scan_repository(
     findings: list[Finding] = []
     issues = [
         RunIssue(
-            code="DISCOVERY",
+            code=issue.code.value,
             message=issue.message,
             path=Path(issue.path),
             phase="discovery",
-            fatal=issue.message != "symlink excluded",
+            fatal=issue.code not in NON_FATAL_DISCOVERY_ISSUES,
         )
         for issue in discovery_issues
     ]
@@ -106,16 +110,9 @@ def scan_repository(
             models.append(model)
 
     selected_airflow_profile = airflow_profile or config.runtime.airflow_version
-    ruff_policies = [
-        policy
-        for policy in pack.policies
-        if policy.status.value == "ACTIVE"
-        and policy.enforcement.type in (EnforcementType.DETERMINISTIC, EnforcementType.HYBRID)
-        and policy_applies(policy, selected_airflow_profile)
-        and ("ruff-air" in policy.enforcement.deterministic_checks or policy.id == "AIR-DET-012")
-    ]
+    ruff_rules = ruff_rules_for_policies(pack.policies, selected_airflow_profile)
     ruff_violations: list[dict[str, Any]] | None = None
-    if ruff_policies:
+    if ruff_rules:
         ruff_violations = []
         if ruff_binary() is None:
             issues.append(
@@ -123,21 +120,18 @@ def scan_repository(
                     code="RUFF_UNAVAILABLE",
                     message="ruff binary not found; the ruff-air check was skipped",
                     phase="deterministic",
-                    fatal=False,
+                    fatal=True,
                 )
             )
         else:
-            rules = sorted(
-                {rule for policy in ruff_policies for rule in cast(RuffAirConfig, policy.configuration).rules}
-            )
-            result = run_ruff(root, rules)
+            result = run_ruff(root, ruff_rules, [source.path for source in files])
             if result is None:
                 issues.append(
                     RunIssue(
                         code="RUFF_UNAVAILABLE",
                         message="ruff invocation failed; the ruff-air check was skipped",
                         phase="deterministic",
-                        fatal=False,
+                        fatal=True,
                     )
                 )
             else:
@@ -161,12 +155,7 @@ def scan_repository(
     if semantic_provider is not None:
         if semantic_model is None:
             raise ValueError("semantic_model is required when a semantic provider is supplied")
-        semantic_policies = [
-            policy
-            for policy in sorted(pack.policies, key=lambda item: item.id)
-            if policy.status.value == "ACTIVE"
-            and policy.enforcement.type in (EnforcementType.SEMANTIC, EnforcementType.HYBRID)
-        ]
+        semantic_policies = select_semantic_policies(pack.policies)
         policy_text = "\n\n".join(
             f"{policy.id}: {policy.invariant}\nRemediation: {policy.safe_path or 'none'}"
             for policy in semantic_policies
@@ -184,24 +173,23 @@ def scan_repository(
                     phase="semantic-context",
                 )
             )
-        requests = [
-            build_semantic_request(policy, context).model_copy(
-                update={
-                    "temperature": config.semantic.temperature,
-                    "max_output_tokens": config.semantic.max_output_tokens,
-                }
-            )
-            for policy in semantic_policies
-        ]
         try:
-            responses = semantic_provider.evaluate_many(
-                requests,
+            evaluation = run_semantic_evaluation(
+                semantic_policies,
+                context,
+                semantic_provider,
                 max_concurrency=config.semantic.max_concurrency,
+                temperature=config.semantic.temperature,
+                max_output_tokens=config.semantic.max_output_tokens,
             )
-            if len(responses) != len(requests):
-                raise SemanticProviderError("provider returned an unexpected response count")
-            for policy, request, response in zip(semantic_policies, requests, responses, strict=True):
-                findings.append(semantic_finding(policy, response, context))
+            for policy, request, response, finding in zip(
+                evaluation.policies,
+                evaluation.requests,
+                evaluation.responses,
+                evaluation.findings,
+                strict=True,
+            ):
+                findings.append(finding)
                 prompt_hash = hashlib.sha256(request.system_prompt.encode("utf-8")).hexdigest()
                 prompt_hashes[policy.id] = prompt_hash
                 semantic_runs.append(

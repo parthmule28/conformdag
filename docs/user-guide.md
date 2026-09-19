@@ -248,9 +248,10 @@ mise exec -- uvx --from conformdag==1.0.0b1 conformdag benchmark benchmarks/synt
 ```
 
 The checked-in benchmark verifies fixture hashes, provenance, and labels before running
-240 offline cases. It reports per-policy and aggregate quality metrics plus explicit
-`null`/provenance values for measurements unavailable without a semantic corpus or
-provider telemetry.
+240 offline cases across 6 policy populations. Each population contains 40 cases:
+20 violations and 20 valid or safe-counterexample cases. It reports per-policy and
+aggregate quality metrics plus explicit `null`/provenance values for measurements
+unavailable without a semantic corpus or provider telemetry.
 
 ## Agentic fix loop
 

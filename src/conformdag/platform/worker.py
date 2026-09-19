@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from conformdag.platform.db import (
     ScanRow,
     claim_queued_scan,
+    heartbeat_running_scan,
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
@@ -67,6 +68,26 @@ class WorkerSettings:
     max_attempts: int = DEFAULT_MAX_ATTEMPTS
     retention_keep: int = DEFAULT_RETENTION_KEEP
 
+    def __post_init__(self) -> None:
+        if self.poll_seconds <= 0:
+            raise ValueError("CONFORMDAG_WORKER_POLL_SECONDS must be greater than zero")
+        if self.idle_seconds <= 0:
+            raise ValueError("CONFORMDAG_WORKER_IDLE_SECONDS must be greater than zero")
+        # Heartbeats refresh after each bounded poll timeout, so the reclaim
+        # window must span at least two poll cycles for a healthy runner to
+        # refresh ownership before another worker reclaims the scan.
+        if self.idle_seconds < 2 * self.poll_seconds:
+            raise ValueError(
+                "CONFORMDAG_WORKER_IDLE_SECONDS must be at least twice poll_seconds "
+                "so heartbeat refreshes outrun stale-scan reclaiming"
+            )
+        if self.timeout_seconds <= 0:
+            raise ValueError("CONFORMDAG_WORKER_TIMEOUT_SECONDS must be greater than zero")
+        if self.max_attempts < 1:
+            raise ValueError("CONFORMDAG_WORKER_MAX_ATTEMPTS must be at least one")
+        if self.retention_keep < 1:
+            raise ValueError("CONFORMDAG_PLATFORM_RETENTION_KEEP must keep at least one scan artifact")
+
     @classmethod
     def from_environment(cls) -> WorkerSettings:
         """Resolve worker settings from environment variables with defaults."""
@@ -77,8 +98,6 @@ class WorkerSettings:
             max_attempts=int(os.environ.get("CONFORMDAG_WORKER_MAX_ATTEMPTS", str(DEFAULT_MAX_ATTEMPTS))),
             retention_keep=int(os.environ.get("CONFORMDAG_PLATFORM_RETENTION_KEEP", str(DEFAULT_RETENTION_KEEP))),
         )
-        if settings.retention_keep < 1:
-            raise ValueError("CONFORMDAG_PLATFORM_RETENTION_KEEP must keep at least one scan artifact")
         return settings
 
 
@@ -86,6 +105,12 @@ def _scan_cancelled(session_factory: sessionmaker[Session], scan_id: str) -> boo
     """Return whether the scan was cancelled, read from a fresh session."""
     with session_factory() as session:
         return session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id)) == "cancelled"
+
+
+def _refresh_heartbeat(session_factory: sessionmaker[Session], scan_id: str, claim_attempt: int | None = None) -> bool:
+    """Refresh ownership in a short transaction while the runner remains healthy."""
+    with session_factory() as session:
+        return heartbeat_running_scan(session, scan_id, expected_attempt=claim_attempt)
 
 
 def _terminate_child(process: subprocess.Popen[str]) -> None:
@@ -108,7 +133,11 @@ def _relay_stderr(stderr: str) -> None:
 
 
 def execute_claimed_scan(
-    session_factory: sessionmaker[Session], dsn: str, scan_id: str, settings: WorkerSettings
+    session_factory: sessionmaker[Session],
+    dsn: str,
+    scan_id: str,
+    settings: WorkerSettings,
+    claim_attempt: int | None = None,
 ) -> RunnerOutcome:
     """Execute one claimed scan in an isolated subprocess and return its outcome.
 
@@ -118,11 +147,15 @@ def execute_claimed_scan(
     result can never overwrite the cancellation.
     """
     try:
+        runner_arguments = [sys.executable, "-m", "conformdag.platform.runner", "--scan-id", scan_id]
+        if claim_attempt is not None:
+            runner_arguments.extend(["--claim-attempt", str(claim_attempt)])
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
-            [sys.executable, "-m", "conformdag.platform.runner", "--scan-id", scan_id, "--dsn", dsn],
+            runner_arguments,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env={**os.environ, "CONFORMDAG_PLATFORM_DSN": dsn},
         )
     except OSError as exc:
         return RunnerOutcome(error=f"worker failed to launch the runner: {exc}", retryable=True)
@@ -142,6 +175,11 @@ def execute_claimed_scan(
                 stderr = process.communicate()[1]
                 _relay_stderr(stderr)
                 return RunnerOutcome(cancelled=True)
+            if not _refresh_heartbeat(session_factory, scan_id, claim_attempt):
+                _terminate_child(process)
+                stderr = process.communicate()[1]
+                _relay_stderr(stderr)
+                return RunnerOutcome(error=_LOST_RUNNER_ERROR)
             continue
         break
     _relay_stderr(stderr)
@@ -155,6 +193,7 @@ def execute_claimed_scan(
 
 def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: WorkerSettings) -> str | None:
     """Claim and execute at most one scan; return the handled scan id or None."""
+    logging.getLogger("conformdag").propagate = False
     logger = logging.getLogger("conformdag.worker")
     with session_factory() as session:
         scan = claim_queued_scan(session, stale_running_cutoff(settings.idle_seconds), settings.max_attempts)
@@ -162,19 +201,33 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
             session.commit()
             return None
         scan_id = scan.id
+        claim_attempt = scan.attempts
         session.commit()
     logger.info("scan_claimed", extra={"scan_id": scan_id})
 
-    outcome = execute_claimed_scan(session_factory, dsn, scan_id, settings)
+    outcome = execute_claimed_scan(session_factory, dsn, scan_id, settings, claim_attempt)
 
     with session_factory() as session:
         final = session.get(ScanRow, scan_id)
         if final is not None:
             if final.status == "running" and not outcome.cancelled:
                 if outcome.retryable and final.attempts < settings.max_attempts:
-                    transition_running_scan(session, scan_id, "queued", outcome.error, requeue=True)
+                    transition_running_scan(
+                        session,
+                        scan_id,
+                        "queued",
+                        outcome.error,
+                        requeue=True,
+                        expected_attempt=claim_attempt,
+                    )
                 else:
-                    transition_running_scan(session, scan_id, "failed", outcome.error or _LOST_RUNNER_ERROR)
+                    transition_running_scan(
+                        session,
+                        scan_id,
+                        "failed",
+                        outcome.error or _LOST_RUNNER_ERROR,
+                        expected_attempt=claim_attempt,
+                    )
                     _apply_retention(session, final.repository_id, settings)
             else:
                 _apply_retention(session, final.repository_id, settings)

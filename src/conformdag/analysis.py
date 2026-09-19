@@ -4,13 +4,48 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import os
 import pickle
+import re
+import tempfile
 from collections.abc import Iterator
+from contextlib import suppress
 from dataclasses import dataclass, field
+from enum import StrEnum
+from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
 DEFAULT_EXCLUDES = ("**/.venv/**", "**/.git/**", "**/vendor/**", "**/generated/**")
+
+
+class ParseIssueCode(StrEnum):
+    """Stable categories for source-discovery and parsing failures."""
+
+    SYMLINK_EXCLUDED = "SYMLINK_EXCLUDED"
+    EXTERNAL_SYMLINK_EXCLUDED = "EXTERNAL_SYMLINK_EXCLUDED"
+    BROKEN_SYMLINK_EXCLUDED = "BROKEN_SYMLINK_EXCLUDED"
+    SYMLINK_RESOLUTION_ERROR = "SYMLINK_RESOLUTION_ERROR"
+    READ_ERROR = "READ_ERROR"
+    INVALID_SOURCE = "INVALID_SOURCE"
+
+
+class ValueState(StrEnum):
+    """Resolution states for configuration values found in source."""
+
+    ABSENT = "ABSENT"
+    RESOLVED = "RESOLVED"
+    UNRESOLVED = "UNRESOLVED"
+
+
+NON_FATAL_DISCOVERY_ISSUES = frozenset(
+    {
+        ParseIssueCode.SYMLINK_EXCLUDED,
+        ParseIssueCode.EXTERNAL_SYMLINK_EXCLUDED,
+        ParseIssueCode.BROKEN_SYMLINK_EXCLUDED,
+        ParseIssueCode.SYMLINK_RESOLUTION_ERROR,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +63,15 @@ class ParseIssue:
     path: str
     message: str
     line: int | None = None
+    code: ParseIssueCode = ParseIssueCode.INVALID_SOURCE
+
+
+@dataclass(frozen=True)
+class StaticValue:
+    """A statically resolved value, an explicit null, or an unresolved expression."""
+
+    state: ValueState
+    value: object | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +102,7 @@ class DagRecord:
     tags: tuple[str, ...]
     variable_name: str | None = None
     defaults: dict[str, object] = field(default_factory=_empty_defaults)
+    unresolved_defaults: tuple[str, ...] = ()
     start_date: tuple[int, int, int] | None = None
     start_date_tz: bool | None = None
     catchup: bool | None = None
@@ -134,6 +179,10 @@ def _empty_assignments() -> dict[str, object]:
     return {}
 
 
+def _empty_unresolved_assignments() -> dict[str, tuple[str, ...]]:
+    return {}
+
+
 @dataclass
 class SourceModel:
     source: SourceFile
@@ -142,14 +191,78 @@ class SourceModel:
     dags: list[DagRecord] = field(default_factory=_empty_dags)
     tasks: list[TaskRecord] = field(default_factory=_empty_tasks)
     assignments: dict[str, object] = field(default_factory=_empty_assignments)
+    unresolved_assignments: dict[str, tuple[str, ...]] = field(default_factory=_empty_unresolved_assignments)
     constants: list[ConstantAssignment] = field(default_factory=_empty_constants)
     secret_assignments: list[SecretAssignment] = field(default_factory=_empty_secrets)
     dynamic_dag_lines: list[int] = field(default_factory=_empty_dynamic_loops)
 
 
-def _matches(relative_path: str, patterns: tuple[str, ...]) -> bool:
-    path = Path(relative_path)
-    return any(path.match(pattern) for pattern in patterns)
+def _normalize_relative_path(value: str) -> str:
+    normalized = value.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+@lru_cache(maxsize=256)
+def _exclude_regex(pattern: str) -> re.Pattern[str]:
+    """Compile a repository-relative glob with explicit ``**`` semantics."""
+    normalized = _normalize_relative_path(pattern)
+    expression: list[str] = []
+    index = 0
+    while index < len(normalized):
+        if normalized.startswith("**/", index):
+            expression.append("(?:.*/)?")
+            index += 3
+        elif normalized.startswith("/**", index):
+            expression.append("(?:/.*)?")
+            index += 3
+        elif normalized.startswith("**", index):
+            expression.append(".*")
+            index += 2
+        elif normalized[index] == "*":
+            expression.append("[^/]*")
+            index += 1
+        elif normalized[index] == "?":
+            expression.append("[^/]")
+            index += 1
+        else:
+            expression.append(re.escape(normalized[index]))
+            index += 1
+    return re.compile("^" + "".join(expression) + "$")
+
+
+def matches_exclude(relative_path: str, patterns: tuple[str, ...] | list[str]) -> bool:
+    """Match normalized repository-relative paths with recursive glob semantics."""
+    candidate = _normalize_relative_path(relative_path)
+    return any(_exclude_regex(_normalize_relative_path(pattern)).fullmatch(candidate) for pattern in patterns)
+
+
+def _contains_symlink(candidate: Path, root: Path) -> bool:
+    try:
+        relative_parts = candidate.relative_to(root).parts
+    except ValueError:
+        return True
+    current = root
+    for part in relative_parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _append_discovery_issue(
+    issues: list[ParseIssue],
+    seen: set[tuple[str, ParseIssueCode]],
+    path: str,
+    message: str,
+    code: ParseIssueCode,
+) -> None:
+    key = (path, code)
+    if key in seen:
+        return
+    seen.add(key)
+    issues.append(ParseIssue(path, message, code=code))
 
 
 def discover_python_files(
@@ -163,15 +276,59 @@ def discover_python_files(
     excluded = tuple(DEFAULT_EXCLUDES) + tuple(exclude or [])
     selected: dict[str, Path] = {}
     issues: list[ParseIssue] = []
+    issue_keys: set[tuple[str, ParseIssueCode]] = set()
     for pattern in include:
         for candidate in root.glob(pattern):
+            try:
+                relative = candidate.relative_to(root).as_posix()
+            except ValueError:
+                continue
+            if matches_exclude(relative, excluded):
+                continue
+            contains_symlink = _contains_symlink(candidate, root)
+            try:
+                resolved = candidate.resolve(strict=False)
+            except (OSError, RuntimeError) as exc:
+                _append_discovery_issue(
+                    issues,
+                    issue_keys,
+                    relative,
+                    f"symlink target could not be resolved: {exc}",
+                    ParseIssueCode.SYMLINK_RESOLUTION_ERROR,
+                )
+                continue
+            try:
+                resolved.relative_to(root)
+            except ValueError:
+                if contains_symlink:
+                    _append_discovery_issue(
+                        issues,
+                        issue_keys,
+                        relative,
+                        "symlink target is outside the repository root",
+                        ParseIssueCode.EXTERNAL_SYMLINK_EXCLUDED,
+                    )
+                continue
+            if contains_symlink:
+                if not follow_internal_symlinks:
+                    _append_discovery_issue(
+                        issues,
+                        issue_keys,
+                        relative,
+                        "symlink excluded by scan configuration",
+                        ParseIssueCode.SYMLINK_EXCLUDED,
+                    )
+                    continue
+                if not resolved.exists():
+                    _append_discovery_issue(
+                        issues,
+                        issue_keys,
+                        relative,
+                        "symlink target does not exist",
+                        ParseIssueCode.BROKEN_SYMLINK_EXCLUDED,
+                    )
+                    continue
             if not candidate.is_file():
-                continue
-            if candidate.is_symlink() and not follow_internal_symlinks:
-                issues.append(ParseIssue(candidate.relative_to(root).as_posix(), "symlink excluded"))
-                continue
-            relative = candidate.relative_to(root).as_posix()
-            if _matches(relative, excluded):
                 continue
             selected[relative] = candidate
 
@@ -180,7 +337,7 @@ def discover_python_files(
         try:
             content = candidate.read_text(encoding="utf-8")
         except OSError as exc:
-            issues.append(ParseIssue(relative, f"unreadable source: {exc}"))
+            issues.append(ParseIssue(relative, f"unreadable source: {exc}", code=ParseIssueCode.READ_ERROR))
             continue
         files.append(
             SourceFile(
@@ -221,10 +378,20 @@ class _ModelVisitor(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self.generic_visit(node)
-        value = _literal_value(node.value)
-        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and value is not None:
-            self.model.assignments[node.targets[0].id] = value
-            if self._function_depth == 0:
+        value = self._resolve_value(node.value)
+        unresolved: tuple[str, ...] = ()
+        if isinstance(node.value, (ast.Dict, ast.Name)):
+            mapped_value, unresolved = self._resolve_mapping(node.value)
+            if unresolved or isinstance(value, dict):
+                value = mapped_value
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and value is not _UNRESOLVED_VALUE:
+            name = node.targets[0].id
+            self.model.assignments[name] = value
+            if unresolved:
+                self.model.unresolved_assignments[name] = unresolved
+            else:
+                self.model.unresolved_assignments.pop(name, None)
+            if self._function_depth == 0 and not unresolved:
                 self.model.constants.append(ConstantAssignment(node.lineno, node.targets[0].id, value))
                 if isinstance(value, str) and secret_like(node.targets[0].id):
                     self.model.secret_assignments.append(SecretAssignment(node.lineno, node.targets[0].id))
@@ -297,8 +464,8 @@ class _ModelVisitor(ast.NodeVisitor):
                 for keyword in decorator.keywords:
                     if not keyword.arg:
                         continue
-                    value = _literal_value(keyword.value)
-                    if value is None:
+                    value = self._resolve_value(keyword.value)
+                    if value is _UNRESOLVED_VALUE:
                         unresolved.append(keyword.arg)
                     else:
                         values[keyword.arg] = value
@@ -348,6 +515,7 @@ class _ModelVisitor(ast.NodeVisitor):
         owner_source: str | None = None
         tags: tuple[str, ...] = ()
         defaults: dict[str, object] = {}
+        unresolved_defaults: list[str] = []
         start_date: tuple[int, int, int] | None = None
         start_date_tz: bool | None = None
         catchup: bool | None = None
@@ -362,7 +530,8 @@ class _ModelVisitor(ast.NodeVisitor):
                 owner = keyword.value.value
                 owner_source = "DAG.owner"
             if keyword.arg == "default_args":
-                defaults = self._resolve_mapping(keyword.value)
+                defaults, unresolved = self._resolve_mapping(keyword.value)
+                unresolved_defaults.extend(unresolved)
                 default_owner = defaults.get("owner")
                 if owner is None and isinstance(default_owner, str):
                     owner = default_owner
@@ -389,6 +558,7 @@ class _ModelVisitor(ast.NodeVisitor):
             owner_source,
             tags,
             defaults=defaults,
+            unresolved_defaults=tuple(unresolved_defaults),
             start_date=start_date,
             start_date_tz=start_date_tz,
             catchup=catchup,
@@ -411,7 +581,7 @@ class _ModelVisitor(ast.NodeVisitor):
                     dag_line = bound_line
                     continue
             value = self._resolve_value(keyword.value)
-            if value is None:
+            if value is _UNRESOLVED_VALUE:
                 unresolved.append(keyword.arg)
             else:
                 values[keyword.arg] = value
@@ -442,22 +612,70 @@ class _ModelVisitor(ast.NodeVisitor):
         return None
 
     def _resolve_value(self, node: ast.AST) -> object:
-        value = _literal_value(node)
-        if value is not None:
-            return value
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float, bool, type(None))):
+            return node.value
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            resolved_items: list[object] = []
+            for item in node.elts:
+                value = self._resolve_value(item)
+                if value is _UNRESOLVED_VALUE:
+                    return _UNRESOLVED_VALUE
+                resolved_items.append(value)
+            return resolved_items
+        if isinstance(node, ast.Dict):
+            values: dict[str, object] = {}
+            for key, value_node in zip(node.keys, node.values, strict=True):
+                if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                    return _UNRESOLVED_VALUE
+                value = self._resolve_value(value_node)
+                if value is _UNRESOLVED_VALUE:
+                    return _UNRESOLVED_VALUE
+                values[key.value] = value
+            return values
+        if isinstance(node, ast.Call) and _qualified_name(node.func) == "timedelta":
+            units: dict[str, object] = {}
+            for keyword in node.keywords:
+                if not keyword.arg:
+                    return _UNRESOLVED_VALUE
+                value = self._resolve_value(keyword.value)
+                if value is _UNRESOLVED_VALUE:
+                    return _UNRESOLVED_VALUE
+                units[keyword.arg] = value
+            total = 0.0
+            for unit, multiplier in (
+                ("weeks", 604800),
+                ("days", 86400),
+                ("hours", 3600),
+                ("minutes", 60),
+                ("seconds", 1),
+            ):
+                value = units.get(unit, 0)
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    return _UNRESOLVED_VALUE
+                total += float(value) * multiplier
+            return total
         if isinstance(node, ast.Name):
-            return self.model.assignments.get(node.id)
-        return None
+            return self.model.assignments.get(node.id, _UNRESOLVED_VALUE)
+        return _UNRESOLVED_VALUE
 
-    def _resolve_mapping(self, node: ast.AST) -> dict[str, object]:
-        value = _literal_value(node)
+    def _resolve_mapping(self, node: ast.AST) -> tuple[dict[str, object], tuple[str, ...]]:
+        value = self._resolve_value(node)
         if isinstance(value, dict):
-            return cast(dict[str, object], value)
-        if isinstance(node, ast.Name):
-            assigned = self.model.assignments.get(node.id)
-            if isinstance(assigned, dict):
-                return cast(dict[str, object], assigned)
-        return {}
+            unresolved_keys = self.model.unresolved_assignments.get(node.id, ()) if isinstance(node, ast.Name) else ()
+            return cast(dict[str, object], value), tuple(unresolved_keys)
+        if isinstance(node, ast.Dict):
+            resolved: dict[str, object] = {}
+            unresolved: list[str] = []
+            for key, value_node in zip(node.keys, node.values, strict=True):
+                if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                    continue
+                value = self._resolve_value(value_node)
+                if value is _UNRESOLVED_VALUE:
+                    unresolved.append(key.value)
+                else:
+                    resolved[key.value] = value
+            return resolved, tuple(unresolved)
+        return {}, ()
 
 
 def _literal_value(node: ast.AST) -> object:
@@ -487,6 +705,9 @@ def _literal_value(node: ast.AST) -> object:
             total += float(value) * multiplier
         return total
     return None
+
+
+_UNRESOLVED_VALUE = object()
 
 
 def datetime_parts(node: ast.AST) -> tuple[tuple[int, int, int] | None, bool | None]:
@@ -524,7 +745,7 @@ def analyze_source(source: SourceFile, cache: ParseCache | None = None) -> tuple
     try:
         tree = ast.parse(source.content, filename=source.relative_path)
     except SyntaxError as exc:
-        return None, ParseIssue(source.relative_path, exc.msg, exc.lineno)
+        return None, ParseIssue(source.relative_path, exc.msg, exc.lineno, ParseIssueCode.INVALID_SOURCE)
     visitor = _ModelVisitor(source)
     visitor.visit(tree)
     model = visitor.model
@@ -551,26 +772,51 @@ class ParseCache:
         entry = self.directory / f"{content_hash}.pkl"
         try:
             model = pickle.loads(entry.read_bytes())  # noqa: S301 - trusted local cache
-        except (OSError, pickle.UnpicklingError):
+        except (OSError, pickle.UnpicklingError, EOFError):
             return None
-        return model if isinstance(model, SourceModel) else None
+        if not isinstance(model, SourceModel) or not hasattr(model, "unresolved_assignments"):
+            return None
+        return model
 
     def put(self, content_hash: str, model: SourceModel) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
         entry = self.directory / f"{content_hash}.pkl"
+        payload = pickle.dumps(model)
+        temporary_path: Path | None = None
         try:
-            entry.write_bytes(pickle.dumps(model))
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=self.directory,
+                prefix=f".{entry.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary_path = Path(stream.name)
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary_path.replace(entry)
         except OSError:
             return
+        finally:
+            if temporary_path is not None:
+                with suppress(OSError):
+                    temporary_path.unlink(missing_ok=True)
         self._puts_since_prune += 1
         if self._puts_since_prune >= 500:
             self._puts_since_prune = 0
             self._prune()
 
     def _prune(self) -> None:
-        entries = sorted(self.directory.glob("*.pkl"), key=lambda entry: entry.stat().st_mtime, reverse=True)
+        try:
+            entries = sorted(self.directory.glob("*.pkl"), key=lambda entry: entry.stat().st_mtime, reverse=True)
+        except OSError:
+            return
         for stale in entries[self.max_entries :]:
-            stale.unlink(missing_ok=True)
+            try:
+                stale.unlink(missing_ok=True)
+            except OSError:
+                continue
 
 
 def iter_module_scope_calls(model: SourceModel) -> Iterator[CallRecord]:

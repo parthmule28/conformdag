@@ -23,6 +23,8 @@ import {
 
 const DIALOG_LABEL = "ConformDAG demo tour";
 const DEFAULT_MAX_WAIT_FRAMES = 300;
+/** Pathname of the overview page, where the first tour step's target lives. */
+const FIRST_STEP_PATHNAME = "/";
 
 export interface DemoTourProps {
   /** Animation-frame budget for waiting on a step target before pausing. */
@@ -118,8 +120,13 @@ export function DemoTour({ maxWaitFrames = DEFAULT_MAX_WAIT_FRAMES }: DemoTourPr
   }
 
   const restart = (): void => {
+    // The first step's target lives on the overview route, so restart must
+    // navigate there (keeping the demo query) before resetting state;
+    // otherwise a restart from another route immediately re-pauses.
+    const to = toDemoLocation(FIRST_STEP_PATHNAME, location.search);
     storeDismissed(false);
     setPaused(false);
+    navigate(to);
     dispatch({ type: "restart" });
   };
 

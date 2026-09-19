@@ -225,7 +225,7 @@ export function AppShell({ banner }: AppShellProps) {
           )}
         </header>
         {banner !== undefined && (
-           <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6">{banner}</div>
+          <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6">{banner}</div>
         )}
         <div className="mx-auto max-w-7xl px-4 pt-6 sm:px-6">
           {pageTitle !== "" && <h1 className="text-2xl font-semibold tracking-tight text-ink">{pageTitle}</h1>}

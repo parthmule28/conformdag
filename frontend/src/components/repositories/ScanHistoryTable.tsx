@@ -75,12 +75,14 @@ export function ScanHistoryTable({
                 )}
               </Td>
               <Td>
-                {scan.complete === true ? (
+                {scan.complete === true && scan.artifact_available ? (
                   <span className="flex flex-wrap gap-x-2 gap-y-1">
                     <ExportLink scanId={scan.scan_id} format="json" />
                     <ExportLink scanId={scan.scan_id} format="sarif" />
                     <ExportLink scanId={scan.scan_id} format="html" />
                   </span>
+                ) : scan.complete === true ? (
+                  <span className="text-muted">Artifact unavailable</span>
                 ) : (
                   <span className="text-muted">{"\u2014"}</span>
                 )}

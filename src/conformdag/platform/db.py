@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
+import tempfile
+import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -18,12 +24,16 @@ from sqlalchemy import (
     create_engine,
     func,
     select,
+    text,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.pool import NullPool
 
 JSONVariant = JSON().with_variant(JSONB(), "postgresql")
+_MIGRATION_THREAD_LOCK = threading.Lock()
 
 
 class Base(DeclarativeBase):
@@ -102,6 +112,8 @@ class FindingRow(Base):
 
 Index("ix_findings_repo_policy", FindingRow.repository_id, FindingRow.policy_id)
 Index("ix_scans_repo_created", ScanRow.repository_id, ScanRow.created_at)
+Index("ix_scans_status_created", ScanRow.status, ScanRow.created_at)
+Index("ix_scans_status_claimed", ScanRow.status, ScanRow.claimed_at)
 
 
 class SuppressionRow(Base):
@@ -119,8 +131,58 @@ class SuppressionRow(Base):
     source: Mapped[str] = mapped_column(String(16), default="platform")
 
 
+Index(
+    "uq_suppressions_policy_fingerprint",
+    SuppressionRow.policy_id,
+    SuppressionRow.fingerprint,
+    unique=True,
+)
+
+
 class PlatformError(RuntimeError):
     """Raised when the platform persistence layer cannot be used."""
+
+
+def migration_lock_path(url: str) -> Path:
+    """Return a lock path on the shared database volume for file databases."""
+    parsed = make_url(url)
+    database_name = parsed.database
+    if parsed.get_backend_name() == "sqlite" and isinstance(database_name, str) and database_name != ":memory:":
+        database = Path(database_name)
+        if not database.is_absolute():
+            database = Path.cwd() / database
+        database = database.resolve()
+        return database.parent / f".{database.name}.conformdag-migrations.lock"
+    lock_name = hashlib.sha256(url.encode("utf-8")).hexdigest()
+    return Path(tempfile.gettempdir()) / f"conformdag-migrations-{lock_name}.lock"
+
+
+@contextmanager
+def _migration_lock(url: str) -> Iterator[None]:
+    """Serialize first-boot migration attempts across threads, processes, and containers."""
+    with _MIGRATION_THREAD_LOCK:
+        if make_url(url).get_backend_name() == "postgresql":
+            engine = create_engine(url, poolclass=NullPool)
+            try:
+                with engine.connect() as connection:
+                    connection.execute(text("SELECT pg_advisory_lock(hashtext(:lock_key))"), {"lock_key": url})
+                    connection.commit()
+                    try:
+                        yield
+                    finally:
+                        connection.execute(text("SELECT pg_advisory_unlock(hashtext(:lock_key))"), {"lock_key": url})
+                        connection.commit()
+            finally:
+                engine.dispose()
+            return
+
+        lock_path = migration_lock_path(url)
+        with lock_path.open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 def run_migrations(url: str) -> None:
@@ -132,7 +194,8 @@ def run_migrations(url: str) -> None:
     alembic_config = Config(ini_path)
     alembic_config.set_main_option("script_location", str(ini_path.parent / "migrations"))
     alembic_config.set_main_option("sqlalchemy.url", url)
-    command.upgrade(alembic_config, "head")
+    with _migration_lock(url):
+        command.upgrade(alembic_config, "head")
 
 
 def create_session_factory(url: str) -> sessionmaker[Session]:
@@ -206,7 +269,13 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
 
 
 def transition_running_scan(
-    session: Session, scan_id: str, status: str, error: str | None = None, *, requeue: bool = False
+    session: Session,
+    scan_id: str,
+    status: str,
+    error: str | None = None,
+    *,
+    requeue: bool = False,
+    expected_attempt: int | None = None,
 ) -> bool:
     """Conditionally transition a running scan to ``status``.
 
@@ -217,10 +286,42 @@ def transition_running_scan(
     Requeueing clears the claim timestamp so the scan re-enters the queue;
     terminal transitions stamp ``finished_at``.
     """
+    predicates = [ScanRow.id == scan_id, ScanRow.status == "running"]
+    if expected_attempt is not None:
+        predicates.append(ScanRow.attempts == expected_attempt)
+    statement = update(ScanRow).where(*predicates).values(status=status, error=error)
     statement = (
-        update(ScanRow).where(ScanRow.id == scan_id, ScanRow.status == "running").values(status=status, error=error)
+        statement.values(claimed_at=None) if requeue else statement.values(claimed_at=None, finished_at=utcnow())
     )
-    statement = statement.values(claimed_at=None) if requeue else statement.values(finished_at=utcnow())
+    applied = cast("CursorResult[Any]", session.execute(statement))
+    if applied.rowcount:
+        session.commit()
+        return True
+    session.rollback()
+    return False
+
+
+def transition_scan_to_cancelled(session: Session, scan_id: str) -> bool:
+    """Atomically cancel a queued or running scan, allowing one winner."""
+    statement = (
+        update(ScanRow)
+        .where(ScanRow.id == scan_id, ScanRow.status.in_(("queued", "running")))
+        .values(status="cancelled", claimed_at=None, finished_at=utcnow())
+    )
+    applied = cast("CursorResult[Any]", session.execute(statement))
+    if applied.rowcount:
+        session.commit()
+        return True
+    session.rollback()
+    return False
+
+
+def heartbeat_running_scan(session: Session, scan_id: str, *, expected_attempt: int | None = None) -> bool:
+    """Refresh a running scan claim only while its status and attempt remain current."""
+    predicates = [ScanRow.id == scan_id, ScanRow.status == "running"]
+    if expected_attempt is not None:
+        predicates.append(ScanRow.attempts == expected_attempt)
+    statement = update(ScanRow).where(*predicates).values(claimed_at=utcnow())
     applied = cast("CursorResult[Any]", session.execute(statement))
     if applied.rowcount:
         session.commit()
@@ -260,13 +361,17 @@ def retention_target_scan_ids(session: Session, repository_id: str, keep: int) -
     newest = (
         select(ScanRow.id)
         .where(ScanRow.repository_id == repository_id)
-        .order_by(ScanRow.created_at.desc())
+        .order_by(ScanRow.created_at.desc(), ScanRow.id.desc())
         .limit(max(keep, 1))
         .subquery()
     )
-    older = select(ScanRow.id).where(
-        ScanRow.repository_id == repository_id,
-        ScanRow.id.not_in(select(newest)),
+    older = (
+        select(ScanRow.id)
+        .where(
+            ScanRow.repository_id == repository_id,
+            ScanRow.id.not_in(select(newest)),
+        )
+        .order_by(ScanRow.created_at.asc(), ScanRow.id.asc())
     )
     return list(session.scalars(older))
 

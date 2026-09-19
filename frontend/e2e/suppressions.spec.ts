@@ -7,8 +7,9 @@ import {
   HEALTHY_REPOSITORY_NAME,
   currentCompletedScan,
   expect,
-  firstFinding,
+  failFindings,
   repositoryByName,
+  suppressionsByState,
   test,
   useAdminToken,
 } from "./fixtures";
@@ -18,7 +19,22 @@ test("create a suppression and distinguish the seeded expired waiver", async ({ 
 
   const healthy = await repositoryByName(page.request, HEALTHY_REPOSITORY_NAME);
   const current = await currentCompletedScan(page.request, healthy.id);
-  const finding = await firstFinding(page.request, current.scan_id);
+  const [findings, suppressionStates] = await Promise.all([
+    failFindings(page.request, current.scan_id),
+    suppressionsByState(page.request),
+  ]);
+  const seededIdentities = new Set(
+    [...suppressionStates.active, ...suppressionStates.expired].map(
+      (suppression) => `${suppression.policy_id}:${suppression.fingerprint}`,
+    ),
+  );
+  const finding = findings.find(
+    (candidate) => !seededIdentities.has(`${candidate.policy_id}:${candidate.fingerprint}`),
+  );
+  expect(finding, "the demo seeds a real failure with an unused suppression identity").toBeDefined();
+  if (finding === undefined) {
+    throw new Error("the demo did not seed a failure with an unused suppression identity");
+  }
 
   await page.goto("/suppressions");
   await expect(page).toHaveURL(/\/suppressions$/);
@@ -50,8 +66,8 @@ test("create a suppression and distinguish the seeded expired waiver", async ({ 
   await dialog.getByRole("button", { name: "Save suppression" }).click();
   await expect(dialog).toBeHidden();
 
-  // The fingerprint is shared with the seeded active waiver for this finding;
-  // the created row is distinguished by the owner the journey entered.
+  // The created row is a distinct suppression identity and is distinguished by
+  // the owner the journey entered.
   const newRow = table
     .getByRole("row", { name: new RegExp(finding.fingerprint) })
     .filter({ hasText: "e2e-owner" });

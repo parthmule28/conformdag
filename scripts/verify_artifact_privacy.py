@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 
 SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*['\"]?[^<'\"\s]+"),
+    re.compile(r"(?i)\b(?:password|passwd|secret|token|api[_-]?key)['\"]?\s*[:=]\s*['\"]?[^<'\"\s]+"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._-]{12,}"),
 )
 RAW_SEMANTIC_FIELDS = ("system_prompt", "raw_prompt", "raw_response")
+RAW_SEMANTIC_FIELD_PATTERN = re.compile(r"""["'](?:system_prompt|raw_prompt|raw_response)["']\s*:""")
 DEFAULT_PATHS = (Path("benchmarks"), Path(".conformdag"), Path("reports"), Path("logs"))
 
 
@@ -29,14 +30,16 @@ def inspect_file(path: Path) -> list[str]:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []
-    issues = [
-        f"{path}: possible credential material"
-        for pattern in SECRET_PATTERNS
-        if pattern.search(text) and "[REDACTED]" not in text
-    ]
-    for field in RAW_SEMANTIC_FIELDS:
-        if f'"{field}"' in text:
-            issues.append(f"{path}: raw semantic field {field!r} is persisted")
+    issues: list[str] = []
+    for pattern in SECRET_PATTERNS:
+        for match in pattern.finditer(text):
+            if "[REDACTED]" not in match.group(0):
+                line = text.count("\n", 0, match.start()) + 1
+                issues.append(f"{path}:{line}: possible credential material")
+    for match in RAW_SEMANTIC_FIELD_PATTERN.finditer(text):
+        field = next(field for field in RAW_SEMANTIC_FIELDS if field in match.group(0))
+        line = text.count("\n", 0, match.start()) + 1
+        issues.append(f"{path}:{line}: raw semantic field {field!r} is persisted")
     return issues
 
 

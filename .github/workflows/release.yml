@@ -13,8 +13,8 @@ jobs:
     name: Validate release candidate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
         with:
           cache: true
       - run: mise run setup
@@ -31,8 +31,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
         with:
           cache: true
       - run: mise run setup
@@ -43,7 +43,7 @@ jobs:
           cp dist/*.whl dist/*.tar.gz release/python/
           sha256sum release/python/* > release/SHA256SUMS
       - name: Upload distributions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: conformdag-python-distributions
           path: release/
@@ -59,12 +59,12 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Download validated distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: conformdag-python-distributions
           path: release
       - name: Attest distributions
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: "release/python/*"
 
@@ -77,8 +77,8 @@ jobs:
       matrix:
         profile: ["3.3.0"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
         with:
           cache: true
       - run: mise run setup
@@ -99,7 +99,7 @@ jobs:
           exit-code: "1"
       - name: Upload vulnerability results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: runtime-vulnerability-results-${{ matrix.profile }}
           path: trivy-${{ matrix.profile }}.sarif
@@ -119,19 +119,26 @@ jobs:
           - profile: "3.3.0"
             dockerfile: runtime/airflow-3.3.0/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+        with:
+          cache: true
+      - name: Verify the runtime profile review covers this release
+        env:
+          CONFORMDAG_RELEASE_REF: ${{ github.ref_name }}
+        run: uv run python scripts/verify_runtime_release.py "$CONFORMDAG_RELEASE_REF"
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           driver: docker-container
       - name: Publish image with SBOM and provenance
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -145,8 +152,8 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
         with:
           cache: true
       - name: Build the wheel with the dashboard SPA
@@ -176,7 +183,7 @@ jobs:
           exit-code: "1"
       - name: Upload vulnerability results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: platform-vulnerability-results
           path: trivy-platform.sarif
@@ -190,8 +197,8 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
         with:
           cache: true
       - name: Build the wheel with the dashboard static assets
@@ -200,17 +207,17 @@ jobs:
           mise run ui-build
           mise run build
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
           driver: docker-container
       - name: Publish image with SBOM and provenance
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: deploy/Dockerfile
@@ -231,11 +238,11 @@ jobs:
       id-token: write
     steps:
       - name: Download validated distributions
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: conformdag-python-distributions
           path: release
       - name: Publish to PyPI with trusted publishing
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: release/python

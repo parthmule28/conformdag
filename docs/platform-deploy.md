@@ -14,6 +14,9 @@ packs stay on local disk; the platform never clones or syncs git.
 
 ```bash
 export CONFORMDAG_PLATFORM_TOKEN="$(openssl rand -hex 32)"
+export CONFORMDAG_POSTGRES_USER="conformdag"
+export CONFORMDAG_POSTGRES_PASSWORD="$(openssl rand -hex 32)"
+export CONFORMDAG_POSTGRES_DB="conformdag"
 export CONFORMDAG_WORKSPACE_DIR="$HOME/conformdag-platform"
 ```
 
@@ -88,6 +91,9 @@ a major platform version.
 |---|---|---|
 | `CONFORMDAG_PLATFORM_DSN` | api, worker | Required database URL (Postgres in production) |
 | `CONFORMDAG_PLATFORM_TOKEN` | api | Single-admin bearer token; unset disables mutations |
+| `CONFORMDAG_POSTGRES_USER` | Compose | Required Postgres username |
+| `CONFORMDAG_POSTGRES_PASSWORD` | Compose | Required Postgres password; no Compose default is provided |
+| `CONFORMDAG_POSTGRES_DB` | Compose | Required Postgres database name |
 | `CONFORMDAG_PLATFORM_RETENTION_KEEP` | api, worker | Full report artifacts kept per repo (default 50) |
 | `CONFORMDAG_WORKSPACE` | api | Workspace file loaded at startup; load errors abort startup |
 | `CONFORMDAG_WORKER_POLL_SECONDS` | worker | Idle poll interval (default 2.0) |

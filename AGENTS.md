@@ -6,7 +6,7 @@ Apache Airflow policy governance: deterministic scanner + fix engine + agentic P
 
 ```bash
 mise run setup          # uv sync --all-groups --all-extras (REQUIRED — core deps + [platform] extra + dev deps)
-mise run check          # the full local gate: format-check → lint → typecheck → test → validate:packs
+mise run check          # the full local gate: format-check → lint → typecheck → test → validate:packs → inventory
 mise run test:coverage  # pytest + 90% coverage gate (CI runs this)
 mise run schema:update  # regenerate JSON schemas after model changes; mise run schema --check verifies
 mise run ui-build       # frontend SPA build (npm ci + vite build → outputs to src/conformdag/platform/static/)
@@ -20,7 +20,7 @@ Single test: `mise exec -- uv run pytest tests/test_platform.py::test_name -x --
 - **`uv run` implicitly syncs** the locked env without extras — if the `[platform]` extra (fastapi, sqlalchemy, etc.) is missing, platform tests fail with `ModuleNotFoundError`. Always use `mise run setup` (which includes `--all-extras`) after cloning or changing pyproject.toml.
 - **The [platform] extra is required for tests.** `tests/test_platform.py` imports fastapi/sqlalchemy at module level. CI runs `mise run setup` with `--all-extras`.
 - **Hatchling respects `.gitignore`**: `src/conformdag/platform/static/` (the built SPA) is gitignored, so the wheel will silently exclude it unless `artifacts = ["src/conformdag/platform/static/**"]` is present in pyproject.toml's `[tool.hatch.build.targets.wheel]`. Never remove this line.
-- **`mise run check` = format-check → lint → typecheck → test → validate:packs.** Run this before every commit. CI mirrors it.
+- **`mise run check` = format-check → lint → typecheck → test → validate:packs → inventory.** Run this before every commit. CI mirrors it.
 - **Pyright strict** (`typeCheckingMode = "strict"`) — 0 errors is the gate. Test files are included. Untyped imports (starlette TestClient) are handled via typed helpers (`_as_httpx`, `cast`) in test files.
 - **Coverage gate is 90%** — enforced by `mise run test:coverage`. Adding untested code will fail the build.
 - **Schema regeneration**: after changing any pydantic model in `models.py`, run `mise run schema:update` and commit the JSON files in `schemas/`. CI checks they are in sync.
@@ -55,7 +55,8 @@ Single test: `mise exec -- uv run pytest tests/test_platform.py::test_name -x --
 
 - `pytest -m "not runtime"` is the default suite (runtime tests need Docker + the Airflow runtime image).
 - Platform tests use SQLite (via `create_session_factory("sqlite:///...")`). Postgres is only exercised in compose/manual boot.
-- The round-trip benchmark gate (`tests/test_roundtrip.py`) runs the fix engine over 80 benchmark cases — it takes ~20s and is part of the standard suite.
+- The full synthetic benchmark corpus is 240 cases. The round-trip gate (`tests/test_roundtrip.py`) runs the fix engine
+  over only its autofix violation population — 80 cases — and takes ~20s as part of the standard suite.
 - `fixture name="build_repository"` in `conftest.py` builds a temp repo with a violating DAG — use it for fix-engine and agent tests.
 - Fixture-injected params need explicit type annotations for pyright strict: `build_repository: Callable[[Path], Path]`.
 

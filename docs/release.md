@@ -26,9 +26,13 @@ and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image
 - [x] Confirm the `Validate platform image` job: wheel contains the built dashboard
   static assets, `serve`/`worker` smoke, and the Trivy CRITICAL/HIGH gate passed.
 - [x] Confirm the published platform image carries SBOM and provenance attestations
-  and is tagged with the release ref and `latest`. The image tag is the full ref
-  name (`v1.0.0-beta.1`, matching the runtime image convention); the package was
-  flipped to Public visibility after first publish.
+   and is tagged with the release ref and `latest`. The image tag is the full ref
+   name (`v1.0.0-beta.1`, matching the runtime image convention); the package was
+   flipped to Public visibility after first publish.
+- [x] Record the maintained Airflow 3.3.0 runtime identity for the current release:
+  the `v1.0.0-beta.1` OCI index is pinned to
+  `sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b` in
+  `src/conformdag/runtime.py` and is checked against this evidence by the test suite.
 - [x] Confirm the `Run the composite action against the sample repository` self-test
   passed on the release commit, covering the community pack path and the
   `pack pull` git path.
@@ -57,11 +61,25 @@ and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image
   push; a policy added before the tag exists is recorded as branch type and
   can be fixed via the API with an explicit `type=tag` on create.
 
-The public beta is released only from a reviewed `v0.1.0-beta.1` tag on `main`. The
-release workflow first re-runs quality, benchmark, schema, dependency, secret, privacy,
-and image-vulnerability gates. Only then does it publish the GHCR runtime image;
-PyPI trusted publishing runs last. Python checksums are kept outside the distribution
-directory so they cannot be uploaded to PyPI as packages.
+### Platform migration 0004 deployment note
+
+Deployments upgrading a pre-0004 platform database must allow migration 0004
+to finish before workers claim scans. The migration keeps the oldest existing
+suppression row for each `(policy_id, fingerprint)` identity, removes later
+duplicates, and then creates the unique index. This cleanup is retry-safe for
+databases that have not recorded 0004; databases already recorded at 0004 do
+not rerun the migration and already enforce the unique identity constraint.
+
+## Historical 0.1.0b1 release evidence
+
+The following records the historical public beta, released from a reviewed
+`v0.1.0-beta.1` tag on `main`. It is retained as provenance for that release and is
+not the current release procedure. The current `1.0.0b1` checklist above is the
+normative release source of truth. The historical workflow first re-ran quality,
+benchmark, schema, dependency, secret, privacy, and image-vulnerability gates. Only
+then did it publish the GHCR runtime image; PyPI trusted publishing ran last. Python
+checksums were kept outside the distribution directory so they could not be uploaded
+to PyPI as packages.
 
 ## Repository and identity
 
@@ -84,10 +102,10 @@ directory so they cannot be uploaded to PyPI as packages.
 
 - [x] `conformdag fix --path . --policy-pack policies/pack.yaml` dry-run writes nothing and
   exits `0` (user guide: Deterministic fixes).
-- [x] Round-trip gate: the benchmark's autofix violation population (inject violations,
-  run the fix engine, assert a clean re-scan) passes via
-  `tests/test_roundtrip.py::test_roundtrip_gate_fixes_every_autofix_violation_case` over
-  the 240-case synthetic corpus; a regression fails the build.
+- [x] Round-trip gate: the benchmark's autofix violation population — 80 of the 240-case
+  synthetic corpus (inject violations, run the fix engine, assert a clean re-scan) — passes
+  via `tests/test_roundtrip.py::test_roundtrip_gate_fixes_every_autofix_violation_case`;
+  a regression fails the build.
 
 - [x] Fast checks.
 - [x] Offline benchmark gate.

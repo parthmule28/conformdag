@@ -36,13 +36,10 @@ export function Modal({ open, onClose, title, children, footer }: ModalProps) {
     }
     restoreFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const panel = panelRef.current;
-    const first = panel?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-    if (first !== null && first !== undefined) {
-      first.focus();
-    } else {
-      panel?.focus();
-    }
+    // Initial focus goes to the dialog panel itself (tabIndex={-1}), not the
+    // first focusable element: the header's dismiss control precedes the
+    // content in the DOM and must not absorb the opening focus.
+    panelRef.current?.focus();
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {

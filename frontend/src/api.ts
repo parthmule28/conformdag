@@ -26,6 +26,7 @@ export interface ScanSummary {
   result_fingerprint: string | null;
   complete: boolean | null;
   gate_passed: boolean | null;
+  artifact_available: boolean;
 }
 
 export interface Finding {

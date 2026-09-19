@@ -36,6 +36,7 @@ class ScanSummaryResponse(BaseModel):
     result_fingerprint: str | None
     complete: bool | None
     gate_passed: bool | None
+    artifact_available: bool
 
 
 class TrendPoint(BaseModel):

@@ -23,7 +23,9 @@ from conformdag.agent import (
     run_agent_pipeline,
     triage_report,
 )
+from conformdag.agent.pr import PrError
 from conformdag.agent.verifier import VerdictError
+from conformdag.fixing.engine import FilePatch
 from conformdag.models import RunIssue, RunMetadata, ScanReport
 from conformdag.scan import scan_repository
 
@@ -78,6 +80,14 @@ def _pr_transport(calls: list[httpx.Request]) -> httpx.MockTransport:
 def _pr_transport_never_called() -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("PR client must not be called when the verifier rejects")
+
+    return httpx.MockTransport(handler)
+
+
+def _pr_transport_plain(calls: list[httpx.Request]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(201, json={"html_url": "https://github.com/acme/repo/pull/1"})
 
     return httpx.MockTransport(handler)
 
@@ -247,6 +257,11 @@ def test_verifier_redacts_credentials(build_repository: Callable[[Path], Path], 
 
 def test_pipeline_opens_pr_after_approval(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
     root = _git_repo(build_repository(tmp_path))
+    unverified = root / "unverified.txt"
+    unverified.write_text("must not enter the agent commit\n", encoding="utf-8")
+    staged_unverified = root / "staged-unverified.txt"
+    staged_unverified.write_text("must not enter the agent commit either\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", staged_unverified.name], cwd=root, check=True, capture_output=True)
     pr_calls: list[httpx.Request] = []
     pull_requests = PrClient(token="t", repo="acme/repo", transport=_pr_transport(pr_calls))
     verifier = Verifier(
@@ -267,6 +282,183 @@ def test_pipeline_opens_pr_after_approval(build_repository: Callable[[Path], Pat
     assert "AIR-DET-" in body["body"]
     pushed = _git_output(root, ["branch", "-r"])
     assert "origin/conformdag/fix" in pushed
+    committed_files = _git_output(root, ["ls-tree", "-r", "--name-only", "HEAD"])
+    assert "unverified.txt" not in committed_files.splitlines()
+    assert "staged-unverified.txt" not in committed_files.splitlines()
+    assert unverified.is_file()
+
+
+def test_pipeline_rejects_pre_existing_edit_in_verified_file(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    """A dirty edit inside a verified file must abort publication, never enter the commit."""
+    root = _git_repo(build_repository(tmp_path))
+    verified_file = root / "dags/violations.py"
+    wip = "\n# WIP: unfinished local edit that must not be published\n"
+    verified_file.write_text(verified_file.read_text(encoding="utf-8") + wip, encoding="utf-8")
+    pull_requests = PrClient(token="t", repo="acme/repo", transport=_pr_transport_never_called())
+    verifier = Verifier(
+        "https://verifier.test/api",
+        "key",
+        VerifierRequest(model="m"),
+        transport=_verifier_transport("approve"),
+    )
+
+    with pytest.raises(PrError, match="pre-existing"):
+        run_agent_pipeline(root, root / "policies/pack.yaml", verifier=verifier, pull_requests=pull_requests)
+    verifier.close()
+
+    assert "conformdag/fix" not in _git_output(root, ["branch", "-a"])
+    assert "# WIP: unfinished local edit that must not be published" in verified_file.read_text(encoding="utf-8")
+
+
+def test_open_pull_request_commits_exactly_verified_patches(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    """The commit is built from the verified blobs, never from the working tree."""
+    root = build_repository(tmp_path)
+    notes = root / "notes.txt"
+    notes.write_text("committed baseline\n", encoding="utf-8")
+    root = _git_repo(root)
+    notes.write_text("local work in progress\n", encoding="utf-8")
+    head_dag = _git_content(root, ["show", "HEAD:dags/violations.py"])
+    calls: list[httpx.Request] = []
+    client = PrClient(token="t", repo="acme/repo", transport=_pr_transport_plain(calls))
+
+    url = client.open_pull_request(
+        root,
+        "conformdag/fix",
+        "title",
+        "body",
+        verified_patches=[
+            FilePatch(
+                path="dags/violations.py",
+                original=head_dag,
+                updated=head_dag.replace("retries=9", "retries=3"),
+                diff="",
+            ),
+            FilePatch(path="dags/new.py", original="", updated="x = 1\n", diff=""),
+        ],
+    )
+
+    assert url == "https://github.com/acme/repo/pull/1"
+    assert len(calls) == 1
+    committed = _git_output(root, ["ls-tree", "-r", "--name-only", "HEAD"]).splitlines()
+    assert "dags/new.py" in committed
+    committed_dag = _git_output(root, ["show", "HEAD:dags/violations.py"])
+    assert "retries=3" in committed_dag
+    assert "retries=9" not in committed_dag
+    assert "local work in progress" not in _git_output(root, ["show", "HEAD:notes.txt"])
+    assert "local work in progress" in notes.read_text(encoding="utf-8")
+
+
+def test_open_pull_request_rejects_patch_not_baselined_on_head(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    """A patch whose snapshot differs from HEAD proves pre-existing edits: fail closed."""
+    root = _git_repo(build_repository(tmp_path))
+    dag_path = root / "dags/violations.py"
+    dag_path.write_text(dag_path.read_text(encoding="utf-8") + "\n# local work\n", encoding="utf-8")
+    head_dag = _git_content(root, ["show", "HEAD:dags/violations.py"])
+    client = PrClient(token="t", repo="acme/repo", transport=_pr_transport_never_called())
+
+    with pytest.raises(PrError, match="pre-existing uncommitted changes"):
+        client.open_pull_request(
+            root,
+            "conformdag/fix",
+            "title",
+            "body",
+            verified_patches=[
+                FilePatch(
+                    path="dags/violations.py",
+                    original=head_dag + "\n# local work\n",
+                    updated=head_dag,
+                    diff="",
+                )
+            ],
+        )
+
+    assert "conformdag/fix" not in _git_output(root, ["branch", "-a"])
+    assert "# local work" in dag_path.read_text(encoding="utf-8")
+
+
+def test_open_pull_request_updates_an_existing_empty_file(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    root = build_repository(tmp_path)
+    empty_path = root / "dags/empty.py"
+    empty_path.write_text("", encoding="utf-8")
+    root = _git_repo(root)
+    calls: list[httpx.Request] = []
+    client = PrClient(token="t", repo="acme/repo", transport=_pr_transport_plain(calls))
+
+    url = client.open_pull_request(
+        root,
+        "conformdag/fix",
+        "title",
+        "body",
+        verified_patches=[FilePatch(path="dags/empty.py", original="", updated="value = 1\n", diff="")],
+    )
+
+    assert url == "https://github.com/acme/repo/pull/1"
+    assert len(calls) == 1
+    assert _git_content(root, ["show", "HEAD:dags/empty.py"]) == "value = 1\n"
+
+
+def test_open_pull_request_rejects_new_file_patch_when_head_contains_path(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    root = _git_repo(build_repository(tmp_path))
+    client = PrClient(token="t", repo="acme/repo", transport=_pr_transport_never_called())
+
+    with pytest.raises(PrError, match="not baselined"):
+        client.open_pull_request(
+            root,
+            "conformdag/fix",
+            "title",
+            "body",
+            verified_patches=[FilePatch(path="dags/violations.py", original="", updated="x = 1\n", diff="")],
+        )
+
+
+def test_open_pull_request_tolerates_verified_content_matching_head(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    root = _git_repo(build_repository(tmp_path))
+    head_dag = _git_content(root, ["show", "HEAD:dags/violations.py"])
+    calls: list[httpx.Request] = []
+    client = PrClient(token="t", repo="acme/repo", transport=_pr_transport_plain(calls))
+
+    url = client.open_pull_request(
+        root,
+        "conformdag/fix",
+        "title",
+        "body",
+        verified_patches=[FilePatch(path="dags/violations.py", original=head_dag, updated=head_dag, diff="")],
+    )
+
+    assert url == "https://github.com/acme/repo/pull/1"
+    assert "origin/conformdag/fix" in _git_output(root, ["branch", "-r"])
+
+
+def test_open_pull_request_rejects_duplicate_patch_paths(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    root = _git_repo(build_repository(tmp_path))
+    head_dag = _git_output(root, ["show", "HEAD:dags/violations.py"])
+    client = PrClient(token="t", repo="acme/repo", transport=_pr_transport_never_called())
+
+    with pytest.raises(PrError, match="duplicated"):
+        client.open_pull_request(
+            root,
+            "conformdag/fix",
+            "title",
+            "body",
+            verified_patches=[
+                FilePatch(path="dags/violations.py", original=head_dag, updated="a = 1\n", diff=""),
+                FilePatch(path="dags/violations.py", original=head_dag, updated="b = 1\n", diff=""),
+            ],
+        )
 
 
 def test_pipeline_without_pr_client_applies_locally(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:
@@ -375,6 +567,12 @@ def _git_repo(root: Path) -> Path:
 def _git_output(root: Path, arguments: list[str]) -> str:
     completed = subprocess.run(["git", *arguments], cwd=root, capture_output=True, text=True, check=True)
     return completed.stdout.strip()
+
+
+def _git_content(root: Path, arguments: list[str]) -> str:
+    """Return git stdout byte-for-byte (no strip), for exact blob comparisons."""
+    completed = subprocess.run(["git", *arguments], cwd=root, capture_output=True, text=True, check=True)
+    return completed.stdout
 
 
 def _finding_with_status(status: str, suppressed: bool, policy_id: str = "AIR-DET-001"):

@@ -3,7 +3,12 @@ services:
     image: ghcr.io/parthmule28/conformdag:latest
     command: ["serve", "--host", "0.0.0.0", "--port", "8642"]
     environment:
-      CONFORMDAG_PLATFORM_DSN: postgresql+psycopg://conformdag:conformdag@postgres:5432/conformdag
+      CONFORMDAG_PLATFORM_DSN: "postgresql+psycopg://"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${CONFORMDAG_POSTGRES_USER:?set CONFORMDAG_POSTGRES_USER}
+      PGPASSWORD: ${CONFORMDAG_POSTGRES_PASSWORD:?set CONFORMDAG_POSTGRES_PASSWORD}
+      PGDATABASE: ${CONFORMDAG_POSTGRES_DB:?set CONFORMDAG_POSTGRES_DB}
       CONFORMDAG_PLATFORM_TOKEN: ${CONFORMDAG_PLATFORM_TOKEN:?set CONFORMDAG_PLATFORM_TOKEN}
       CONFORMDAG_WORKSPACE: /workspace/conformdag-workspace.yaml
     ports:
@@ -19,8 +24,12 @@ services:
     image: ghcr.io/parthmule28/conformdag:latest
     command: ["worker"]
     environment:
-      CONFORMDAG_PLATFORM_DSN: postgresql+psycopg://conformdag:conformdag@postgres:5432/conformdag
-      CONFORMDAG_PLATFORM_TOKEN: ${CONFORMDAG_PLATFORM_TOKEN:-}
+      CONFORMDAG_PLATFORM_DSN: "postgresql+psycopg://"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${CONFORMDAG_POSTGRES_USER:?set CONFORMDAG_POSTGRES_USER}
+      PGPASSWORD: ${CONFORMDAG_POSTGRES_PASSWORD:?set CONFORMDAG_POSTGRES_PASSWORD}
+      PGDATABASE: ${CONFORMDAG_POSTGRES_DB:?set CONFORMDAG_POSTGRES_DB}
     volumes:
       - ${CONFORMDAG_WORKSPACE_DIR:?set CONFORMDAG_WORKSPACE_DIR}:/workspace:rw
     depends_on:
@@ -31,13 +40,13 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: conformdag
-      POSTGRES_PASSWORD: conformdag
-      POSTGRES_DB: conformdag
+      POSTGRES_USER: ${CONFORMDAG_POSTGRES_USER:?set CONFORMDAG_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${CONFORMDAG_POSTGRES_PASSWORD:?set CONFORMDAG_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${CONFORMDAG_POSTGRES_DB:?set CONFORMDAG_POSTGRES_DB}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U conformdag"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
       retries: 10

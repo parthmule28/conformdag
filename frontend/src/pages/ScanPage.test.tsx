@@ -338,6 +338,7 @@ beforeEach(() => {
 describe("ScanPage", () => {
   it("shows a loading state while scan status is in flight", () => {
     getScanStatusMock.mockReturnValue(new Promise(() => undefined));
+    findingsMock.mockReturnValue(new Promise(() => undefined));
     renderScanPage("scan-1");
     expect(screen.getByRole("status")).toHaveTextContent("Loading scan");
   });
@@ -404,6 +405,7 @@ describe("ScanPage", () => {
     expect(within(suppressedRow).getByText("Existing")).toBeInTheDocument();
 
     const dialog = await openDetail("PARSE-002");
+    expect(dialog).toHaveFocus();
     expect(within(dialog).getByText("Suppressed finding")).toBeInTheDocument();
     expect(within(dialog).getByText(/known parser limitation/)).toBeInTheDocument();
     expect(within(dialog).getByText("DAG could not be parsed")).toBeInTheDocument();

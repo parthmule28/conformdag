@@ -65,6 +65,7 @@ describe("ThemeProvider", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     document.documentElement.removeAttribute("data-theme");
   });
 
@@ -90,6 +91,30 @@ describe("ThemeProvider", () => {
     renderToggle();
     expect(toggleButton()).toHaveAccessibleName("Color theme: dark");
     expect(document.documentElement).not.toHaveAttribute("data-theme");
+  });
+
+  it("falls back to the system scheme when storage cannot be read", () => {
+    systemDark = true;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage blocked");
+    });
+
+    renderToggle();
+
+    expect(toggleButton()).toHaveAccessibleName("Color theme: dark");
+  });
+
+  it("still applies a toggled theme when storage cannot be written", () => {
+    systemDark = false;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage blocked");
+    });
+    renderToggle();
+
+    fireEvent.click(toggleButton());
+
+    expect(toggleButton()).toHaveAccessibleName("Color theme: dark");
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
   });
 
   it("persists a toggled theme and applies it to the document root", () => {

@@ -1,7 +1,9 @@
 """Tests for the validated Docker runtime boundary."""
 
+import re
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,10 +12,14 @@ import pytest
 
 from conformdag.models import AirflowProfile, ProjectRuntimeConfig
 from conformdag.runtime import (
+    RUNTIME_PROFILES,
     DockerRunner,
     RuntimePhaseError,
+    RuntimeReleaseError,
     build_runtime_manifest,
     execute_runtime,
+    runtime_profile,
+    validate_runtime_release,
 )
 
 pytestmark = pytest.mark.runtime
@@ -80,8 +86,20 @@ def test_supported_profile_resolves_pinned_image_and_providers(tmp_path: Path) -
     )
 
     assert manifest.supported_profile is True
-    assert manifest.image == "ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1"
+    assert manifest.image == (
+        "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
+        "sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b"
+    )
     assert manifest.provider_versions["apache-airflow-providers-google"] == "22.2.2"
+
+
+def test_supported_profile_uses_the_reviewed_immutable_identity() -> None:
+    profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
+
+    assert profile.image == (
+        "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
+        "sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b"
+    )
 
 
 def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path) -> None:
@@ -113,6 +131,9 @@ def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path)
     assert "/tmp:rw,noexec,nosuid,size=64m" in command  # noqa: S108 - boundary assertion
     assert command[-2:] == ["--manifest", "/conformdag/runtime-manifest.json"]
     assert mocked.call_args.kwargs["shell"] is False
+    assert not (tmp_path / ".conformdag" / "runtime-manifest.json").exists()
+    manifest_mount = next(item for item in command if "runtime-manifest.json" in item and item.startswith("type=bind"))
+    assert f"src={tmp_path}" not in manifest_mount
 
 
 def test_runtime_import_failure_is_returned_as_structured_error(tmp_path: Path) -> None:
@@ -214,7 +235,7 @@ def test_runtime_daemon_failure_is_reported() -> None:
 
 def test_published_profile_is_pulled_and_executed_by_digest(tmp_path: Path) -> None:
     runner = DockerRunner()
-    digest = "ghcr.io/parthmule28/conformdag/airflow-3.3.0@sha256:" + "f" * 64
+    digest = runtime_profile(AirflowProfile.AIRFLOW_3_3_0).image
 
     with (
         patch.object(runner, "require_daemon") as require_daemon,
@@ -238,11 +259,32 @@ def test_published_profile_is_pulled_and_executed_by_digest(tmp_path: Path) -> N
     assert resolved == digest
     require_daemon.assert_called_once_with()
     pull_image.assert_called_once_with(
-        "ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1",
+        digest,
         timeout_seconds=300,
     )
     resolve_digest.assert_called_once()
     assert run_manifest.call_args.args[1] == digest
+
+
+def test_published_profile_rejects_an_unreviewed_digest(tmp_path: Path) -> None:
+    runner = DockerRunner()
+    unreviewed = "ghcr.io/parthmule28/conformdag/airflow-3.3.0@sha256:" + "0" * 64
+
+    with (
+        patch.object(runner, "require_daemon"),
+        patch.object(runner, "pull_image"),
+        patch.object(runner, "resolve_digest", return_value=unreviewed),
+        patch.object(runner, "run_manifest", return_value=[]),
+        pytest.raises(RuntimePhaseError, match="reviewed runtime profile identity"),
+    ):
+        execute_runtime(
+            tmp_path,
+            ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+            ["AIR-DET-001"],
+            ["dags/**/*.py"],
+            [],
+            runner,
+        )
 
 
 def test_digest_resolution_rejects_tag_only_images() -> None:
@@ -254,3 +296,35 @@ def test_digest_resolution_rejects_tag_only_images() -> None:
         pytest.raises(RuntimePhaseError, match="immutable digest"),
     ):
         runner.resolve_digest("airflow:latest")
+
+
+def test_release_validation_accepts_the_reviewed_release_ref() -> None:
+    profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
+
+    validate_runtime_release(profile.reviewed_release)
+
+
+def test_release_validation_rejects_an_unreviewed_release_ref() -> None:
+    unreviewed = "v9.9.9-rc.999"
+
+    with pytest.raises(
+        RuntimeReleaseError,
+        match=f"refusing unreviewed release {re.escape(unreviewed)}",
+    ):
+        validate_runtime_release(unreviewed)
+
+
+def test_release_validation_names_the_recorded_review_in_the_error() -> None:
+    profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
+
+    with pytest.raises(RuntimeReleaseError, match=re.escape(profile.reviewed_release)):
+        validate_runtime_release("v9.9.9-rc.999")
+
+
+def test_release_validation_requires_an_immutable_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
+    tag_pinned = replace(profile, image="ghcr.io/parthmule28/conformdag/airflow-3.3.0:v9.9.9")
+    monkeypatch.setitem(RUNTIME_PROFILES, AirflowProfile.AIRFLOW_3_3_0, tag_pinned)
+
+    with pytest.raises(RuntimeReleaseError, match="immutable sha256 digest"):
+        validate_runtime_release(profile.reviewed_release)

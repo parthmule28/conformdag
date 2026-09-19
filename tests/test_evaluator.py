@@ -1,5 +1,6 @@
 """Tests for typed deterministic evaluators and stable evidence."""
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,6 +32,7 @@ from conformdag.models import (
     Severity,
 )
 from conformdag.policy import load_policy_pack, resolve_policy_pack_path
+from conformdag.ruff_adapter import ruff_rule_matches, run_ruff, validate_ruff_selector
 
 
 def _model(source: str, relative_path: str = "dag.py"):
@@ -79,7 +81,7 @@ def test_ruff_air_evaluator_maps_violations_to_findings(tmp_path: Path, monkeypa
         }
     ]
 
-    def fake_run_ruff(_root: Path, _rules: list[str]) -> list[dict[str, Any]]:
+    def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> list[dict[str, Any]]:
         return payload
 
     monkeypatch.setattr("conformdag.evaluator.run_ruff", fake_run_ruff)
@@ -98,12 +100,49 @@ def test_ruff_air_evaluator_maps_violations_to_findings(tmp_path: Path, monkeypa
     assert "AIR002" in finding.explanation
 
 
+def test_ruff_air_evaluator_reports_symlinked_violation_under_scan_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    target = dags / "target.py"
+    source_text = "from airflow import DAG\ndag = DAG(dag_id='x')\n"
+    target.write_text(source_text, encoding="utf-8")
+    link = dags / "link.py"
+    link.symlink_to(target)
+    source_file = SourceFile(link, "dags/link.py", source_text, "input-hash")
+    model, issue = analyze_source(source_file)
+    assert issue is None
+    assert model is not None
+    policy = _ruff_policy()
+    context = EvaluationContext(policy, [model], repository_root=tmp_path)
+    payload: list[dict[str, Any]] = [
+        {
+            "filename": "dags/link.py",
+            "location": {"row": 2, "column": 7},
+            "code": "AIR002",
+            "message": "`DAG` or `@dag` should have an explicit `schedule` argument",
+        }
+    ]
+
+    def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> list[dict[str, Any]]:
+        return payload
+
+    monkeypatch.setattr("conformdag.evaluator.run_ruff", fake_run_ruff)
+
+    findings = CHECK_EVALUATORS["ruff-air"].evaluate(context)
+
+    assert len(findings) == 1
+    assert findings[0].location.file == Path("dags/link.py")
+    assert findings[0].location.start_line == 2
+
+
 def test_ruff_air_evaluator_skips_when_binary_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     model = _model("from airflow import DAG\ndag = DAG(dag_id='x')\n")
     policy = _ruff_policy()
     context = EvaluationContext(policy, [model], repository_root=tmp_path)
 
-    def fake_run_ruff(_root: Path, _rules: list[str]) -> None:
+    def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> None:
         return None
 
     monkeypatch.setattr("conformdag.evaluator.run_ruff", fake_run_ruff)
@@ -133,7 +172,7 @@ def test_evaluate_deterministic_runs_one_ruff_union_and_filters_by_policy(
         },
     ]
 
-    def fake_run_ruff(root: Path, rules: list[str]) -> list[dict[str, Any]]:
+    def fake_run_ruff(root: Path, rules: list[str], _files: list[Path]) -> list[dict[str, Any]]:
         calls.append((root, rules))
         return payload
 
@@ -153,6 +192,8 @@ def test_evaluate_deterministic_runs_one_ruff_union_and_filters_by_policy(
 def test_run_ruff_disables_source_fixes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.ruff_adapter import run_ruff
 
+    source = tmp_path / "dag.py"
+    source.write_text("from airflow import DAG\n", encoding="utf-8")
     calls: list[tuple[list[str], dict[str, object]]] = []
 
     def fake_run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -162,16 +203,96 @@ def test_run_ruff_disables_source_fixes(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr("conformdag.ruff_adapter.ruff_binary", lambda: "/usr/bin/ruff")
     monkeypatch.setattr("conformdag.ruff_adapter.subprocess.run", fake_run)
 
-    assert run_ruff(tmp_path, ["AIR002"]) == []
+    assert run_ruff(tmp_path, ["AIR002"], [source]) == []
     assert len(calls) == 1
     arguments, kwargs = calls[0]
     assert "--no-fix" in arguments
+    assert "--isolated" in arguments
+    assert "--no-respect-gitignore" in arguments
+    assert "--no-cache" in arguments
     assert arguments[arguments.index("--select") + 1] == "AIR002"
+    assert arguments[-1] == str(source)
     assert kwargs["check"] is False
+
+
+def test_run_ruff_reports_internal_symlink_sources_under_scan_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.ruff_adapter import run_ruff
+
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    target = legacy / "target.py"
+    target.write_text("from airflow import DAG\ndag = DAG(dag_id='x')\n", encoding="utf-8")
+    dags = tmp_path / "dags"
+    dags.mkdir()
+    link = dags / "link.py"
+    link.symlink_to(target)
+    payload = json.dumps(
+        [
+            {
+                "filename": str(target.resolve()),
+                "location": {"row": 2, "column": 7},
+                "code": "AIR002",
+                "message": "`DAG` or `@dag` should have an explicit `schedule` argument",
+            }
+        ]
+    )
+
+    def fake_run(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(arguments, 1, stdout=payload, stderr="")
+
+    monkeypatch.setattr("conformdag.ruff_adapter.ruff_binary", lambda: "/usr/bin/ruff")
+    monkeypatch.setattr("conformdag.ruff_adapter.subprocess.run", fake_run)
+
+    violations = run_ruff(tmp_path, ["AIR002"], [link])
+
+    assert violations is not None
+    assert [item["filename"] for item in violations] == ["dags/link.py"]
+
+
+def test_run_ruff_rejects_source_paths_outside_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("conformdag.ruff_adapter.ruff_binary", lambda: "/usr/bin/ruff")
+
+    assert run_ruff(tmp_path, ["AIR002"], [tmp_path.parent / "outside.py"]) is None
+
+
+def test_run_ruff_does_not_scan_repository_when_no_sources_are_selected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr("conformdag.ruff_adapter.ruff_binary", lambda: "/usr/bin/ruff")
+    monkeypatch.setattr("conformdag.ruff_adapter.subprocess.run", fake_run)
+
+    assert run_ruff(tmp_path, ["AIR002"], []) == []
+    assert calls == []
+
+
+def test_ruff_selector_supports_exact_family_and_bounded_prefix_matching() -> None:
+    assert ruff_rule_matches("AIR002", "AIR002")
+    assert not ruff_rule_matches("AIR003", "AIR002")
+    assert ruff_rule_matches("AIR002", "AIR")
+    assert ruff_rule_matches("AIR002", "AIR0")
+    assert not ruff_rule_matches("AIRFLOW002", "AIR")
+    assert not ruff_rule_matches("A002", "AIR")
+
+
+@pytest.mark.parametrize("selector", ["", "AIR*", "AIR-002", "2AIR", "AIR 002"])
+def test_ruff_selector_rejects_invalid_values(selector: str) -> None:
+    with pytest.raises(ValueError, match="invalid Ruff selector"):
+        validate_ruff_selector(selector)
 
 
 def test_run_ruff_returns_none_on_invocation_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.ruff_adapter import run_ruff
+
+    source = tmp_path / "dag.py"
+    source.write_text("from airflow import DAG\n", encoding="utf-8")
 
     def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(arguments, 2, stdout="", stderr="ruff failed")
@@ -179,11 +300,14 @@ def test_run_ruff_returns_none_on_invocation_failure(tmp_path: Path, monkeypatch
     monkeypatch.setattr("conformdag.ruff_adapter.ruff_binary", lambda: "/usr/bin/ruff")
     monkeypatch.setattr("conformdag.ruff_adapter.subprocess.run", fake_run)
 
-    assert run_ruff(tmp_path, ["AIR002"]) is None
+    assert run_ruff(tmp_path, ["AIR002"], [source]) is None
 
 
 def test_run_ruff_rejects_empty_json_on_violation_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.ruff_adapter import run_ruff
+
+    source = tmp_path / "dag.py"
+    source.write_text("from airflow import DAG\n", encoding="utf-8")
 
     def fake_run(arguments: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(arguments, 1, stdout="", stderr="")
@@ -191,7 +315,7 @@ def test_run_ruff_rejects_empty_json_on_violation_exit(tmp_path: Path, monkeypat
     monkeypatch.setattr("conformdag.ruff_adapter.ruff_binary", lambda: "/usr/bin/ruff")
     monkeypatch.setattr("conformdag.ruff_adapter.subprocess.run", fake_run)
 
-    assert run_ruff(tmp_path, ["AIR002"]) is None
+    assert run_ruff(tmp_path, ["AIR002"], [source]) is None
 
 
 def test_owner_evaluator_handles_valid_and_invalid_values() -> None:
@@ -235,6 +359,46 @@ def test_structural_fingerprint_does_not_depend_on_line_number() -> None:
     second = structural_fingerprint(policy, "dag.py", "dag:dag:owner:platform", FindingStatus.PASS)
 
     assert first == second
+
+
+def test_timeout_distinguishes_absent_resolved_none_and_unresolved_values() -> None:
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
+    policy = next(item for item in pack.policies if item.id == "AIR-DET-003")
+    model = _model(
+        "from datetime import timedelta\n"
+        "from airflow import DAG\n"
+        "from airflow.providers.standard.operators.empty import EmptyOperator\n"
+        "with DAG(dag_id='timeouts') as dag:\n"
+        "    EmptyOperator(task_id='absent')\n"
+        "    EmptyOperator(task_id='none', execution_timeout=None)\n"
+        "    EmptyOperator(task_id='dynamic', execution_timeout=timedelta(seconds=TIMEOUT_SECONDS))\n"
+        "    EmptyOperator(task_id='resolved', execution_timeout=timedelta(seconds=300))\n"
+    )
+
+    findings = CHECK_EVALUATORS["effective-timeout"].evaluate(EvaluationContext(policy, [model]))
+    by_task = {(finding.explanation or "").split(" ", 2)[1]: finding.status for finding in findings}
+
+    assert by_task["absent"] is FindingStatus.PASS
+    assert by_task["none"] is FindingStatus.FAIL
+    assert by_task["dynamic"] is FindingStatus.ERROR
+    assert by_task["resolved"] is FindingStatus.PASS
+
+
+def test_timeout_in_an_assigned_unresolved_default_mapping_is_an_error() -> None:
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
+    policy = next(item for item in pack.policies if item.id == "AIR-DET-003")
+    model = _model(
+        "from airflow import DAG\n"
+        "from airflow.providers.standard.operators.empty import EmptyOperator\n"
+        "DEFAULT_ARGS = {'execution_timeout': TIMEOUT_SECONDS}\n"
+        "dag = DAG(default_args=DEFAULT_ARGS)\n"
+        "EmptyOperator(task_id='dynamic', dag=dag)\n"
+    )
+
+    findings = CHECK_EVALUATORS["effective-timeout"].evaluate(EvaluationContext(policy, [model]))
+
+    assert len(findings) == 1
+    assert findings[0].status is FindingStatus.ERROR
 
 
 def test_deterministic_policy_suite_evaluates_tags_defaults_io_and_operators() -> None:

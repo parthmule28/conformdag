@@ -29,6 +29,17 @@ const MANY_POINTS = Array.from({ length: 10 }, (_, index) => ({
   date: `2026-09-${String(index + 16).padStart(2, "0")}`,
 }));
 
+const PEAK_OF_FIVE = [
+  {
+    date: "2026-09-16",
+    completed_scan_count: 1,
+    fail_finding_count: 3,
+    error_finding_count: 2,
+    suppressed_finding_count: 0,
+    new_finding_count: 0,
+  },
+];
+
 afterEach(cleanup);
 
 describe("TrendChart", () => {
@@ -60,5 +71,14 @@ describe("TrendChart", () => {
     expect(screen.getByRole("img", { name: /Finding volume by day.*daily points from/ })).toHaveStyle({
       width: "max(100%, 756px)",
     });
+  });
+
+  it("labels the y-axis with a readable integer midpoint and endpoints", () => {
+    const { container } = render(<TrendChart points={PEAK_OF_FIVE} />);
+
+    const tickLabels = Array.from(container.querySelectorAll("svg text[x='0']")).map(
+      (node) => node.textContent,
+    );
+    expect(tickLabels).toEqual(["5", "2", "0"]);
   });
 });

@@ -135,6 +135,73 @@ def test_semantic_finding_normalizes_audit_citations_and_marks_unknown_locations
     assert finding.audit_evidence[1].location == "missing.py"
 
 
+def test_semantic_fingerprint_ignores_provider_prose() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    first = semantic_finding(
+        policy,
+        SemanticResponse(
+            status="FAIL",
+            evidence="the first explanation of the same decision",
+            explanation="provider prose one",
+            confidence=Confidence.HIGH,
+        ),
+        _context(),
+    )
+    second = semantic_finding(
+        policy,
+        SemanticResponse(
+            status="FAIL",
+            evidence="a completely different wording for the same decision",
+            explanation="provider prose two",
+            confidence=Confidence.LOW,
+        ),
+        _context(),
+    )
+
+    assert first.fingerprint == second.fingerprint
+
+
+def test_semantic_fingerprint_is_stable_across_unrelated_context_changes() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    cited = SemanticContext(
+        "[SOURCE dag.py]\nlogging.info(token='[REDACTED]')",
+        "hash-one",
+        ("dag.py",),
+        (),
+    )
+    unrelated_edit = SemanticContext(
+        "[POLICY]\nunchanged\n\n[SOURCE dag.py]\nlogging.info(token='[REDACTED]')\n\n"
+        "[SOURCE unrelated_dag.py]\n# an edit in another file changes the whole-context hash",
+        "hash-two",
+        ("dag.py", "unrelated_dag.py"),
+        (),
+    )
+
+    first = semantic_finding(
+        policy,
+        SemanticResponse(
+            status="FAIL",
+            evidence="the same cited violation",
+            explanation="same explanation",
+            confidence=Confidence.HIGH,
+        ),
+        cited,
+    )
+    second = semantic_finding(
+        policy,
+        SemanticResponse(
+            status="FAIL",
+            evidence="the same cited violation",
+            explanation="same explanation",
+            confidence=Confidence.HIGH,
+        ),
+        unrelated_edit,
+    )
+
+    assert cited.context_hash != unrelated_edit.context_hash
+    assert first.fingerprint == second.fingerprint
+
+
 def test_normalizes_abstention_as_advisory_finding() -> None:
     policy = next(item for item in _policies() if item.id == "AIR-SEM-004")
     response = SemanticResponse(

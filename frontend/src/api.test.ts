@@ -57,6 +57,7 @@ const SCAN_SUMMARY_FIXTURE = {
   result_fingerprint: "fp-abc",
   complete: true,
   gate_passed: true,
+  artifact_available: true,
 };
 
 const FINDING_FIXTURE = {

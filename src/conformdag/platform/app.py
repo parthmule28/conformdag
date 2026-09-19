@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -11,14 +12,18 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import ColumnElement, false, func, nullslast, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
+from starlette.types import Scope
 
 from conformdag.models import ScanReport
 from conformdag.platform.aggregates import build_overview, build_repository_trends
@@ -38,6 +43,7 @@ from conformdag.platform.db import (
     count_scans,
     eligible_baseline,
     new_id,
+    transition_scan_to_cancelled,
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
@@ -50,14 +56,56 @@ API_PREFIX = "/api/v1"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+def _is_spa_route(path: str) -> bool:
+    """Return whether a missing static path is eligible for the SPA shell."""
+    normalized = path.strip("/")
+    if normalized == "" or normalized.startswith("assets/"):
+        return normalized == ""
+    return "." not in normalized.rsplit("/", maxsplit=1)[-1]
+
+
+class DashboardStaticFiles(StaticFiles):
+    """Serve the built dashboard while preserving missing-asset 404 responses."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or not _is_spa_route(path):
+                raise
+            return await super().get_response("index.html", scope)
+        if response.status_code == 404 and _is_spa_route(path):
+            return await super().get_response("index.html", scope)
+        return response
+
+
 class PlatformSettings(BaseModel):
     """Operator-supplied platform configuration resolved from the environment."""
 
     dsn: str
     admin_token: str | None = None
     retention_keep: int = Field(default=50, ge=1)
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     workspace: Path | None = None
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, origins: list[str]) -> list[str]:
+        for origin in origins:
+            if origin == "*":
+                raise ValueError("wildcard CORS origins are not supported; configure explicit origins")
+            parsed = urlsplit(origin)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or parsed.path not in {"", "/"}
+            ):
+                raise ValueError(f"invalid CORS origin: {origin}")
+        return origins
 
 
 def load_settings() -> PlatformSettings:
@@ -82,7 +130,7 @@ class RepositoryCreate(BaseModel):
     name: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
     path: str
     policy_pack: str | None = None
-    airflow_profile: str | None = None
+    airflow_profile: str | None = Field(default=None, max_length=32)
 
 
 class WorkspaceLoadRequest(BaseModel):
@@ -151,7 +199,9 @@ def require_admin(request: Request, authorization: Annotated[str | None, Header(
             status_code=503,
             detail="platform admin token is not configured; mutations are disabled",
         )
-    if authorization != f"Bearer {settings.admin_token}":
+    presented = (authorization or "").encode("utf-8")
+    expected = f"Bearer {settings.admin_token}".encode()
+    if not hmac.compare_digest(presented, expected):
         raise HTTPException(status_code=401, detail="admin authentication required")
 
 
@@ -258,11 +308,10 @@ def cancel_scan(request: Request, scan_id: str) -> dict[str, str]:
         scan = session.get(ScanRow, scan_id)
         if scan is None:
             raise HTTPException(status_code=404, detail="scan not found")
-        if scan.status not in {"queued", "running"}:
-            raise HTTPException(status_code=409, detail=f"scan already {scan.status}")
-        scan.status = "cancelled"
-        scan.finished_at = utcnow()
-        session.commit()
+        if not transition_scan_to_cancelled(session, scan_id):
+            current = session.get(ScanRow, scan_id)
+            status = current.status if current is not None else "gone"
+            raise HTTPException(status_code=409, detail=f"scan already {status}")
         return {"scan_id": scan_id, "status": "cancelled"}
 
 
@@ -325,6 +374,7 @@ def scan_history(
                     result_fingerprint=row.result_fingerprint,
                     complete=row.complete,
                     gate_passed=cast("bool | None", gate_result.get("passed")),
+                    artifact_available=row.report_json is not None,
                 )
             )
         return summaries
@@ -380,11 +430,13 @@ def scan_findings(
     factory = _factory(request)
     with factory() as session:
         scan = session.get(ScanRow, scan_id)
-        repository = session.get(RepositoryRow, scan.repository_id) if scan is not None else None
+        if scan is None:
+            raise HTTPException(status_code=404, detail="scan not found")
+        repository = session.get(RepositoryRow, scan.repository_id)
         baseline_fingerprints: set[str] | None = None
         baseline = (
             eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
-            if scan is not None and repository is not None and repository.baseline_scan_id
+            if repository is not None and repository.baseline_scan_id
             else None
         )
         if baseline is not None:
@@ -461,7 +513,11 @@ def create_suppression(request: Request, payload: SuppressionCreate) -> dict[str
             source="platform",
         )
         session.add(row)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError as exc:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="suppression already exists for this policy finding") from exc
         return _suppression_payload(row)
 
 
@@ -520,7 +576,7 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["X-Total-Count"],
@@ -618,9 +674,10 @@ def create_app(
         _pack_delete_gate
     )
 
-    app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
+    app.api_route("/api", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
+    app.api_route("/api/{rest:path}", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
     if STATIC_DIR.is_dir():
-        app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
+        app.mount("/", DashboardStaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
 
 
@@ -709,7 +766,7 @@ def _pack_delete_gate(request: Request, pack_name: str, gate_id: str) -> dict[st
     return {"status": "deleted", "gate_id": gate_id}
 
 
-def _api_fallback(rest: str) -> dict[str, str]:
+def _api_fallback(rest: str = "") -> dict[str, str]:
     """Return a JSON 404 for unknown API paths instead of the dashboard SPA."""
     raise HTTPException(status_code=404, detail=f"unknown API path: /api/{rest}")
 

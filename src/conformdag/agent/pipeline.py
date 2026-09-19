@@ -113,6 +113,7 @@ def run_agent_pipeline(
             branch,
             _title(outcome.initial_report),
             pipeline.pr_body(pull_requests.repo),
+            verified_patches=outcome.patches,
         )
     return pipeline
 

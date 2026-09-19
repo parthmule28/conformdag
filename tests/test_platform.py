@@ -20,7 +20,7 @@ from typing import Any, NoReturn, cast
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from ruamel.yaml import YAML
@@ -56,12 +56,15 @@ from conformdag.platform.db import (
     SuppressionRow,
     claim_queued_scan,
     create_session_factory,
+    heartbeat_running_scan,
     initialize_session_factory,
     new_id,
     new_suppression_id,
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
+    transition_running_scan,
+    transition_scan_to_cancelled,
     utcnow,
 )
 from conformdag.platform.demo import DemoWorkspace, build_demo_workspace, seed_demo_scenario, start_demo_worker
@@ -341,6 +344,10 @@ def test_demo_seed_suppressions_use_real_current_findings(tmp_path: Path) -> Non
         )
         assert active_finding is not None and active_finding.suppressed is True
         assert any(finding.status == "FAIL" and not finding.suppressed for finding in current_findings)
+        assert any(
+            finding.policy_id == "AIR-DET-003" and finding.status == "FAIL" and not finding.suppressed
+            for finding in current_findings
+        )
 
 
 def test_demo_worker_processes_interactive_scans_after_seed(tmp_path: Path) -> None:
@@ -675,6 +682,7 @@ def test_cors_preflight_allows_configured_origin(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert "access-control-allow-credentials" not in response.headers
 
 
 def test_cors_rejects_unknown_origin(client: TestClient) -> None:
@@ -721,7 +729,39 @@ def test_json_formatter_emits_single_line_json() -> None:
 def test_platform_startup_installs_json_logging(client: TestClient) -> None:
     from conformdag.platform.logging import JsonFormatter
 
-    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
+    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger("conformdag").handlers)
+    assert not any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
+
+
+def test_migrations_and_startup_emit_application_event_once(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root_logger = logging.getLogger()
+    conformdag_logger = logging.getLogger("conformdag")
+    previous_root_handlers = list(root_logger.handlers)
+    try:
+        for handler in previous_root_handlers:
+            root_logger.removeHandler(handler)
+        for handler in list(conformdag_logger.handlers):
+            conformdag_logger.removeHandler(handler)
+        dsn = f"sqlite:///{tmp_path / 'platform.db'}"
+        factory = initialize_session_factory(dsn)
+        create_app(factory, PlatformSettings(dsn=dsn, admin_token="secret-token"))
+        capsys.readouterr()
+
+        marker = "migration-startup-log-once"
+        assert conformdag_logger.propagate is False
+        logging.getLogger("conformdag.platform.test").info(marker)
+        matching_lines = [line for line in capsys.readouterr().err.splitlines() if marker in line]
+
+        assert len(matching_lines) == 1
+        assert matching_lines[0].startswith("{")
+    finally:
+        for handler in list(root_logger.handlers):
+            root_logger.removeHandler(handler)
+        for handler in list(conformdag_logger.handlers):
+            conformdag_logger.removeHandler(handler)
+        for handler in previous_root_handlers:
+            root_logger.addHandler(handler)
+        conformdag_logger.propagate = False
 
 
 def test_request_middleware_logs_and_echoes_request_id(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
@@ -871,6 +911,127 @@ def test_create_app_registers_workspace_packs_at_startup(tmp_path: Path, monkeyp
     assert any(entry["name"] == "org" and entry["id"] == "org" for entry in entries)
 
 
+def test_first_boot_migrations_are_serialized(tmp_path: Path) -> None:
+    dsn = f"sqlite:///{tmp_path / 'first-boot.db'}"
+    errors: list[BaseException] = []
+
+    def initialize() -> None:
+        try:
+            initialize_session_factory(dsn)
+        except BaseException as exc:  # pragma: no cover - assertion captures any migration race
+            errors.append(exc)
+
+    threads = [threading.Thread(target=initialize) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+
+
+def test_sqlite_migration_lock_is_shared_with_the_database_volume(tmp_path: Path) -> None:
+    from conformdag.platform.db import migration_lock_path
+
+    database = tmp_path / "first-boot.db"
+
+    assert migration_lock_path(f"sqlite:///{database}") == tmp_path / ".first-boot.db.conformdag-migrations.lock"
+
+
+def test_postgres_migration_lock_uses_database_advisory_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform import db
+
+    statements: list[str] = []
+
+    class FakeConnection:
+        def __enter__(self) -> "FakeConnection":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, statement: object, _parameters: object) -> None:
+            statements.append(str(statement))
+
+        def commit(self) -> None:
+            return None
+
+    class FakeEngine:
+        def connect(self) -> FakeConnection:
+            return FakeConnection()
+
+        def dispose(self) -> None:
+            return None
+
+    def fake_create_engine(*_args: object, **_kwargs: object) -> FakeEngine:
+        return FakeEngine()
+
+    def fake_upgrade(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(db, "create_engine", fake_create_engine)
+    monkeypatch.setattr("alembic.command.upgrade", fake_upgrade)
+
+    db.run_migrations("postgresql+psycopg://platform@db/conformdag")
+
+    assert any("pg_advisory_lock" in statement for statement in statements)
+    assert any("pg_advisory_unlock" in statement for statement in statements)
+
+
+def test_suppression_identity_migration_deduplicates_existing_rows(tmp_path: Path) -> None:
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    database = tmp_path / "duplicate-suppressions.db"
+    dsn = f"sqlite:///{database}"
+    config = Config(str(Path("src/conformdag/platform/alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("src/conformdag/platform/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", dsn)
+    command.upgrade(config, "0003")
+    engine = create_engine(dsn)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO suppressions "
+                "(id, policy_id, fingerprint, reason, owner, created_at, expires_at, source) "
+                "VALUES (:id, :policy_id, :fingerprint, :reason, :owner, :created_at, :expires_at, :source)"
+            ),
+            [
+                {
+                    "id": "suppression-1",
+                    "policy_id": "AIR-DET-001",
+                    "fingerprint": "a" * 64,
+                    "reason": "first",
+                    "owner": "platform",
+                    "created_at": "2026-01-01 00:00:00",
+                    "expires_at": "2099-01-01 00:00:00",
+                    "source": "platform",
+                },
+                {
+                    "id": "suppression-2",
+                    "policy_id": "AIR-DET-001",
+                    "fingerprint": "a" * 64,
+                    "reason": "duplicate",
+                    "owner": "platform",
+                    "created_at": "2026-01-02 00:00:00",
+                    "expires_at": "2099-01-01 00:00:00",
+                    "source": "platform",
+                },
+            ],
+        )
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        count = connection.scalar(
+            text("SELECT COUNT(*) FROM suppressions WHERE policy_id = 'AIR-DET-001' AND fingerprint = :fingerprint"),
+            {"fingerprint": "a" * 64},
+        )
+    assert count == 1
+
+
 def test_abandoned_running_scan_is_reclaimed_within_attempt_budget(platform_env: str) -> None:
     factory = initialize_session_factory(platform_env)
     with factory() as session:
@@ -919,6 +1080,61 @@ def test_abandoned_scan_fails_after_attempt_budget(platform_env: str) -> None:
         assert scan.error is not None and "abandoned" in scan.error
 
 
+def test_stale_worker_claim_cannot_refresh_or_finish_reclaimed_scan(platform_env: str) -> None:
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running", attempts=2))
+        session.commit()
+
+    with factory() as session:
+        assert heartbeat_running_scan(session, "scan1", expected_attempt=1) is False
+    with factory() as session:
+        assert transition_running_scan(session, "scan1", "succeeded", expected_attempt=1) is False
+
+    scan = only_scan(platform_env)
+    assert scan.status == "running"
+    assert scan.attempts == 2
+
+
+def test_cancel_transition_has_one_winner(platform_env: str) -> None:
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    with factory() as session:
+        assert transition_scan_to_cancelled(session, "scan1") is True
+    with factory() as session:
+        assert transition_scan_to_cancelled(session, "scan1") is False
+
+    assert only_scan(platform_env).status == "cancelled"
+
+
+def test_worker_refreshes_claim_heartbeat(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_sleeper_runner(monkeypatch, tmp_path)
+    session_factory = factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        session.add(
+            ScanRow(
+                id="scan1",
+                repository_id="repo1",
+                status="running",
+                claimed_at=datetime.now(UTC) - timedelta(hours=2),
+            )
+        )
+        session.commit()
+
+    from conformdag.platform.worker import execute_claimed_scan
+
+    execute_claimed_scan(session_factory, platform_env, "scan1", settings(timeout_seconds=1, poll_seconds=0.05))
+
+    claimed = only_scan(platform_env).claimed_at
+    assert claimed is not None and claimed.replace(tzinfo=UTC) > datetime.now(UTC) - timedelta(minutes=1)
+
+
 def test_worker_executes_queued_scan_end_to_end(
     platform_env: str,
     tmp_path: Path,
@@ -943,12 +1159,16 @@ def test_worker_executes_queued_scan_end_to_end(
 
     settings = WorkerSettings(retention_keep=50)
     worker_logger = logging.getLogger("conformdag.worker")
-    worker_logger.addHandler(caplog.handler)
+    conformdag_logger = logging.getLogger("conformdag")
+    direct_capture = caplog.handler not in conformdag_logger.handlers
+    if direct_capture:
+        worker_logger.addHandler(caplog.handler)
     try:
         with caplog.at_level(logging.INFO, logger="conformdag.worker"):
             handled = run_worker_once(factory, platform_env, settings)
     finally:
-        worker_logger.removeHandler(caplog.handler)
+        if direct_capture:
+            worker_logger.removeHandler(caplog.handler)
 
     assert handled == "scan1"
     events = [record for record in caplog.records if record.name == "conformdag.worker"]
@@ -1111,6 +1331,29 @@ def test_scan_history_emits_complete_and_gate_passed(client: TestClient, tmp_pat
     assert entry["status"] == "succeeded"
     assert entry["complete"] is True
     assert entry["gate_passed"] is True
+    assert entry["artifact_available"] is True
+
+
+def test_scan_history_marks_pruned_artifacts_unavailable(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(
+                id="scan-pruned",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="p" * 64,
+                report_json=None,
+            )
+        )
+        session.commit()
+
+    entry = next(
+        row for row in _get(client, f"/api/v1/repos/{repository_id}/scans").json() if row["scan_id"] == "scan-pruned"
+    )
+
+    assert entry["artifact_available"] is False
 
 
 def test_scan_history_returns_total_and_deterministic_tie_order(client: TestClient, tmp_path: Path) -> None:
@@ -1948,13 +2191,33 @@ def test_worker_skips_cancelled_scan(platform_env: str) -> None:
 
 
 def test_worker_settings_resolve_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-
     monkeypatch.setenv("CONFORMDAG_WORKER_POLL_SECONDS", "0.5")
     monkeypatch.setenv("CONFORMDAG_WORKER_MAX_ATTEMPTS", "7")
     settings = WorkerSettings.from_environment()
 
     assert settings.poll_seconds == 0.5
     assert settings.max_attempts == 7
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("CONFORMDAG_WORKER_POLL_SECONDS", "0"),
+        ("CONFORMDAG_WORKER_IDLE_SECONDS", "0"),
+        ("CONFORMDAG_WORKER_TIMEOUT_SECONDS", "0"),
+        ("CONFORMDAG_WORKER_MAX_ATTEMPTS", "0"),
+    ],
+)
+def test_worker_settings_reject_nonpositive_timing(monkeypatch: pytest.MonkeyPatch, variable: str, value: str) -> None:
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(ValueError, match="must be"):
+        WorkerSettings.from_environment()
+
+
+def test_worker_settings_reject_idle_window_without_heartbeat_margin() -> None:
+    with pytest.raises(ValueError, match="CONFORMDAG_WORKER_IDLE_SECONDS must be at least twice poll_seconds"):
+        WorkerSettings(poll_seconds=10.0, idle_seconds=2)
 
 
 def test_worker_loop_sleeps_when_idle(platform_env: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2041,6 +2304,18 @@ def test_register_repository_rejects_missing_paths(client: TestClient) -> None:
         json={"name": "ghost", "path": "/nonexistent/path"},
         headers={"Authorization": "Bearer secret-token"},
     )
+    assert response.status_code == 422
+
+
+def test_register_repository_rejects_overlong_airflow_profile(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "repo").mkdir(exist_ok=True)
+    response = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": "profile-too-long", "path": str(tmp_path / "repo"), "airflow_profile": "x" * 33},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
     assert response.status_code == 422
 
 
@@ -2150,6 +2425,71 @@ def test_load_settings_requires_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
         load_settings()
 
 
+def test_platform_rejects_wildcard_cors_origins() -> None:
+    with pytest.raises(ValidationError, match="wildcard"):
+        PlatformSettings(dsn="sqlite:///x", cors_origins=["*"])
+
+
+def test_admin_auth_uses_constant_time_comparison(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform import app as app_module
+
+    calls: list[tuple[bytes, bytes]] = []
+    real_compare = app_module.hmac.compare_digest
+
+    def compare(left: bytes, right: bytes) -> bool:
+        calls.append((left, right))
+        return real_compare(left, right)
+
+    monkeypatch.setattr(app_module.hmac, "compare_digest", compare)
+    response = _post(client, "/api/v1/repos", json={"name": "x", "path": "."})
+
+    assert response.status_code == 401
+    assert calls == [(b"", b"Bearer secret-token")]
+
+
+def test_admin_auth_rejects_non_ascii_header_without_server_error(client: TestClient) -> None:
+    from conformdag.platform import app as app_module
+
+    request = cast("Request", SimpleNamespace(app=cast("FastAPI", client.app)))
+    with pytest.raises(HTTPException) as raised:
+        app_module.require_admin(request, "Bearer café")
+
+    assert raised.value.status_code == 401
+
+
+def test_worker_does_not_put_dsn_in_runner_argv(
+    platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import conformdag.platform.worker as worker_module
+    from conformdag.platform.worker import execute_claimed_scan
+
+    seed_running_scan(platform_env, tmp_path)
+    captured: dict[str, Any] = {}
+
+    class CompletedProcess:
+        returncode = 0
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            _ = timeout
+            return "", ""
+
+        def poll(self) -> int:
+            return 0
+
+    def fake_popen(arguments: list[str], **kwargs: Any) -> CompletedProcess:
+        captured["arguments"] = arguments
+        captured.update(kwargs)
+        return CompletedProcess()
+
+    monkeypatch.setattr(worker_module.subprocess, "Popen", fake_popen)
+
+    assert (
+        execute_claimed_scan(factory(platform_env), platform_env, "scan1", settings()) == worker_module.RunnerOutcome()
+    )
+    assert "--dsn" not in captured["arguments"]
+    assert captured["env"]["CONFORMDAG_PLATFORM_DSN"] == platform_env
+
+
 def test_runner_persists_scan_failure(
     platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -2163,17 +2503,21 @@ def test_runner_persists_scan_failure(
 
     monkeypatch.chdir(tmp_path)
     runner_logger = logging.getLogger("conformdag.runner")
-    runner_logger.addHandler(caplog.handler)
+    conformdag_logger = logging.getLogger("conformdag")
+    direct_capture = caplog.handler not in conformdag_logger.handlers
+    if direct_capture:
+        runner_logger.addHandler(caplog.handler)
     try:
         with caplog.at_level(logging.INFO, logger="conformdag.runner"):
             code = execute_scan("scan1", platform_env)
     finally:
-        runner_logger.removeHandler(caplog.handler)
+        if direct_capture:
+            runner_logger.removeHandler(caplog.handler)
 
     assert code == 1
     from conformdag.platform.logging import JsonFormatter
 
-    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger().handlers)
+    assert any(isinstance(handler.formatter, JsonFormatter) for handler in logging.getLogger("conformdag").handlers)
     events = [record for record in caplog.records if record.name == "conformdag.runner"]
     assert [record.getMessage() for record in events] == ["scan_started", "scan_completed"]
     assert all(_log_extra(record, "scan_id") == "scan1" for record in events)
@@ -2992,6 +3336,23 @@ def test_worker_settings_reject_zero_retention_from_environment(monkeypatch: pyt
         WorkerSettings.from_environment()
 
 
+def test_suppression_identity_is_unique(client: TestClient) -> None:
+    payload = {
+        "policy_id": "AIR-DET-001",
+        "fingerprint": "u" * 64,
+        "reason": "duplicate test",
+        "owner": "platform",
+        "expires_at": "2027-01-01T00:00:00Z",
+    }
+    headers = {"Authorization": "Bearer secret-token"}
+
+    first = _post(client, "/api/v1/suppressions", json=payload, headers=headers)
+    second = _post(client, "/api/v1/suppressions", json=payload, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+
+
 def test_retention_target_scan_ids_protect_newest_with_zero_keep(platform_env: str) -> None:
     with factory(platform_env)() as session:
         session.add(RepositoryRow(id="repo1", name="r", path="."))
@@ -3089,6 +3450,18 @@ def test_unknown_put_api_paths_return_json_404(client: TestClient) -> None:
     assert response.json()["detail"].startswith("unknown API path")
 
 
+def test_unknown_api_head_and_root_paths_do_not_fall_back_to_the_dashboard(client: TestClient) -> None:
+    for path in ("/api", "/api/v1/not-a-route"):
+        response = _as_httpx(client).head(path)
+        assert response.status_code == 404, path
+
+
+def test_unknown_scan_findings_returns_404(client: TestClient) -> None:
+    response = _get(client, "/api/v1/scans/missing/findings")
+
+    assert response.status_code == 404
+
+
 @pytest.mark.skipif(
     not (Path(__file__).resolve().parents[1] / "src/conformdag/platform/static/index.html").is_file(),
     reason="dashboard static assets are not built",
@@ -3097,6 +3470,22 @@ def test_dashboard_index_is_served(client: TestClient) -> None:
     response = _get(client, "/")
     assert response.status_code == 200
     assert "ConformDAG Platform" in response.text
+
+
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "src/conformdag/platform/static/index.html").is_file(),
+    reason="dashboard static assets are not built",
+)
+def test_dashboard_deep_links_fall_back_without_masking_assets_or_api(client: TestClient) -> None:
+    deep_link = _get(client, "/repos/repo-1")
+    missing_asset = _get(client, "/assets/does-not-exist.js")
+    unknown_api = _get(client, "/api/v1/not-a-route")
+
+    assert deep_link.status_code == 200
+    assert "ConformDAG Platform" in deep_link.text
+    assert missing_asset.status_code == 404
+    assert unknown_api.status_code == 404
+    assert unknown_api.json()["detail"].startswith("unknown API path")
 
 
 def test_retention_clears_artifacts_and_keeps_findings(platform_env: str) -> None:
@@ -3126,6 +3515,36 @@ def test_retention_clears_artifacts_and_keeps_findings(platform_env: str) -> Non
         assert scans["scan2"].report_json is not None
         assert scans["scan3"].report_json is not None
         assert len(scans) == 4
+
+
+def test_retention_order_is_deterministic_for_equal_timestamps(platform_env: str) -> None:
+    created = datetime(2026, 1, 1, tzinfo=UTC)
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path="."))
+        for scan_id in ("scan-a", "scan-c", "scan-b"):
+            session.add(
+                ScanRow(
+                    id=scan_id,
+                    repository_id="repo1",
+                    status="succeeded",
+                    created_at=created,
+                    report_json={"report_version": "2"},
+                )
+            )
+        session.commit()
+
+        targets = retention_target_scan_ids(session, "repo1", keep=1)
+
+    assert targets == ["scan-a", "scan-b"]
+
+
+def test_scan_claim_indexes_exist(platform_env: str) -> None:
+    with factory(platform_env)() as session:
+        indexes = sa_inspect(session.get_bind()).get_indexes("scans")
+
+    index_columns = {tuple(index["column_names"]) for index in indexes}
+    assert ("status", "created_at") in index_columns
+    assert ("status", "claimed_at") in index_columns
 
 
 def testworker_parse_cache_env_controls_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -3318,6 +3737,47 @@ def test_write_pack_cleans_temp_when_temp_write_fails(tmp_path: Path, monkeypatc
     assert pack_path.read_text(encoding="utf-8") == "original content\n"
     assert all(entry.parent == tmp_path for entry in created)
     assert not list(tmp_path.glob(".pack.yaml.*"))
+
+
+def test_pack_service_serializes_snapshot_reads_with_writes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform.packs import PackService
+
+    pack_path = tmp_path / "pack.yaml"
+    pack_path.write_text("schema_version: '1'\nid: x\nversion: '1'\npolicies: []\n", encoding="utf-8")
+    service = PackService({"test": pack_path})
+    entered = threading.Event()
+    release = threading.Event()
+    read_done = threading.Event()
+    real_write = _write_pack
+
+    def blocked_write(pack: PolicyPack, path: Path) -> None:
+        entered.set()
+        assert release.wait(timeout=5)
+        real_write(pack, path)
+
+    monkeypatch.setattr(packs_module, "_write_pack", blocked_write)
+
+    writer = threading.Thread(
+        target=service.upsert_gate,
+        args=("test", "release", {"rules": [{"type": "no-new-findings"}]}),
+    )
+    writer.start()
+    assert entered.wait(timeout=5)
+
+    def read() -> None:
+        service.list_gates("test")
+        read_done.set()
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    assert not read_done.wait(timeout=0.2)
+    release.set()
+    writer.join(timeout=5)
+    reader.join(timeout=5)
+
+    assert not writer.is_alive()
+    assert not reader.is_alive()
+    assert read_done.is_set()
 
 
 def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:

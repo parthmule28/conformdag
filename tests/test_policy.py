@@ -142,6 +142,43 @@ def test_load_policy_pack_rejects_unknown_deterministic_check(tmp_path: Path) ->
         load_policy_pack(pack_path, tmp_path)
 
 
+def test_load_policy_pack_rejects_check_configuration_mismatch(tmp_path: Path) -> None:
+    pack_path = write_pack(tmp_path, deterministic_checks=["effective-timeout"])
+    yaml = YAML(typ="safe")
+    raw = yaml.load(pack_path.read_text(encoding="utf-8"))  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(raw, dict)
+    raw["policies"][0]["configuration"] = {"kind": "required-owner"}
+    with pack_path.open("w", encoding="utf-8") as handle:
+        yaml.dump(raw, handle)  # pyright: ignore[reportUnknownMemberType]
+
+    with pytest.raises(PolicyValidationError, match="requires configuration kind 'execution-timeout'"):
+        load_policy_pack(pack_path, tmp_path)
+
+
+def test_load_policy_pack_rejects_invalid_ruff_selector(tmp_path: Path) -> None:
+    pack_path = write_pack(tmp_path, deterministic_checks=["ruff-air"])
+    yaml = YAML(typ="safe")
+    raw = yaml.load(pack_path.read_text(encoding="utf-8"))  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(raw, dict)
+    raw["policies"][0]["configuration"] = {"kind": "ruff-air", "rules": ["AIR*"]}
+    with pack_path.open("w", encoding="utf-8") as handle:
+        yaml.dump(raw, handle)  # pyright: ignore[reportUnknownMemberType]
+
+    with pytest.raises(PolicyValidationError, match="invalid Ruff selector"):
+        load_policy_pack(pack_path, tmp_path)
+
+
+def test_provenance_decode_errors_are_structured_policy_failures(tmp_path: Path) -> None:
+    standards = tmp_path / "standards" / "dag-authoring.md"
+    standards.parent.mkdir(parents=True)
+    standards.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    pack_path = write_pack(tmp_path)
+    standards.write_bytes(b"\xff\xfe")
+
+    with pytest.raises(PolicyValidationError, match="cannot read source document"):
+        load_policy_pack(pack_path, tmp_path)
+
+
 def test_load_policy_pack_rejects_unknown_gate_policy(tmp_path: Path) -> None:
     pack_path = write_pack(tmp_path, gate_policy_ids=["AIR-MISSING-001"])
     with pytest.raises(PolicyValidationError, match="unknown policy ids"):

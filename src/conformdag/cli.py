@@ -885,6 +885,7 @@ def agent_run(
         typer.echo(f"pull request: {outcome.pull_request_url}", err=True)
     elif outcome.blocked:
         typer.echo("pull request blocked by verifier verdict", err=True)
+        raise typer.Exit(code=1)
     if not outcome.changed:
         typer.echo("agent run: nothing to fix", err=True)
 
@@ -951,6 +952,10 @@ def baseline_set(scan_id: str) -> None:
             repository.baseline_scan_id = scan_id
             session.commit()
             repository_id = repository.id
+    except typer.Exit:
+        # typer.Exit derives from RuntimeError; intentional CLI exits must not be
+        # re-caught and reported as a second (empty) error line.
+        raise
     except (OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:
         _fail(exc)
     typer.echo(f"baseline set: {scan_id} (repository {repository_id})")

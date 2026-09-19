@@ -113,19 +113,25 @@ def _was_cancelled(session: Session, scan_id: str) -> bool:
     return session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id)) == "cancelled"
 
 
-def execute_scan(scan_id: str, dsn: str) -> int:
+def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> int:
     """Run one claimed scan inside this subprocess and persist the outcome."""
     logger = logging.getLogger("conformdag.runner")
     factory = create_session_factory(dsn)
     install_json_logging()
     with factory() as session:
         scan = session.get(ScanRow, scan_id)
-        if scan is None or scan.status != "running":
+        if scan is None or scan.status != "running" or (claim_attempt is not None and scan.attempts != claim_attempt):
             print(f"scan {scan_id} is not claimable for execution", file=sys.stderr)
             return 2
         repository = session.get(RepositoryRow, scan.repository_id)
         if repository is None:
-            transition_running_scan(session, scan_id, "failed", "repository row disappeared")
+            transition_running_scan(
+                session,
+                scan_id,
+                "failed",
+                "repository row disappeared",
+                expected_attempt=claim_attempt,
+            )
             return 2
         pack = repository.policy_pack
         try:
@@ -135,7 +141,7 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             )
         except PERSISTENT_FAILURES as exc:
             logger.info("scan_completed", extra={"scan_id": scan_id, "error": str(exc)})
-            if not transition_running_scan(session, scan_id, "failed", str(exc)):
+            if not transition_running_scan(session, scan_id, "failed", str(exc), expected_attempt=claim_attempt):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             return 1
@@ -147,7 +153,13 @@ def execute_scan(scan_id: str, dsn: str) -> int:
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             _ingest(session, scan, normalized)
-            if not transition_running_scan(session, scan_id, "failed", _incomplete_error(normalized)):
+            if not transition_running_scan(
+                session,
+                scan_id,
+                "failed",
+                _incomplete_error(normalized),
+                expected_attempt=claim_attempt,
+            ):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             return 1
@@ -197,7 +209,7 @@ def execute_scan(scan_id: str, dsn: str) -> int:
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0
         _ingest(session, scan, normalized)
-        if not transition_running_scan(session, scan_id, "succeeded"):
+        if not transition_running_scan(session, scan_id, "succeeded", expected_attempt=claim_attempt):
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0
         return 0
@@ -207,9 +219,13 @@ def main() -> None:
     """Entry point for the subprocess scan runner."""
     parser = argparse.ArgumentParser(description="Execute one platform scan.")
     parser.add_argument("--scan-id", required=True)
-    parser.add_argument("--dsn", required=True)
+    parser.add_argument("--claim-attempt", type=int, required=True)
+    parser.add_argument("--dsn")
     args = parser.parse_args()
-    raise SystemExit(execute_scan(args.scan_id, args.dsn))
+    dsn = args.dsn or os.environ.get("CONFORMDAG_PLATFORM_DSN")
+    if not dsn:
+        parser.error("--dsn or CONFORMDAG_PLATFORM_DSN is required")
+    raise SystemExit(execute_scan(args.scan_id, dsn, args.claim_attempt))
 
 
 if __name__ == "__main__":
