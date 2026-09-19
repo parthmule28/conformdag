@@ -50,6 +50,7 @@ run = "uv run python scripts/runtime_smoke.py"
 
 [tasks.build]
 description = "Build wheel and source distribution"
+depends = ["ui-build"]
 run = "uv build"
 
 [tasks."ui-build"]

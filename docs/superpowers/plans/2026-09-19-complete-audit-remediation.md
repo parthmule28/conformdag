@@ -79,13 +79,13 @@
 
 ### Phase 5 — Release, packaging, runtime, supply chain
 
-- [ ] CR-2 enforceable reviewed immutable runtime identity policy
-- [ ] IMP-8 frontend build is a package-build prerequisite
-- [ ] MIN-32 occurrence-level artifact privacy checks
-- [ ] MIN-33 reviewed SHA-pinned release Actions
-- [ ] MIN-34 production Compose credentials are required
-- [ ] MIN-35 correct `.superpowers/` ignore decision
-- [ ] Clean frontend/wheel/install/server smoke verification
+- [x] CR-2 enforceable reviewed immutable runtime identity policy
+- [x] IMP-8 frontend build is a package-build prerequisite
+- [x] MIN-32 occurrence-level artifact privacy checks
+- [x] MIN-33 reviewed SHA-pinned release Actions
+- [x] MIN-34 production Compose credentials are required
+- [x] MIN-35 correct `.superpowers/` ignore decision
+- [x] Clean frontend/wheel/install/server smoke verification — 34 affected tests passed; wheel/sdist include static assets; installed server API/SPA/404 smoke passed
 
 ### Phase 6 — Production SPA and frontend
 

@@ -14,6 +14,7 @@ from conformdag.runtime import (
     RuntimePhaseError,
     build_runtime_manifest,
     execute_runtime,
+    runtime_profile,
 )
 
 pytestmark = pytest.mark.runtime
@@ -80,8 +81,20 @@ def test_supported_profile_resolves_pinned_image_and_providers(tmp_path: Path) -
     )
 
     assert manifest.supported_profile is True
-    assert manifest.image == "ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1"
+    assert manifest.image == (
+        "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
+        "sha256:b78c44154bc0112c2be67746ba70eef66a0f3c9b34b8ad43b398837f74f72481"
+    )
     assert manifest.provider_versions["apache-airflow-providers-google"] == "22.2.2"
+
+
+def test_supported_profile_uses_the_reviewed_immutable_identity() -> None:
+    profile = runtime_profile(AirflowProfile.AIRFLOW_3_3_0)
+
+    assert profile.image == (
+        "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
+        "sha256:b78c44154bc0112c2be67746ba70eef66a0f3c9b34b8ad43b398837f74f72481"
+    )
 
 
 def test_docker_runner_uses_argument_arrays_and_validates_output(tmp_path: Path) -> None:
@@ -217,7 +230,7 @@ def test_runtime_daemon_failure_is_reported() -> None:
 
 def test_published_profile_is_pulled_and_executed_by_digest(tmp_path: Path) -> None:
     runner = DockerRunner()
-    digest = "ghcr.io/parthmule28/conformdag/airflow-3.3.0@sha256:" + "f" * 64
+    digest = runtime_profile(AirflowProfile.AIRFLOW_3_3_0).image
 
     with (
         patch.object(runner, "require_daemon") as require_daemon,
@@ -241,11 +254,32 @@ def test_published_profile_is_pulled_and_executed_by_digest(tmp_path: Path) -> N
     assert resolved == digest
     require_daemon.assert_called_once_with()
     pull_image.assert_called_once_with(
-        "ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1",
+        digest,
         timeout_seconds=300,
     )
     resolve_digest.assert_called_once()
     assert run_manifest.call_args.args[1] == digest
+
+
+def test_published_profile_rejects_an_unreviewed_digest(tmp_path: Path) -> None:
+    runner = DockerRunner()
+    unreviewed = "ghcr.io/parthmule28/conformdag/airflow-3.3.0@sha256:" + "0" * 64
+
+    with (
+        patch.object(runner, "require_daemon"),
+        patch.object(runner, "pull_image"),
+        patch.object(runner, "resolve_digest", return_value=unreviewed),
+        patch.object(runner, "run_manifest", return_value=[]),
+        pytest.raises(RuntimePhaseError, match="reviewed runtime profile identity"),
+    ):
+        execute_runtime(
+            tmp_path,
+            ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+            ["AIR-DET-001"],
+            ["dags/**/*.py"],
+            [],
+            runner,
+        )
 
 
 def test_digest_resolution_rejects_tag_only_images() -> None:

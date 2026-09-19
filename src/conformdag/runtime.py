@@ -30,7 +30,10 @@ class RuntimeProfile:
 RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
     AirflowProfile.AIRFLOW_3_3_0: RuntimeProfile(
         airflow_profile=AirflowProfile.AIRFLOW_3_3_0,
-        image="ghcr.io/parthmule28/conformdag/airflow-3.3.0:v0.1.0-beta.1",
+        image=(
+            "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
+            "sha256:b78c44154bc0112c2be67746ba70eef66a0f3c9b34b8ad43b398837f74f72481"
+        ),
         provider_versions={
             "apache-airflow-providers-standard": "1.15.0",
             "apache-airflow-providers-postgres": "6.8.0",
@@ -210,6 +213,11 @@ def execute_runtime(
     if manifest.supported_profile:
         docker.pull_image(selected_image, timeout_seconds=config.timeout_seconds)
         image_digest = docker.resolve_digest(selected_image)
+        if image_digest != selected_image:
+            raise RuntimePhaseError(
+                "runtime image does not match the reviewed runtime profile identity: "
+                f"expected {selected_image}, got {image_digest}"
+            )
     else:
         image_digest = selected_image
     immutable_manifest = manifest.model_copy(update={"image": image_digest})

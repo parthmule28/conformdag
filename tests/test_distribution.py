@@ -1,6 +1,9 @@
 """Distribution tests: pack pull from git and the composite action definition."""
 
+import re
+import runpy
 import subprocess
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from shutil import copyfile
@@ -188,3 +191,64 @@ def test_action_yml_is_a_valid_composite_action() -> None:
     assert "sarif_file" in (upload.get("with") or {})
     blocking = steps[-1]
     assert blocking["if"] is not None and "fail-on-blocking" in str(blocking["if"])
+
+
+def test_package_build_requires_the_frontend_build() -> None:
+    config = tomllib.loads(Path("mise.toml").read_text(encoding="utf-8"))
+
+    assert "ui-build" in config["tasks"]["build"]["depends"]
+
+
+def test_release_workflow_uses_reviewed_sha_pins() -> None:
+    uses = [
+        line.split("uses:", 1)[1].strip().split(" #", 1)[0]
+        for line in Path(".github/workflows/release.yml").read_text(encoding="utf-8").splitlines()
+        if "uses:" in line
+    ]
+
+    assert uses
+    assert all(re.fullmatch(r"[^/@]+/[^/@]+@[0-9a-f]{40}", action) for action in uses)
+
+
+def test_production_compose_requires_database_credentials() -> None:
+    compose = YAML(typ="safe").load(Path("deploy/docker-compose.yml").read_text(encoding="utf-8"))  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    postgres_environment = compose["services"]["postgres"]["environment"]
+
+    assert postgres_environment["POSTGRES_USER"] == "${CONFORMDAG_POSTGRES_USER:?set CONFORMDAG_POSTGRES_USER}"
+    assert (
+        postgres_environment["POSTGRES_PASSWORD"] == "${CONFORMDAG_POSTGRES_PASSWORD:?set CONFORMDAG_POSTGRES_PASSWORD}"
+    )
+    assert postgres_environment["POSTGRES_DB"] == "${CONFORMDAG_POSTGRES_DB:?set CONFORMDAG_POSTGRES_DB}"
+    for service in ("api", "worker"):
+        assert (
+            "${CONFORMDAG_POSTGRES_USER:?set CONFORMDAG_POSTGRES_USER}"
+            in compose["services"][service]["environment"]["CONFORMDAG_PLATFORM_DSN"]
+        )
+        assert (
+            "${CONFORMDAG_POSTGRES_PASSWORD:?set CONFORMDAG_POSTGRES_PASSWORD}"
+            in compose["services"][service]["environment"]["CONFORMDAG_PLATFORM_DSN"]
+        )
+
+
+def test_generated_superpowers_workspace_is_ignored_without_hiding_durable_plans() -> None:
+    ignored = Path(".gitignore").read_text(encoding="utf-8").splitlines()
+
+    assert ".superpowers/" in ignored
+    assert Path("docs/superpowers/plans").is_dir()
+
+
+def test_privacy_check_reports_each_unredacted_occurrence(tmp_path: Path) -> None:
+    artifact = tmp_path / "report.json"
+    artifact.write_text(
+        '{"token": "[REDACTED]", "password": "live-password-value", "api_key": "another-key-value"}',
+        encoding="utf-8",
+    )
+
+    inspect_file = cast(
+        "Callable[[Path], list[str]]",
+        runpy.run_path("scripts/verify_artifact_privacy.py")["inspect_file"],
+    )
+    issues = inspect_file(artifact)
+
+    assert len(issues) == 2
+    assert all("possible credential material" in issue for issue in issues)
