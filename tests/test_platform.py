@@ -1,18 +1,21 @@
 """Platform tier tests: workspace model, HTTP API contract, and worker durability."""
 
 import hashlib
-import importlib
+import importlib.util
 import json
 import logging
 import os
 import signal
+import socket
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from shutil import copyfile
+from types import ModuleType, SimpleNamespace
 from typing import Any, NoReturn, cast
 
 import httpx
@@ -21,18 +24,26 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from ruamel.yaml import YAML
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 import conformdag.platform.packs as packs_module
+from conformdag.analysis import ParseCache
 from conformdag.evaluator import CHECK_EVALUATORS
 from conformdag.models import (
     AirflowProfile,
     EnforcementConfig,
     EnforcementType,
+    Finding,
+    FindingLocation,
+    FindingStatus,
     Ownership,
     PolicyPack,
     PolicySource,
+    RemediationAction,
+    RemediationPayload,
+    RemediationTarget,
     RunMetadata,
     ScanReport,
     Severity,
@@ -44,13 +55,16 @@ from conformdag.platform.db import (
     ScanRow,
     SuppressionRow,
     claim_queued_scan,
+    create_session_factory,
     initialize_session_factory,
+    new_id,
     new_suppression_id,
     prune_scan_artifact,
     retention_target_scan_ids,
     stale_running_cutoff,
     utcnow,
 )
+from conformdag.platform.demo import DemoWorkspace, build_demo_workspace, seed_demo_scenario, start_demo_worker
 from conformdag.platform.worker import WorkerSettings, run_worker_once
 from conformdag.policy import load_policy_pack
 
@@ -63,10 +77,6 @@ def _as_httpx(client: TestClient) -> httpx.Client:
 def _post(client: TestClient, url: str, **kwargs: Any) -> httpx.Response:
     """Call a platform endpoint and return a typed response."""
     return _as_httpx(client).post(url, **kwargs)
-
-
-def _delete_helper(client: TestClient, url: str) -> httpx.Response:
-    return _as_httpx(client).delete(url)
 
 
 def _get(client: TestClient, url: str) -> httpx.Response:
@@ -255,6 +265,309 @@ def _install_sleeper_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     sleeper.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8")
     sleeper.chmod(0o755)
     monkeypatch.setattr(sys, "executable", str(sleeper))
+
+
+def test_demo_seed_builds_valid_workspace_under_requested_root(tmp_path: Path) -> None:
+    workspace = build_demo_workspace(tmp_path)
+
+    assert workspace.root == tmp_path
+    assert workspace.workspace_path.is_file()
+    assert (workspace.root / "standards/dag-authoring.md").is_file()
+    assert workspace.pack_path.is_file()
+    assert workspace.workspace_path.is_relative_to(tmp_path)
+    assert workspace.pack_path.is_relative_to(tmp_path)
+
+
+def test_demo_seed_creates_baseline_and_later_gate_failure(tmp_path: Path) -> None:
+    workspace = build_demo_workspace(tmp_path)
+    scenario = seed_demo_scenario(workspace)
+    demo_factory = create_session_factory(workspace.dsn)
+
+    with demo_factory() as session:
+        repository = session.get(RepositoryRow, scenario.ids["repository"])
+        baseline = session.get(ScanRow, scenario.ids["baseline_scan"])
+        current = session.get(ScanRow, scenario.ids["current_scan"])
+
+        assert repository is not None
+        assert baseline is not None and baseline.complete is True
+        assert repository.baseline_scan_id == baseline.id
+        assert current is not None and current.complete is True
+        assert current.report_json is not None
+        gate_result = cast("dict[str, object]", current.report_json.get("gate_result"))
+        assert gate_result["passed"] is False
+        findings = session.scalars(select(FindingRow).where(FindingRow.scan_id == current.id)).all()
+        assert findings
+
+
+def test_demo_seed_makes_the_healthy_current_scan_newest(tmp_path: Path) -> None:
+    """The tour follows the overview's newest repository link, so the healthy
+    current gate-failed scan must be the newest scan platform-wide; otherwise
+    the guided demo lands on the broken repository and pauses."""
+    workspace = build_demo_workspace(tmp_path)
+    scenario = seed_demo_scenario(workspace)
+    demo_factory = create_session_factory(workspace.dsn)
+
+    with demo_factory() as session:
+        newest = session.scalars(select(ScanRow).order_by(ScanRow.created_at.desc(), ScanRow.id.desc())).first()
+        assert newest is not None
+        assert newest.id == scenario.ids["current_scan"]
+        assert newest.repository_id == scenario.ids["repository"]
+
+
+def test_demo_seed_suppressions_use_real_current_findings(tmp_path: Path) -> None:
+    workspace = build_demo_workspace(tmp_path)
+    scenario = seed_demo_scenario(workspace)
+    demo_factory = create_session_factory(workspace.dsn)
+
+    with demo_factory() as session:
+        active = session.get(SuppressionRow, scenario.ids["active_suppression"])
+        expired = session.get(SuppressionRow, scenario.ids["expired_suppression"])
+        assert active is not None and expired is not None
+        comparison_now = utcnow() if active.expires_at.tzinfo is not None else utcnow().replace(tzinfo=None)
+        assert active.expires_at > comparison_now
+        assert expired.expires_at < comparison_now
+        assert (active.policy_id, active.fingerprint) != (expired.policy_id, expired.fingerprint)
+
+        current_findings = session.scalars(
+            select(FindingRow).where(FindingRow.scan_id == scenario.ids["current_scan"])
+        ).all()
+        active_finding = next(
+            (
+                finding
+                for finding in current_findings
+                if finding.policy_id == active.policy_id and finding.fingerprint == active.fingerprint
+            ),
+            None,
+        )
+        assert active_finding is not None and active_finding.suppressed is True
+        assert any(finding.status == "FAIL" and not finding.suppressed for finding in current_findings)
+
+
+def test_demo_worker_processes_interactive_scans_after_seed(tmp_path: Path) -> None:
+    worker_module = importlib.import_module("conformdag.platform.worker")
+    worker_module._shutdown_requested.clear()
+    workspace = build_demo_workspace(tmp_path)
+    scenario = seed_demo_scenario(workspace)
+    demo_factory = create_session_factory(workspace.dsn)
+
+    with demo_factory() as session:
+        scan = ScanRow(id=new_id(), repository_id=scenario.ids["repository"], status="queued", trigger="dashboard")
+        session.add(scan)
+        session.commit()
+        scan_id = scan.id
+
+    worker = start_demo_worker(workspace)
+    try:
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            with demo_factory() as session:
+                row = session.get(ScanRow, scan_id)
+                assert row is not None
+                if row.status in {"succeeded", "failed", "cancelled"}:
+                    assert row.status == "succeeded"
+                    assert row.complete is True
+                    break
+            time.sleep(0.1)
+        else:
+            pytest.fail("demo worker never finished the interactive scan")
+    finally:
+        worker_module.request_shutdown()
+        worker.join(timeout=10.0)
+        worker_module._shutdown_requested.clear()
+
+    assert not worker.is_alive()
+
+
+def _load_demo_launcher_module() -> ModuleType:
+    """Load scripts/demo.py by path so launcher helpers are exercised as shipped."""
+    launcher_path = Path(__file__).resolve().parents[1] / "scripts" / "demo.py"
+    spec = importlib.util.spec_from_file_location("conformdag_demo_launcher", launcher_path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise ImportError(f"demo launcher not found at {launcher_path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def _load_e2e_launcher_module() -> ModuleType:
+    """Load scripts/e2e_platform.py by path so launcher helpers are exercised as shipped."""
+    launcher_path = Path(__file__).resolve().parents[1] / "scripts" / "e2e_platform.py"
+    spec = importlib.util.spec_from_file_location("conformdag_e2e_launcher", launcher_path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise ImportError(f"e2e launcher not found at {launcher_path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def _free_loopback_port() -> int:
+    """Reserve an ephemeral loopback port for a launcher test, then release it."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+    finally:
+        probe.close()
+
+
+def test_demo_port_preflight_rejects_occupied_loopback_port() -> None:
+    demo = _load_demo_launcher_module()
+    blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        address = blocker.getsockname()
+        host = str(address[0])
+        port = int(address[1])
+        with pytest.raises(RuntimeError) as excinfo:
+            demo.ensure_port_available(host, port)
+    finally:
+        blocker.close()
+
+    message = str(excinfo.value)
+    assert host in message
+    assert str(port) in message
+
+
+def test_demo_url_enables_the_client_tour() -> None:
+    demo = _load_demo_launcher_module()
+    assert demo.demo_url("127.0.0.1", 8642) == "http://127.0.0.1:8642/?demo=1"
+
+
+def test_demo_launcher_no_open_runs_server_and_shuts_down_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    demo = _load_demo_launcher_module()
+    worker_module = importlib.import_module("conformdag.platform.worker")
+    worker_module._shutdown_requested.clear()
+
+    opened: list[str] = []
+
+    def _record_open(url: str) -> bool:
+        opened.append(url)
+        return True
+
+    class _FakeServer:
+        def __init__(self) -> None:
+            self.should_exit = False
+            self.run_calls = 0
+
+        def run(self) -> None:
+            self.run_calls += 1
+
+    fake_server = _FakeServer()
+    served: list[tuple[str, int]] = []
+
+    def _fake_make_server(app: FastAPI, host: str, port: int) -> _FakeServer:
+        served.append((host, port))
+        return fake_server
+
+    shutdown_calls: list[bool] = []
+    real_request_shutdown = worker_module.request_shutdown
+
+    def _recording_shutdown() -> None:
+        shutdown_calls.append(True)
+        real_request_shutdown()
+
+    port = _free_loopback_port()
+    before = set(Path(tempfile.gettempdir()).glob("conformdag-demo-*"))
+    try:
+        monkeypatch.setattr(demo, "webbrowser", SimpleNamespace(open=_record_open))
+        monkeypatch.setattr(demo, "_make_server", _fake_make_server)
+        monkeypatch.setattr(worker_module, "request_shutdown", _recording_shutdown)
+        exit_code = demo.main(["--no-open", "--port", str(port)])
+    finally:
+        worker_module._shutdown_requested.clear()
+
+    assert exit_code == 0
+    assert opened == []
+    assert served == [("127.0.0.1", port)]
+    assert fake_server.run_calls == 1
+    assert fake_server.should_exit is True
+    assert shutdown_calls == [True]
+    assert not any(thread.name == "conformdag-demo-worker" for thread in threading.enumerate())
+    assert set(Path(tempfile.gettempdir()).glob("conformdag-demo-*")) == before
+
+
+def test_demo_launcher_signal_bridge_behaviour_by_phase() -> None:
+    demo = _load_demo_launcher_module()
+
+    class _FakeServer:
+        def __init__(self) -> None:
+            self.should_exit = False
+
+    server_holder: list[_FakeServer | None] = [None]
+    bridge = demo._stop_bridge(server_holder)
+
+    with pytest.raises(KeyboardInterrupt):
+        bridge(signal.SIGTERM, None)
+
+    server = _FakeServer()
+    server_holder[0] = server
+    bridge(signal.SIGINT, None)
+    assert server.should_exit is True
+
+
+def test_demo_launcher_survives_sigterm_during_seeding(monkeypatch: pytest.MonkeyPatch) -> None:
+    demo = _load_demo_launcher_module()
+    demo_module = importlib.import_module("conformdag.platform.demo")
+    real_workspace_builder = demo_module.build_demo_workspace
+    seed_window_entered: list[bool] = []
+
+    def _sigterm_during_seed(root: Path) -> DemoWorkspace:
+        seed_window_entered.append(True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        return real_workspace_builder(root)
+
+    monkeypatch.setattr(demo_module, "build_demo_workspace", _sigterm_during_seed)
+
+    before = set(Path(tempfile.gettempdir()).glob("conformdag-demo-*"))
+    exit_code = demo.main(["--no-open", "--port", str(_free_loopback_port())])
+
+    assert seed_window_entered == [True]
+    assert exit_code == 0
+    assert set(Path(tempfile.gettempdir()).glob("conformdag-demo-*")) == before
+    assert not any(thread.name == "conformdag-demo-worker" for thread in threading.enumerate())
+
+
+def test_e2e_launcher_signal_bridge_behaviour_by_phase() -> None:
+    e2e = _load_e2e_launcher_module()
+
+    class _FakeServer:
+        def __init__(self) -> None:
+            self.should_exit = False
+
+    server_holder: list[_FakeServer | None] = [None]
+    bridge = e2e._stop_bridge(server_holder)
+
+    with pytest.raises(KeyboardInterrupt):
+        bridge(signal.SIGTERM, None)
+
+    server = _FakeServer()
+    server_holder[0] = server
+    bridge(signal.SIGINT, None)
+    assert server.should_exit is True
+
+
+def test_e2e_launcher_survives_sigterm_during_seeding(monkeypatch: pytest.MonkeyPatch) -> None:
+    e2e = _load_e2e_launcher_module()
+    real_workspace_builder = e2e.build_demo_workspace
+    seed_window_entered: list[bool] = []
+
+    def _sigterm_during_seed(root: Path) -> DemoWorkspace:
+        seed_window_entered.append(True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        return real_workspace_builder(root)
+
+    monkeypatch.setattr(e2e, "build_demo_workspace", _sigterm_during_seed)
+
+    before = set(Path(tempfile.gettempdir()).glob("conformdag-e2e-*"))
+    exit_code = e2e.main(["--port", str(_free_loopback_port())])
+
+    assert seed_window_entered == [True]
+    assert exit_code == 0
+    assert set(Path(tempfile.gettempdir()).glob("conformdag-e2e-*")) == before
+    assert not any(thread.name == "conformdag-demo-worker" for thread in threading.enumerate())
 
 
 def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
@@ -774,6 +1087,190 @@ def test_scan_history_endpoint_paginates(client: TestClient, tmp_path: Path) -> 
     assert [row["scan_id"] for row in page_two] == ["scan0"]
 
 
+def test_scan_history_emits_complete_and_gate_passed(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(
+                id="scan-summarized",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="e" * 64,
+                report_json={"report_version": "2", "complete": True, "gate_result": {"passed": True}},
+            )
+        )
+        session.commit()
+
+    entry = next(
+        row
+        for row in _get(client, f"/api/v1/repos/{repository_id}/scans").json()
+        if row["scan_id"] == "scan-summarized"
+    )
+
+    assert entry["status"] == "succeeded"
+    assert entry["complete"] is True
+    assert entry["gate_passed"] is True
+
+
+def test_scan_history_returns_total_and_deterministic_tie_order(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        same_time = datetime(2026, 3, 1, tzinfo=UTC)
+        for scan_id in ("scan-b", "scan-a", "scan-c"):
+            session.add(
+                ScanRow(
+                    id=scan_id,
+                    repository_id=repository_id,
+                    status="succeeded",
+                    created_at=same_time,
+                )
+            )
+        session.commit()
+
+    response = _get(client, f"/api/v1/repos/{repository_id}/scans?limit=2")
+
+    assert response.headers["X-Total-Count"] == "3"
+    assert [row["scan_id"] for row in response.json()] == ["scan-c", "scan-b"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "severity=high",
+        "policy_id=AIR-TST-001",
+        "file_path=dags/example.py",
+        "suppressed=true",
+        "baseline_status=new",
+    ],
+)
+def test_findings_endpoint_filters_and_paginates(client: TestClient, tmp_path: Path, query: str) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(
+            ScanRow(
+                id="baseline-scan",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="b" * 64,
+            )
+        )
+        session.add(ScanRow(id="scan1", repository_id=repository_id, status="succeeded"))
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.baseline_scan_id = "baseline-scan"
+        for index, fingerprint in enumerate(("1" * 64, "2" * 64)):
+            session.add(
+                FindingRow(
+                    scan_id="scan1",
+                    repository_id=repository_id,
+                    policy_id="AIR-TST-001",
+                    policy_version="1.0.0",
+                    status="FAIL",
+                    severity="high",
+                    file_path="dags/example.py",
+                    start_line=index + 1,
+                    fingerprint=fingerprint,
+                    suppressed=True,
+                )
+            )
+        for fingerprint in ("3" * 64, "4" * 64):
+            session.add(
+                FindingRow(
+                    scan_id="baseline-scan",
+                    repository_id=repository_id,
+                    policy_id="AIR-TST-001",
+                    policy_version="1.0.0",
+                    status="FAIL",
+                    severity="high",
+                    file_path="dags/example.py",
+                    start_line=1,
+                    fingerprint=fingerprint,
+                    suppressed=True,
+                )
+            )
+            session.add(
+                FindingRow(
+                    scan_id="scan1",
+                    repository_id=repository_id,
+                    policy_id="AIR-OTHER-001",
+                    policy_version="1.0.0",
+                    status="PASS",
+                    severity="medium",
+                    file_path="dags/other.py",
+                    start_line=9,
+                    fingerprint=fingerprint,
+                    suppressed=False,
+                )
+            )
+        session.commit()
+
+    unpaginated = _get(client, f"/api/v1/scans/scan1/findings?{query}")
+    paginated = _get(client, f"/api/v1/scans/scan1/findings?{query}&limit=1&offset=1")
+
+    assert unpaginated.headers["X-Total-Count"] == "2"
+    assert [row["fingerprint"] for row in unpaginated.json()] == ["1" * 64, "2" * 64]
+    assert paginated.headers["X-Total-Count"] == "2"
+    assert [row["fingerprint"] for row in paginated.json()] == ["2" * 64]
+
+
+def test_findings_baseline_filter_returns_no_false_new_rows_without_baseline(
+    client: TestClient, tmp_path: Path
+) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="ineligible-scan", repository_id=repository_id, status="queued"))
+        session.add(ScanRow(id="scan1", repository_id=repository_id, status="succeeded"))
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.baseline_scan_id = "ineligible-scan"
+        session.add(
+            FindingRow(
+                scan_id="scan1",
+                repository_id=repository_id,
+                policy_id="AIR-TST-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/example.py",
+                start_line=1,
+                fingerprint="e" * 64,
+                suppressed=False,
+            )
+        )
+        session.commit()
+
+    for query in ("baseline_status=new", "baseline_status=existing"):
+        response = _get(client, f"/api/v1/scans/scan1/findings?{query}")
+        assert response.json() == []
+        assert response.headers["X-Total-Count"] == "0"
+
+    labeled = _get(client, "/api/v1/scans/scan1/findings")
+    assert labeled.json()[0]["baseline_status"] is None
+
+
+@pytest.mark.parametrize("bad_query", ["limit=0", "limit=501", "offset=-1"])
+def test_findings_endpoint_rejects_invalid_pagination_params(client: TestClient, bad_query: str) -> None:
+    response = _get(client, f"/api/v1/scans/scan1/findings?{bad_query}")
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("bad_query", ["limit=0", "limit=501", "offset=-1"])
+def test_scan_history_endpoint_rejects_invalid_pagination_params(client: TestClient, bad_query: str) -> None:
+    response = _get(client, f"/api/v1/repos/repo1/scans?{bad_query}")
+
+    assert response.status_code == 422
+
+
+def test_cors_exposes_total_count_header_for_configured_origins(client: TestClient) -> None:
+    response = _as_httpx(client).get("/api/v1/health", headers={"Origin": "http://localhost:5173"})
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-expose-headers") == "X-Total-Count"
+
+
 def test_findings_endpoint_labels_findings_against_repository_baseline(client: TestClient, tmp_path: Path) -> None:
     repository_id = _register(client, tmp_path)
     with _platform_state(client)[0]() as session:
@@ -877,6 +1374,530 @@ def test_findings_endpoint_uses_null_baseline_status_without_usable_baseline(
     findings = _get(client, "/api/v1/scans/current-scan/findings").json()
 
     assert findings[0]["baseline_status"] is None
+
+
+def _register_named(client: TestClient, tmp_path: Path, name: str) -> str:
+    """Register one more repository by name and return its id."""
+    response = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": name, "path": str(tmp_path / "repo"), "policy_pack": None},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert response.status_code == 200
+    return response.json()["id"]
+
+
+def _seed_scan(
+    session: Session,
+    scan_id: str,
+    repository_id: str,
+    *,
+    status: str,
+    complete: bool | None = None,
+    created_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    gate_passed: bool | None = None,
+) -> None:
+    """Insert one scan row with explicit lifecycle columns."""
+    session.add(
+        ScanRow(
+            id=scan_id,
+            repository_id=repository_id,
+            status=status,
+            complete=complete,
+            created_at=created_at,
+            finished_at=finished_at,
+            report_json={"gate_result": {"passed": gate_passed}} if gate_passed is not None else None,
+        )
+    )
+
+
+def _seed_finding(
+    session: Session,
+    scan_id: str,
+    repository_id: str,
+    fingerprint: str,
+    *,
+    status: str = "FAIL",
+    suppressed: bool = False,
+) -> None:
+    """Insert one normalized finding row for the given scan."""
+    session.add(
+        FindingRow(
+            scan_id=scan_id,
+            repository_id=repository_id,
+            policy_id="AIR-TST-001",
+            policy_version="1.0.0",
+            status=status,
+            severity="high",
+            file_path="dags/example.py",
+            start_line=1,
+            end_line=2,
+            fingerprint=fingerprint,
+            suppressed=suppressed,
+        )
+    )
+
+
+def test_overview_endpoint_aggregates_counts_current_findings_and_trends(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    other_id = _register_named(client, tmp_path, "side-dags")
+    now = utcnow()
+    day_current = now - timedelta(days=2)
+    current_finished = day_current + timedelta(minutes=10)
+    with _platform_state(client)[0]() as session:
+        _seed_scan(
+            session,
+            "baseline-1",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=now - timedelta(days=5),
+            finished_at=now - timedelta(days=5),
+        )
+        _seed_finding(session, "baseline-1", repository_id, "e" * 64)
+        _seed_finding(session, "baseline-1", repository_id, "s" * 64, suppressed=True)
+        _seed_scan(
+            session,
+            "current-1",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=day_current + timedelta(minutes=7),
+            finished_at=current_finished,
+            gate_passed=True,
+        )
+        _seed_finding(session, "current-1", repository_id, "e" * 64)
+        _seed_finding(session, "current-1", repository_id, "1" * 64)
+        _seed_finding(session, "current-1", repository_id, "2" * 64, status="ERROR")
+        _seed_finding(session, "current-1", repository_id, "3" * 64, suppressed=True)
+        _seed_finding(session, "current-1", repository_id, "4" * 64, status="ERROR", suppressed=True)
+        _seed_finding(session, "current-1", repository_id, "s" * 64, suppressed=True)
+        _seed_scan(session, "queued-1", repository_id, status="queued", created_at=day_current + timedelta(minutes=6))
+        _seed_scan(session, "running-1", repository_id, status="running", created_at=day_current + timedelta(minutes=5))
+        _seed_scan(
+            session,
+            "failed-1",
+            repository_id,
+            status="failed",
+            created_at=day_current + timedelta(minutes=4),
+            finished_at=current_finished,
+        )
+        _seed_finding(session, "failed-1", repository_id, "f" * 64)
+        _seed_scan(
+            session,
+            "cancelled-1",
+            repository_id,
+            status="cancelled",
+            created_at=day_current + timedelta(minutes=3),
+            finished_at=current_finished,
+        )
+        _seed_scan(
+            session,
+            "incomplete-1",
+            repository_id,
+            status="succeeded",
+            complete=False,
+            created_at=day_current + timedelta(minutes=2),
+            finished_at=current_finished,
+        )
+        _seed_finding(session, "incomplete-1", repository_id, "i" * 64)
+        _seed_scan(
+            session,
+            "old-1",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=now - timedelta(days=40),
+            finished_at=now - timedelta(days=40),
+        )
+        _seed_finding(session, "old-1", repository_id, "o" * 64)
+        _seed_scan(session, "queued-baseline", other_id, status="queued", created_at=day_current)
+        _seed_scan(
+            session,
+            "current-b",
+            other_id,
+            status="succeeded",
+            complete=True,
+            created_at=day_current + timedelta(minutes=1),
+            finished_at=current_finished,
+        )
+        _seed_finding(session, "current-b", other_id, "z" * 64)
+        core = session.get(RepositoryRow, repository_id)
+        side = session.get(RepositoryRow, other_id)
+        assert core is not None and side is not None
+        core.baseline_scan_id = "baseline-1"
+        side.baseline_scan_id = "queued-baseline"
+        session.commit()
+
+    response = _get(client, "/api/v1/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {
+        "repository_count",
+        "completed_scan_count",
+        "active_scan_count",
+        "current_failure_count",
+        "current_error_count",
+        "current_new_finding_count",
+        "trends",
+        "recent_scans",
+    }
+    assert payload["repository_count"] == 2
+    assert payload["completed_scan_count"] == 4
+    assert payload["active_scan_count"] == 3
+    assert payload["current_failure_count"] == 3
+    assert payload["current_error_count"] == 1
+    assert payload["current_new_finding_count"] == 4
+    baseline_date = (now - timedelta(days=5)).date().isoformat()
+    current_date = current_finished.date().isoformat()
+    assert {point["date"] for point in payload["trends"]} == {baseline_date, current_date}
+    points = {point["date"]: point for point in payload["trends"]}
+    assert points[baseline_date] == {
+        "date": baseline_date,
+        "completed_scan_count": 1,
+        "fail_finding_count": 1,
+        "error_finding_count": 0,
+        "suppressed_finding_count": 1,
+        "new_finding_count": 0,
+    }
+    assert points[current_date] == {
+        "date": current_date,
+        "completed_scan_count": 2,
+        "fail_finding_count": 3,
+        "error_finding_count": 1,
+        "suppressed_finding_count": 3,
+        "new_finding_count": 4,
+    }
+    assert [row["scan_id"] for row in payload["recent_scans"]] == [
+        "current-1",
+        "queued-1",
+        "running-1",
+        "failed-1",
+        "cancelled-1",
+        "incomplete-1",
+        "current-b",
+        "queued-baseline",
+        "baseline-1",
+        "old-1",
+    ]
+    newest = payload["recent_scans"][0]
+    assert newest["repository_id"] == repository_id
+    assert newest["repository_name"] == "core-dags"
+    assert newest["status"] == "succeeded"
+    assert newest["complete"] is True
+    assert newest["gate_passed"] is True
+    queued = next(row for row in payload["recent_scans"] if row["scan_id"] == "queued-1")
+    assert queued["repository_name"] == "core-dags"
+    assert queued["complete"] is None
+    assert queued["gate_passed"] is None
+    assert queued["finished_at"] is None
+    side_row = next(row for row in payload["recent_scans"] if row["scan_id"] == "current-b")
+    assert side_row["repository_name"] == "side-dags"
+
+
+def test_overview_recent_scans_limit_to_ten_newest_scans(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    now = utcnow()
+    with _platform_state(client)[0]() as session:
+        for index in range(12):
+            _seed_scan(
+                session,
+                f"scan-{index:02d}",
+                repository_id,
+                status="succeeded",
+                complete=True,
+                created_at=now - timedelta(hours=index),
+            )
+        session.commit()
+
+    payload = _get(client, "/api/v1/overview").json()
+
+    assert payload["completed_scan_count"] == 12
+    assert [row["scan_id"] for row in payload["recent_scans"]] == [f"scan-{index:02d}" for index in range(10)]
+
+
+@pytest.mark.parametrize("query", ["days=0", "days=366", "days=-1"])
+def test_overview_endpoint_rejects_out_of_range_days(client: TestClient, query: str) -> None:
+    response = _get(client, f"/api/v1/overview?{query}")
+
+    assert response.status_code == 422
+
+
+def test_repository_trends_group_by_utc_date_and_omit_missing_dates(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    now = utcnow()
+    late = (now - timedelta(days=2)).replace(hour=23, minute=50, second=0, microsecond=0)
+    early = late + timedelta(minutes=20)
+    with _platform_state(client)[0]() as session:
+        _seed_scan(
+            session,
+            "late-scan",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=late,
+            finished_at=late,
+        )
+        _seed_finding(session, "late-scan", repository_id, "a" * 64)
+        _seed_scan(
+            session,
+            "early-scan",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=early,
+            finished_at=early,
+        )
+        _seed_finding(session, "early-scan", repository_id, "b" * 64, status="ERROR")
+        session.commit()
+
+    response = _get(client, f"/api/v1/repos/{repository_id}/trends?days=30")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {"repository_id", "points"}
+    assert payload["repository_id"] == repository_id
+    assert [point["date"] for point in payload["points"]] == [late.date().isoformat(), early.date().isoformat()]
+    assert payload["points"][0] == {
+        "date": late.date().isoformat(),
+        "completed_scan_count": 1,
+        "fail_finding_count": 1,
+        "error_finding_count": 0,
+        "suppressed_finding_count": 0,
+        "new_finding_count": 0,
+    }
+    assert payload["points"][1] == {
+        "date": early.date().isoformat(),
+        "completed_scan_count": 1,
+        "fail_finding_count": 0,
+        "error_finding_count": 1,
+        "suppressed_finding_count": 0,
+        "new_finding_count": 0,
+    }
+
+
+def test_repository_trends_scoped_to_one_repository(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    other_id = _register_named(client, tmp_path, "side-dags")
+    now = utcnow()
+    mine = now - timedelta(days=2)
+    theirs = now - timedelta(days=3)
+    with _platform_state(client)[0]() as session:
+        _seed_scan(
+            session,
+            "mine-scan",
+            repository_id,
+            status="succeeded",
+            complete=True,
+            created_at=mine,
+            finished_at=mine,
+        )
+        _seed_finding(session, "mine-scan", repository_id, "m" * 64)
+        _seed_scan(
+            session,
+            "theirs-scan",
+            other_id,
+            status="succeeded",
+            complete=True,
+            created_at=theirs,
+            finished_at=theirs,
+        )
+        _seed_finding(session, "theirs-scan", other_id, "t" * 64)
+        session.commit()
+
+    payload = _get(client, f"/api/v1/repos/{repository_id}/trends?days=30").json()
+
+    assert [point["date"] for point in payload["points"]] == [mine.date().isoformat()]
+    assert payload["points"][0]["completed_scan_count"] == 1
+    assert payload["points"][0]["fail_finding_count"] == 1
+
+
+def test_repository_trends_without_eligible_scans_return_no_points(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    finished = utcnow() - timedelta(days=1)
+    with _platform_state(client)[0]() as session:
+        _seed_scan(session, "queued-1", repository_id, status="queued", created_at=finished)
+        _seed_scan(
+            session,
+            "failed-1",
+            repository_id,
+            status="failed",
+            created_at=finished,
+            finished_at=finished,
+        )
+        _seed_finding(session, "failed-1", repository_id, "f" * 64)
+        _seed_scan(
+            session,
+            "incomplete-1",
+            repository_id,
+            status="succeeded",
+            complete=False,
+            created_at=finished,
+            finished_at=finished,
+        )
+        _seed_finding(session, "incomplete-1", repository_id, "i" * 64)
+        session.commit()
+
+    trends = _get(client, f"/api/v1/repos/{repository_id}/trends?days=30").json()
+    overview = _get(client, "/api/v1/overview").json()
+
+    assert trends["points"] == []
+    assert overview["completed_scan_count"] == 0
+    assert overview["active_scan_count"] == 1
+    assert overview["current_failure_count"] == 0
+    assert overview["current_error_count"] == 0
+    assert overview["current_new_finding_count"] == 0
+    assert overview["trends"] == []
+
+
+def test_repository_trends_unknown_repository_returns_404(client: TestClient) -> None:
+    response = _get(client, "/api/v1/repos/unknown/trends?days=30")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("query", ["days=0", "days=366", "days=-1"])
+def test_repository_trends_reject_out_of_range_days(client: TestClient, query: str) -> None:
+    response = _get(client, f"/api/v1/repos/repo1/trends?{query}")
+
+    assert response.status_code == 422
+
+
+def test_aggregate_functions_reject_non_positive_days(platform_env: str) -> None:
+    from conformdag.platform.aggregates import build_overview, build_repository_trends
+
+    now = utcnow()
+    with initialize_session_factory(platform_env)() as session:
+        with pytest.raises(ValueError, match="days"):
+            build_overview(session, now, 0)
+        with pytest.raises(ValueError, match="days"):
+            build_repository_trends(session, "repo1", now, 0)
+
+
+def test_findings_migration_adds_nullable_end_line(platform_env: str) -> None:
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        bind = session.get_bind()
+        columns = {column["name"]: column for column in sa_inspect(bind).get_columns("findings")}
+
+    assert "end_line" in columns
+    assert columns["end_line"]["nullable"] is True
+
+
+def test_finding_payload_emits_positions_fix_and_baseline_status(
+    client: TestClient, platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    repository_id = _register(client, tmp_path)
+
+    def fake_scan_repository(
+        repository_root: Path, policy_pack: Path | None = None, *, parse_cache: ParseCache | None = None
+    ) -> ScanReport:
+        return ScanReport(
+            complete=True,
+            result_fingerprint="a" * 64,
+            run=RunMetadata(
+                tool_version="test",
+                policy_pack_id="test-pack",
+                policy_pack_version="1.0.0",
+                timestamp=datetime.now(UTC),
+            ),
+            findings=[
+                Finding(
+                    policy_id="AIR-DET-001",
+                    policy_version="1.0.0",
+                    status=FindingStatus.FAIL,
+                    severity=Severity.HIGH,
+                    enforcement=EnforcementType.DETERMINISTIC,
+                    location=FindingLocation(file=Path("dags/x.py"), start_line=3, end_line=7),
+                    explanation="missing owner",
+                    remediation="set an owner",
+                    fix=RemediationPayload(
+                        fix_kind="set-kwarg",
+                        action=RemediationAction.SET_KWARG,
+                        kwarg="owner",
+                        target=RemediationTarget(line=3),
+                        value="data-platform",
+                    ),
+                    fingerprint="c" * 64,
+                )
+            ],
+        )
+
+    monkeypatch.setattr("conformdag.platform.runner.scan_repository", fake_scan_repository)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="scan-positions", repository_id=repository_id, status="running"))
+        session.add(
+            ScanRow(
+                id="baseline-scan",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint="b" * 64,
+            )
+        )
+        session.add(
+            FindingRow(
+                scan_id="baseline-scan",
+                repository_id=repository_id,
+                policy_id="AIR-DET-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/old.py",
+                start_line=1,
+                fingerprint="b" * 64,
+            )
+        )
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.baseline_scan_id = "baseline-scan"
+        session.commit()
+
+    assert execute_scan("scan-positions", platform_env) == 0
+
+    finding = _get(client, "/api/v1/scans/scan-positions/findings").json()[0]
+
+    assert finding["start_line"] == 3
+    assert finding["end_line"] == 7
+    assert finding["fix"] == {
+        "fix_kind": "set-kwarg",
+        "action": "set-kwarg",
+        "kwarg": "owner",
+        "target": {"line": 3, "column": 0, "enclosing": None, "node": "statement"},
+        "value": "data-platform",
+        "hint": None,
+    }
+    assert finding["baseline_status"] == "new"
+
+
+def test_finding_payload_keeps_legacy_rows_readable_without_end_line(client: TestClient, tmp_path: Path) -> None:
+    repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        session.add(ScanRow(id="scan-legacy", repository_id=repository_id, status="succeeded"))
+        session.add(
+            FindingRow(
+                scan_id="scan-legacy",
+                repository_id=repository_id,
+                policy_id="AIR-DET-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/legacy.py",
+                start_line=9,
+                fingerprint="d" * 64,
+            )
+        )
+        session.commit()
+
+    finding = _get(client, "/api/v1/scans/scan-legacy/findings").json()[0]
+
+    assert finding["start_line"] == 9
+    assert finding["end_line"] is None
 
 
 def test_export_json_is_byte_compatible_with_stored_report(client: TestClient, tmp_path: Path) -> None:
@@ -1427,6 +2448,143 @@ def test_runner_applies_platform_suppression_before_gate_evaluation(platform_env
         assert gate["passed"] is True
 
 
+def _seed_error_scan(platform_env: str, tmp_path: Path) -> str:
+    """Seed one repository whose single task carries an unresolved retry value."""
+    (tmp_path / "standards").mkdir(parents=True)
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Execution safety\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "dags/dynamic.py").write_text(
+        "from airflow.decorators import task\n"
+        "from airflow import DAG\n"
+        "\n"
+        "with DAG(dag_id='dynamic'):\n"
+        "    @task(retries=RETRIES)\n"
+        "    def work(): ...\n",
+        encoding="utf-8",
+    )
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "unresolved",
+        "version": "1",
+        "quality_gates": [{"id": "default", "rules": [{"type": "max-findings", "count": 0}]}],
+        "policies": [
+            {
+                "id": "AIR-DET-004",
+                "title": "Task retries are bounded",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "medium",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Execution safety",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Retry count and delay remain within policy bounds.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["retry-bounds"]},
+                "configuration": {
+                    "kind": "retry-bounds",
+                    "min_retries": 0,
+                    "max_retries": 5,
+                    "min_delay_seconds": 0,
+                    "max_delay_seconds": 3600,
+                    "allow_zero_retries": True,
+                },
+            }
+        ],
+    }
+    _write_yaml(tmp_path / "pack.yaml", pack)
+    (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
+
+    session_factory = factory(platform_env)
+    with session_factory() as session:
+        session.add(
+            RepositoryRow(
+                id="repo-unresolved",
+                name="unresolved",
+                path=str(tmp_path),
+                policy_pack=str(tmp_path / "pack.yaml"),
+            )
+        )
+        scan = ScanRow(id="scan1", repository_id="repo-unresolved", status="running")
+        session.add(scan)
+        session.commit()
+        return scan.id
+
+
+def _add_platform_suppression(
+    platform_env: str, template_scan_id: str, follow_up_scan_id: str, *, expires_at: datetime
+) -> None:
+    """Suppress the error finding of one scan and queue a follow-up scan."""
+    with factory(platform_env)() as session:
+        finding = session.scalars(select(FindingRow).where(FindingRow.scan_id == template_scan_id)).one()
+        session.add(
+            SuppressionRow(
+                id=new_suppression_id(),
+                policy_id=finding.policy_id,
+                fingerprint=finding.fingerprint,
+                reason="dynamic retry remediation scheduled",
+                owner="platform",
+                expires_at=expires_at,
+            )
+        )
+        session.add(ScanRow(id=follow_up_scan_id, repository_id="repo-unresolved", status="running"))
+        session.commit()
+
+
+def test_platform_suppression_waives_error_before_gate_and_completion(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    scan_id = _seed_error_scan(platform_env, tmp_path)
+
+    assert execute_scan(scan_id, platform_env) == 1
+    first = load_scan(platform_env, scan_id)
+    assert first.error is not None and "EVALUATION_ERROR" in first.error
+
+    _add_platform_suppression(platform_env, scan_id, "scan2", expires_at=utcnow() + timedelta(days=1))
+
+    assert execute_scan("scan2", platform_env) == 0
+
+    with factory(platform_env)() as session:
+        suppressed = session.scalars(select(FindingRow).where(FindingRow.scan_id == "scan2")).one()
+        assert suppressed.suppressed is True
+        scan = session.get(ScanRow, "scan2")
+        assert scan is not None and scan.status == "succeeded"
+        assert scan.complete is True
+        assert scan.report_json is not None
+        assert scan.report_json["complete"] is True
+        issues = cast("list[dict[str, object]]", scan.report_json["issues"])
+        assert not any(issue["fatal"] for issue in issues)
+        gate = scan.report_json.get("gate_result")
+        assert isinstance(gate, dict)
+        assert gate["passed"] is True
+
+
+def test_expired_platform_suppression_does_not_waive_error(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    scan_id = _seed_error_scan(platform_env, tmp_path)
+
+    assert execute_scan(scan_id, platform_env) == 1
+
+    _add_platform_suppression(platform_env, scan_id, "scan3", expires_at=utcnow() - timedelta(days=1))
+
+    assert execute_scan("scan3", platform_env) == 1
+
+    with factory(platform_env)() as session:
+        scan = session.get(ScanRow, "scan3")
+        assert scan is not None and scan.status == "failed"
+        assert scan.complete is False
+        assert scan.report_json is not None
+        assert scan.report_json["complete"] is False
+        assert scan.report_json.get("gate_result") is None
+        issues = cast("list[dict[str, object]]", scan.report_json["issues"])
+        assert any(issue["code"] == "EVALUATION_ERROR" and issue["fatal"] for issue in issues)
+
+
 def test_runner_persists_gate_result(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "standards").mkdir()
     (tmp_path / "standards/dag-authoring.md").write_text(
@@ -1925,6 +3083,12 @@ def test_unknown_api_paths_return_json_404(client: TestClient) -> None:
     assert response.json()["detail"].startswith("unknown API path")
 
 
+def test_unknown_put_api_paths_return_json_404(client: TestClient) -> None:
+    response = _as_httpx(client).put("/api/v1/not-a-route")
+    assert response.status_code == 404
+    assert response.json()["detail"].startswith("unknown API path")
+
+
 @pytest.mark.skipif(
     not (Path(__file__).resolve().parents[1] / "src/conformdag/platform/static/index.html").is_file(),
     reason="dashboard static assets are not built",
@@ -2264,6 +3428,244 @@ def test_upsert_policy_rejects_unknown_evaluator_and_keeps_pack_usable(tmp_path:
     assert policy.title == "Recovered owner policy"
 
 
+def test_pack_service_delete_rejects_gate_reference_and_preserves_bytes(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackError, PackService
+
+    (tmp_path / "standards").mkdir()
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "boundary",
+        "version": "1",
+        "quality_gates": [{"id": "always", "rules": [{"type": "always-block", "policy_ids": ["AIR-TST-001"]}]}],
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "Owner policy",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"]},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    pack_path = tmp_path / "pack.yaml"
+    _write_yaml(pack_path, pack)
+    service = PackService({"test": pack_path})
+    before = pack_path.read_bytes()
+
+    with pytest.raises(PackError, match="references unknown policy ids"):
+        service.delete_policy("test", "AIR-TST-001")
+
+    assert pack_path.read_bytes() == before
+
+
+def _write_gate_pack(tmp_path: Path, gates: list[dict[str, Any]]) -> Path:
+    """Write a valid one-policy pack with the given quality gates and return its path."""
+    (tmp_path / "standards").mkdir(parents=True, exist_ok=True)
+    document = tmp_path / "standards/dag-authoring.md"
+    document.write_text("# DAG Authoring Standards\n\n## Ownership and metadata\n", encoding="utf-8")
+    content_hash = hashlib.sha256(document.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+    pack: dict[str, Any] = {
+        "schema_version": "1",
+        "id": "gates",
+        "version": "1",
+        "quality_gates": gates,
+        "policies": [
+            {
+                "id": "AIR-TST-001",
+                "title": "Owner policy",
+                "version": "1.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "airflow_profiles": ["3.3.0"],
+                "ownership": {"owner": "platform"},
+                "source": {
+                    "document": "standards/dag-authoring.md",
+                    "section": "Ownership and metadata",
+                    "content_hash": content_hash,
+                },
+                "invariant": "Every DAG declares an owner.",
+                "safe_path": "An owner is present.",
+                "enforcement": {"type": "deterministic", "deterministic_checks": ["effective-owner"]},
+                "configuration": {"kind": "required-owner", "allowed_values": ["platform"]},
+            }
+        ],
+    }
+    pack_path = tmp_path / "pack.yaml"
+    _write_yaml(pack_path, pack)
+    return pack_path
+
+
+def test_pack_service_gate_crud_preserves_order_and_round_trips(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackError, PackService
+
+    pack_path = _write_gate_pack(
+        tmp_path,
+        [
+            {
+                "id": "release",
+                "rules": [
+                    {"type": "no-new-findings"},
+                    {"type": "max-severity", "severity": "high"},
+                ],
+            },
+            {"id": "sandbox", "rules": [{"type": "failure-rate", "max_percent": 50.0}]},
+        ],
+    )
+    service = PackService({"test": pack_path})
+    assert [gate["id"] for gate in service.list_gates("test")] == ["release", "sandbox"]
+
+    service.upsert_gate(
+        "test",
+        "release",
+        {
+            "rules": [
+                {"type": "always-block", "policy_ids": ["AIR-TST-001"]},
+                {"type": "max-findings", "count": 5},
+                {"type": "max-severity", "severity": "critical"},
+            ]
+        },
+    )
+    service.upsert_gate("test", "audit", {"rules": [{"type": "no-new-findings"}]})
+
+    reloaded = load_policy_pack(pack_path, tmp_path)
+    assert [gate.id for gate in reloaded.quality_gates] == ["release", "sandbox", "audit"]
+    assert reloaded.quality_gates[0].model_dump(mode="json")["rules"] == [
+        {"type": "always-block", "policy_ids": ["AIR-TST-001"]},
+        {"type": "max-findings", "count": 5},
+        {"type": "max-severity", "severity": "critical"},
+    ]
+    assert reloaded.quality_gates[1].model_dump(mode="json")["rules"] == [{"type": "failure-rate", "max_percent": 50.0}]
+
+    service.delete_gate("test", "sandbox")
+
+    final = load_policy_pack(pack_path, tmp_path)
+    assert [gate.id for gate in final.quality_gates] == ["release", "audit"]
+    assert [gate["id"] for gate in service.list_gates("test")] == ["release", "audit"]
+
+    with pytest.raises(PackError):
+        service.list_gates("missing")
+    with pytest.raises(PackError):
+        service.delete_gate("test", "no-such-gate")
+
+
+def test_gate_mutation_rejects_invalid_reconstructed_pack_and_preserves_bytes(tmp_path: Path) -> None:
+    from conformdag.platform.packs import PackError, PackService
+
+    pack_path = _write_gate_pack(
+        tmp_path,
+        [
+            {"id": "release", "rules": [{"type": "always-block", "policy_ids": ["AIR-TST-001"]}]},
+            {"id": "audit", "rules": [{"type": "no-new-findings"}]},
+        ],
+    )
+    service = PackService({"test": pack_path})
+    before = pack_path.read_bytes()
+
+    with pytest.raises(PackError, match="references unknown policy ids"):
+        service.upsert_gate(
+            "test",
+            "release",
+            {"rules": [{"type": "always-block", "policy_ids": ["AIR-NOPE-001"]}]},
+        )
+    assert pack_path.read_bytes() == before
+
+    with pytest.raises(PackError, match="does not match"):
+        service.upsert_gate(
+            "test",
+            "release",
+            {"id": "audit", "rules": [{"type": "no-new-findings"}]},
+        )
+    assert pack_path.read_bytes() == before
+
+    with pytest.raises(PackError):
+        service.upsert_gate("test", "release", {"rules": [{"type": "max-findings"}]})
+    assert pack_path.read_bytes() == before
+
+
+def test_gate_routes_require_admin_and_return_validation_errors(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    before = pack_path.read_bytes()
+    admin = {"Authorization": "Bearer secret-token"}
+
+    unauth_get = _get(client, "/api/v1/packs/org/gates")
+    assert unauth_get.status_code == 200
+    assert unauth_get.json() == []
+
+    unauth_put = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/release",
+        json={"rules": [{"type": "no-new-findings"}]},
+    )
+    assert unauth_put.status_code == 401
+    unauth_delete = _as_httpx(client).delete("/api/v1/packs/org/gates/release")
+    assert unauth_delete.status_code == 401
+    assert pack_path.read_bytes() == before
+
+    bad_discriminator = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/broken",
+        json={"rules": [{"type": "no-such-rule"}]},
+        headers=admin,
+    )
+    assert bad_discriminator.status_code == 422
+    missing_field = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/broken",
+        json={"rules": [{"type": "max-findings"}]},
+        headers=admin,
+    )
+    assert missing_field.status_code == 422
+    empty_rules = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/broken",
+        json={"rules": []},
+        headers=admin,
+    )
+    assert empty_rules.status_code == 422
+    assert pack_path.read_bytes() == before
+    assert _get(client, "/api/v1/packs/org/gates").json() == []
+
+    saved = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/release",
+        json={"rules": [{"type": "max-severity", "severity": "critical"}]},
+        headers=admin,
+    )
+    assert saved.status_code == 200
+    appended = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/audit",
+        json={"rules": [{"type": "failure-rate", "max_percent": 25.0}]},
+        headers=admin,
+    )
+    assert appended.status_code == 200
+    assert [gate["id"] for gate in _get(client, "/api/v1/packs/org/gates").json()] == ["release", "audit"]
+
+    assert _get(client, "/api/v1/packs/missing/gates").status_code == 404
+    unknown_pack_put = _as_httpx(client).put(
+        "/api/v1/packs/missing/gates/release",
+        json={"rules": [{"type": "no-new-findings"}]},
+        headers=admin,
+    )
+    assert unknown_pack_put.status_code == 404
+    unknown_pack_delete = _as_httpx(client).delete("/api/v1/packs/missing/gates/release", headers=admin)
+    assert unknown_pack_delete.status_code == 404
+    unknown_gate_delete = _as_httpx(client).delete("/api/v1/packs/org/gates/no-such-gate", headers=admin)
+    assert unknown_gate_delete.status_code == 404
+
+    removed = _as_httpx(client).delete("/api/v1/packs/org/gates/release", headers=admin)
+    assert removed.status_code == 200
+    assert [gate["id"] for gate in _get(client, "/api/v1/packs/org/gates").json()] == ["audit"]
+
+
 def test_pack_policy_save_endpoint_persists_dashboard_check_fields(client: TestClient, tmp_path: Path) -> None:
     from conformdag.platform.packs import PackService
 
@@ -2381,6 +3783,77 @@ def test_dashboard_policy_update_preserves_contract_metadata(client: TestClient,
     assert after["enforcement"] == before["enforcement"]
     assert after["invariant"] == before["invariant"]
     assert after["safe_path"] == before["safe_path"]
+
+
+def test_policy_upsert_round_trips_tags_and_preserves_contract_metadata(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    admin = {"Authorization": "Bearer secret-token"}
+    url = "/api/v1/packs/org/policies/AIR-DET-001"
+    before = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert before["tags"] == []
+    source_hash_before = next(
+        policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001"
+    ).source.content_hash
+    edit = {
+        "title": "Tagged owner policy",
+        "version": before["version"],
+        "status": before["status"],
+        "severity": before["severity"],
+        "check_kind": before["check_kind"],
+        "check_config": before["check_config"],
+        "source_document": before["source_document"],
+        "source_section": before["source_section"],
+        "invariant": before["invariant"],
+    }
+
+    tagged = _as_httpx(client).put(url, json={**edit, "tags": ["data", "analytics-platform"]}, headers=admin)
+    assert tagged.status_code == 200
+    tagged_row = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert tagged_row["tags"] == ["data", "analytics-platform"]
+    for key in ("source_version", "ownership", "scope", "exceptions", "enforcement", "invariant", "safe_path"):
+        assert tagged_row[key] == before[key], f"tag update changed contract field {key!r}"
+
+    omitted = _as_httpx(client).put(url, json=edit, headers=admin)
+    assert omitted.status_code == 200
+    assert _load_dashboard_policy(client, "org", "AIR-DET-001")["tags"] == ["data", "analytics-platform"]
+
+    cleared = _as_httpx(client).put(url, json={**edit, "tags": []}, headers=admin)
+    assert cleared.status_code == 200
+    cleared_row = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert cleared_row["tags"] == []
+    for key in ("source_version", "ownership", "scope", "exceptions", "enforcement", "invariant", "safe_path"):
+        assert cleared_row[key] == before[key], f"tag clear changed contract field {key!r}"
+
+    saved = next(policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001")
+    assert saved.source.content_hash == source_hash_before
+
+
+@pytest.mark.parametrize("tags", [["Data"], ["data", "data"], ["bad_tag"]])
+def test_policy_upsert_rejects_invalid_tags_and_preserves_bytes(
+    client: TestClient, tmp_path: Path, tags: list[str]
+) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    before = pack_path.read_bytes()
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json={
+            "title": "Broken tag policy",
+            "version": "1.0.0",
+            "status": "ACTIVE",
+            "severity": "high",
+            "check_kind": "required-owner",
+            "check_config": {"kind": "required-owner", "allowed_values": ["platform"]},
+            "source_document": "standards/dag-authoring.md",
+            "source_section": "Ownership and metadata",
+            "invariant": "Every DAG has an owner.",
+            "tags": tags,
+        },
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert pack_path.read_bytes() == before
 
 
 def test_concurrent_policy_updates_do_not_lose_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2650,6 +4123,56 @@ def test_pack_policy_delete_returns_422_for_malformed_pack(platform_env: str, tm
     assert "unknown deterministic check" in response.text
 
 
+def test_pack_policy_delete_returns_422_when_resulting_pack_is_invalid(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _write_gate_pack(
+        tmp_path,
+        [{"id": "release", "rules": [{"type": "always-block", "policy_ids": ["AIR-TST-001"]}]}],
+    )
+    cast("FastAPI", client.app).state.pack_service.register("org", pack_path)
+    before = pack_path.read_bytes()
+
+    response = _as_httpx(client).delete(
+        "/api/v1/packs/org/policies/AIR-TST-001",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert "references unknown policy ids" in response.text
+    assert pack_path.read_bytes() == before
+
+
+def test_pack_gate_delete_maps_pack_validation_to_422(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.platform.packs import PackService
+
+    pack_path = _write_gate_pack(tmp_path, [{"id": "release", "rules": [{"type": "no-new-findings"}]}])
+    service = cast("PackService", cast("FastAPI", client.app).state.pack_service)
+    service.register("org", pack_path)
+
+    def reject_delete(pack_name: str, gate_id: str) -> None:
+        raise packs_module.PackError("gate validation failed")
+
+    monkeypatch.setattr(service, "delete_gate", reject_delete)
+    response = _as_httpx(client).delete(
+        "/api/v1/packs/org/gates/release",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "gate validation failed"
+
+
+def test_pack_policy_list_returns_422_for_malformed_pack(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _write_unknown_check_pack(tmp_path / "packs")
+    cast("FastAPI", client.app).state.pack_service.register("bad", pack_path)
+
+    response = _get(client, "/api/v1/packs/bad/policies")
+
+    assert response.status_code == 422
+    assert "unknown deterministic check" in response.text
+
+
 def test_pack_validate_reports_gate_errors(tmp_path: Path) -> None:
     from conformdag.platform.packs import PackService
 
@@ -2686,18 +4209,30 @@ def test_pack_list_endpoint_returns_empty_when_no_packs(client: TestClient) -> N
 
 def test_pack_delete_endpoint_returns_404_for_unknown(client: TestClient) -> None:
     """Verify the delete endpoint returns 404 for a nonexistent policy."""
-    result = _delete_helper(client, "/api/v1/packs/nonexistent/policies/AIR-DET-001")
-    assert result.status_code in {404, 401}
+    result = _as_httpx(client).delete(
+        "/api/v1/packs/nonexistent/policies/AIR-DET-001",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert result.status_code == 404
 
 
-def test_pack_validate_endpoint_on_clean_pack(client: TestClient) -> None:
-    """Verify the validate endpoint returns valid for a well-formed pack."""
+def test_pack_validate_endpoint_returns_404_for_unknown_pack(client: TestClient) -> None:
     result = _post(
         client,
         "/api/v1/packs/nonexistent/validate",
-        headers={"Authorization": "Bearer soak-demo-token"},
+        headers={"Authorization": "Bearer secret-token"},
     )
-    assert result.status_code in {200, 404, 401, 422}
+    assert result.status_code == 404
+
+
+def test_pack_policy_delete_endpoint_returns_404_for_unknown_policy(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    result = _as_httpx(client).delete(
+        "/api/v1/packs/org/policies/AIR-NOPE-001",
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert result.status_code == 404
+    assert pack_path.is_file()
 
 
 def test_sensitive_logging_evaluator_detects_api_key_pattern() -> None:

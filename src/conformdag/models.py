@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, PositiveInt, field_validator
+
+_POLICY_TAG_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?")
 
 
 def _empty_airflow_profiles() -> list[AirflowProfile]:
@@ -315,6 +318,21 @@ class Policy(ConformModel):
     enforcement: EnforcementConfig
     exceptions: ExceptionPolicy = Field(default_factory=ExceptionPolicy)
     configuration: PolicyConfiguration
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("tags")
+    @classmethod
+    def valid_tags(cls, tags: list[str]) -> list[str]:
+        seen: set[str] = set()
+        for tag in tags:
+            if not _POLICY_TAG_PATTERN.fullmatch(tag):
+                raise ValueError(
+                    f"tag {tag!r} must be a lowercase slug of 1-32 alphanumeric characters with inner hyphens"
+                )
+            if tag in seen:
+                raise ValueError(f"tag {tag!r} is duplicated; tags must be unique")
+            seen.add(tag)
+        return tags
 
 
 class PolicyPack(ConformModel):

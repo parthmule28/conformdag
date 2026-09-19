@@ -8,6 +8,27 @@ Every scan is offline and non-executing by default. One scan engine produces
 one versioned JSON report; terminal, SARIF, and self-contained HTML are
 projections of it.
 
+## Run the demo
+
+See the entire enforcement loop in about a minute — no Docker, no credentials,
+no network access. The demo seeds a realistic Airflow repository landscape into
+a disposable local workspace and opens the real dashboard in your browser:
+
+```bash
+mise run setup
+mise run demo
+```
+
+A guided tour walks through the overview, the quality gate blocking a change,
+one finding and its verified remediation payload, the policy behind it, a
+time-bounded suppression, and report export. Press Ctrl-C to stop the server;
+every seeded row lives in a temporary directory and is removed on exit. To
+print the URL instead of opening a browser, run `mise run demo -- --no-open`.
+
+The demo is loopback-only and disposable — it is not a production deployment
+path. The durable team server runs under Docker Compose; see
+[the governance platform](#the-governance-platform).
+
 ## How it works
 
 ```mermaid

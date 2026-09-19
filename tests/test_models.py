@@ -106,3 +106,46 @@ def test_policy_pack_accepts_quality_gates() -> None:
         }
     )
     assert len(pack.quality_gates) == 1
+
+
+def test_policy_without_tags_defaults_to_empty_list() -> None:
+    payload = make_policy().model_dump(mode="json")
+    payload.pop("tags", None)
+
+    policy = Policy.model_validate(payload)
+
+    assert policy.tags == []
+
+
+def test_policy_tags_preserve_input_order() -> None:
+    payload = {**make_policy().model_dump(mode="json"), "tags": ["zeta", "alpha-9", "mid"]}
+
+    policy = Policy.model_validate(payload)
+
+    assert policy.tags == ["zeta", "alpha-9", "mid"]
+
+
+def test_policy_tags_accept_boundary_slugs() -> None:
+    payload = {**make_policy().model_dump(mode="json"), "tags": ["a", "0" * 32, "data-1"]}
+
+    policy = Policy.model_validate(payload)
+
+    assert policy.tags == ["a", "0" * 32, "data-1"]
+
+
+@pytest.mark.parametrize(
+    ("tags", "expected"),
+    [
+        (["data", "data"], "duplicated"),
+        ([""], "lowercase slug"),
+        (["Data"], "lowercase slug"),
+        (["-data"], "lowercase slug"),
+        (["data-"], "lowercase slug"),
+        (["a" * 33], "lowercase slug"),
+    ],
+)
+def test_policy_tags_reject_invalid_values(tags: list[str], expected: str) -> None:
+    payload = {**make_policy().model_dump(mode="json"), "tags": tags}
+
+    with pytest.raises(ValidationError, match=expected):
+        Policy.model_validate(payload)

@@ -16,22 +16,32 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, false, func, nullslast, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import PlainTextResponse
 
 from conformdag.models import ScanReport
+from conformdag.platform.aggregates import build_overview, build_repository_trends
+from conformdag.platform.contracts import (
+    FindingResponse,
+    GateResponse,
+    GateUpsertRequest,
+    OverviewResponse,
+    RepositoryTrendsResponse,
+    ScanSummaryResponse,
+)
 from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
     ScanRow,
     SuppressionRow,
+    count_scans,
     eligible_baseline,
     new_id,
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
-from conformdag.platform.packs import PackError, PackService
+from conformdag.platform.packs import PackError, PackNotFoundError, PackService
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
 from conformdag.policy import PolicyValidationError
 from conformdag.reporting import render_html, render_sarif
@@ -87,7 +97,8 @@ class PolicyUpsertRequest(BaseModel):
     Editable fields are required. Contract metadata fields (``source_version``,
     ``ownership``, ``scope``, ``exceptions``, ``enforcement``, ``safe_path``)
     are optional: an existing policy keeps its persisted value when the request
-    omits them, while a new policy must carry them completely.
+    omits them, while a new policy must carry them completely. ``tags`` follows
+    the preserve-on-omit rule; an explicit empty list clears the tags.
     """
 
     title: str
@@ -105,6 +116,7 @@ class PolicyUpsertRequest(BaseModel):
     scope: dict[str, Any] | None = None
     exceptions: dict[str, Any] | None = None
     enforcement: dict[str, Any] | None = None
+    tags: list[str] | None = None
 
 
 class SuppressionCreate(BaseModel):
@@ -281,29 +293,41 @@ def scan_status(request: Request, scan_id: str) -> dict[str, object]:
 def scan_history(
     request: Request,
     repository_id: str,
+    response: Response,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[dict[str, object]]:
-    """Return the scan history of one repository, newest first."""
+) -> list[ScanSummaryResponse]:
+    """Return the scan history of one repository, newest first.
+
+    Ordering is ``created_at`` descending with ``scan id`` descending as the
+    tie-breaker, so entries sharing a timestamp keep a deterministic order.
+    ``X-Total-Count`` carries the repository's unpaged scan count.
+    """
     factory = _factory(request)
     with factory() as session:
+        response.headers["X-Total-Count"] = str(count_scans(session, repository_id))
         rows = session.scalars(
             select(ScanRow)
             .where(ScanRow.repository_id == repository_id)
-            .order_by(ScanRow.created_at.desc())
+            .order_by(ScanRow.created_at.desc(), ScanRow.id.desc())
             .limit(limit)
             .offset(offset)
         ).all()
-        return [
-            {
-                "scan_id": row.id,
-                "status": row.status,
-                "created_at": row.created_at,
-                "finished_at": row.finished_at,
-                "result_fingerprint": row.result_fingerprint,
-            }
-            for row in rows
-        ]
+        summaries: list[ScanSummaryResponse] = []
+        for row in rows:
+            gate_result = cast("dict[str, object]", row.report_json.get("gate_result") or {}) if row.report_json else {}
+            summaries.append(
+                ScanSummaryResponse(
+                    scan_id=row.id,
+                    status=row.status,
+                    created_at=row.created_at,
+                    finished_at=row.finished_at,
+                    result_fingerprint=row.result_fingerprint,
+                    complete=row.complete,
+                    gate_passed=cast("bool | None", gate_result.get("passed")),
+                )
+            )
+        return summaries
 
 
 def set_baseline(request: Request, repository_id: str, payload: BaselineSetRequest) -> dict[str, str]:
@@ -334,37 +358,71 @@ def scan_report(request: Request, scan_id: str) -> dict[str, Any]:
 def scan_findings(
     request: Request,
     scan_id: str,
-    status: str | None = None,
+    response: Response,
+    status: Annotated[str | None, Query()] = None,
+    severity: Annotated[str | None, Query()] = None,
+    policy_id: Annotated[str | None, Query()] = None,
+    file_path: Annotated[str | None, Query()] = None,
+    suppressed: Annotated[bool | None, Query()] = None,
+    baseline_status: Annotated[str | None, Query(pattern="^(existing|new)$")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[dict[str, object]]:
-    """List normalized findings and optional baseline labels for one scan.
+) -> list[FindingResponse]:
+    """List normalized findings with server-side filters and pagination.
 
     ``baseline_status`` is ``"existing"`` or ``"new"`` when the repository
     has a same-repository successful baseline scan. It is ``None`` when no
-    usable baseline is configured; that state is not treated as ``existing``.
+    usable baseline is configured; that state is not treated as ``existing``,
+    and both baseline-status filters return no rows in that case. Filters are
+    applied before counting, so ``X-Total-Count`` always carries the unpaged
+    number of matching findings, and ordering is deterministic.
     """
     factory = _factory(request)
     with factory() as session:
-        query = select(FindingRow).where(FindingRow.scan_id == scan_id)
-        if status:
-            query = query.where(FindingRow.status == status.upper())
-        rows = session.scalars(
-            query.order_by(FindingRow.policy_id, FindingRow.file_path).limit(limit).offset(offset)
-        ).all()
-        baseline_fingerprints: set[str] | None = None
         scan = session.get(ScanRow, scan_id)
-        if scan is not None:
-            repository = session.get(RepositoryRow, scan.repository_id)
-            baseline = (
-                eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
-                if repository and repository.baseline_scan_id
-                else None
+        repository = session.get(RepositoryRow, scan.repository_id) if scan is not None else None
+        baseline_fingerprints: set[str] | None = None
+        baseline = (
+            eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
+            if scan is not None and repository is not None and repository.baseline_scan_id
+            else None
+        )
+        if baseline is not None:
+            baseline_fingerprints = set(
+                session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline.id)).all()
             )
-            if baseline is not None:
-                baseline_fingerprints = set(
-                    session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline.id)).all()
-                )
+        filters: list[ColumnElement[bool]] = [FindingRow.scan_id == scan_id]
+        if status:
+            filters.append(FindingRow.status == status.upper())
+        if severity:
+            filters.append(FindingRow.severity == severity.lower())
+        if policy_id:
+            filters.append(FindingRow.policy_id == policy_id)
+        if file_path:
+            filters.append(FindingRow.file_path == file_path)
+        if suppressed is not None:
+            filters.append(FindingRow.suppressed == suppressed)
+        if baseline_status is not None:
+            if baseline_fingerprints is None:
+                filters.append(false())
+            elif baseline_status == "existing":
+                filters.append(FindingRow.fingerprint.in_(baseline_fingerprints))
+            else:
+                filters.append(FindingRow.fingerprint.not_in(baseline_fingerprints))
+        total = session.scalar(select(func.count()).select_from(FindingRow).where(*filters)) or 0
+        response.headers["X-Total-Count"] = str(total)
+        rows = session.scalars(
+            select(FindingRow)
+            .where(*filters)
+            .order_by(
+                FindingRow.policy_id,
+                nullslast(FindingRow.file_path),
+                nullslast(FindingRow.start_line),
+                FindingRow.fingerprint,
+            )
+            .limit(limit)
+            .offset(offset)
+        ).all()
         return [_finding_payload(row, baseline_fingerprints) for row in rows]
 
 
@@ -424,6 +482,24 @@ def update_suppression(request: Request, suppression_id: str, payload: Suppressi
         return _suppression_payload(row)
 
 
+def overview(request: Request, days: Annotated[int, Query(ge=1, le=365)] = 30) -> OverviewResponse:
+    """Return read-only overview aggregates across registered repositories."""
+    factory = _factory(request)
+    with factory() as session:
+        return build_overview(session, utcnow(), days)
+
+
+def repository_trends(
+    request: Request, repository_id: str, days: Annotated[int, Query(ge=1, le=365)] = 30
+) -> RepositoryTrendsResponse:
+    """Return read-only daily trend aggregates for one repository."""
+    factory = _factory(request)
+    with factory() as session:
+        if session.get(RepositoryRow, repository_id) is None:
+            raise HTTPException(status_code=404, detail="repository not registered")
+        return build_repository_trends(session, repository_id, utcnow(), days)
+
+
 def create_app(
     session_factory: sessionmaker[Session], settings: PlatformSettings, workspace_path: Path | None = None
 ) -> FastAPI:
@@ -447,6 +523,7 @@ def create_app(
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Total-Count"],
     )
     app.state.pack_service = PackService()
     configured_workspace = workspace_path if workspace_path is not None else settings.workspace
@@ -522,6 +599,8 @@ def create_app(
     app.get(API_PREFIX + "/suppressions")(list_suppressions)
     app.post(API_PREFIX + "/suppressions", dependencies=[Depends(require_admin)])(create_suppression)
     app.patch(API_PREFIX + "/suppressions/{suppression_id}", dependencies=[Depends(require_admin)])(update_suppression)
+    app.get(API_PREFIX + "/overview")(overview)
+    app.get(API_PREFIX + "/repos/{repository_id}/trends")(repository_trends)
 
     app.get(API_PREFIX + "/packs")(_pack_list)
     app.get(API_PREFIX + "/packs/{pack_name}/policies")(_pack_policies)
@@ -533,7 +612,13 @@ def create_app(
     )
     app.post(API_PREFIX + "/packs/{pack_name}/validate", dependencies=[Depends(require_admin)])(_pack_validate)
 
-    app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "DELETE"])(_api_fallback)
+    app.get(API_PREFIX + "/packs/{pack_name}/gates")(_pack_gates)
+    app.put(API_PREFIX + "/packs/{pack_name}/gates/{gate_id}", dependencies=[Depends(require_admin)])(_pack_upsert_gate)
+    app.delete(API_PREFIX + "/packs/{pack_name}/gates/{gate_id}", dependencies=[Depends(require_admin)])(
+        _pack_delete_gate
+    )
+
+    app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
@@ -550,6 +635,8 @@ def _pack_policies(request: Request, pack_name: str) -> list[dict[str, Any]]:
         return service.list_policies(pack_name)
     except PackError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PolicyValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _pack_upsert_policy(
@@ -558,6 +645,8 @@ def _pack_upsert_policy(
     service: PackService = request.app.state.pack_service
     try:
         service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json"))
+    except PackNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (PackError, PolicyValidationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "saved", "policy_id": policy_id}
@@ -567,8 +656,10 @@ def _pack_delete_policy(request: Request, pack_name: str, policy_id: str) -> dic
     service: PackService = request.app.state.pack_service
     try:
         service.delete_policy(pack_name, policy_id)
-    except PackError as exc:
+    except PackNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PackError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except PolicyValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "deleted", "policy_id": policy_id}
@@ -576,7 +667,46 @@ def _pack_delete_policy(request: Request, pack_name: str, policy_id: str) -> dic
 
 def _pack_validate(request: Request, pack_name: str) -> dict[str, Any]:
     service: PackService = request.app.state.pack_service
-    return service.validate_pack(pack_name)
+    try:
+        return service.validate_pack(pack_name)
+    except PackNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+def _pack_gates(request: Request, pack_name: str) -> list[GateResponse]:
+    service: PackService = request.app.state.pack_service
+    try:
+        return [GateResponse.model_validate(gate) for gate in service.list_gates(pack_name)]
+    except PackError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PolicyValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _pack_upsert_gate(request: Request, pack_name: str, gate_id: str, payload: GateUpsertRequest) -> dict[str, str]:
+    service: PackService = request.app.state.pack_service
+    try:
+        service.upsert_gate(pack_name, gate_id, payload.model_dump(mode="json"))
+    except PackNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PackError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PolicyValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "saved", "gate_id": gate_id}
+
+
+def _pack_delete_gate(request: Request, pack_name: str, gate_id: str) -> dict[str, str]:
+    service: PackService = request.app.state.pack_service
+    try:
+        service.delete_gate(pack_name, gate_id)
+    except PackNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PackError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except PolicyValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "deleted", "gate_id": gate_id}
 
 
 def _api_fallback(rest: str) -> dict[str, str]:
@@ -592,24 +722,25 @@ def _load_report(session_factory: sessionmaker[Session], scan_id: str) -> ScanRe
         return ScanReport.model_validate(scan.report_json)
 
 
-def _finding_payload(row: FindingRow, baseline_fingerprints: set[str] | None = None) -> dict[str, object]:
+def _finding_payload(row: FindingRow, baseline_fingerprints: set[str] | None = None) -> FindingResponse:
     baseline_status: str | None = None
     if baseline_fingerprints is not None:
         baseline_status = "existing" if row.fingerprint in baseline_fingerprints else "new"
-    return {
-        "policy_id": row.policy_id,
-        "policy_version": row.policy_version,
-        "status": row.status,
-        "severity": row.severity,
-        "file_path": row.file_path,
-        "start_line": row.start_line,
-        "fingerprint": row.fingerprint,
-        "explanation": row.explanation,
-        "remediation": row.remediation,
-        "fix": row.fix_json,
-        "suppressed": row.suppressed,
-        "baseline_status": baseline_status,
-    }
+    return FindingResponse(
+        policy_id=row.policy_id,
+        policy_version=row.policy_version,
+        status=row.status,
+        severity=row.severity,
+        file_path=row.file_path,
+        start_line=row.start_line,
+        end_line=row.end_line,
+        fingerprint=row.fingerprint,
+        explanation=row.explanation,
+        remediation=row.remediation,
+        fix=row.fix_json,
+        suppressed=row.suppressed,
+        baseline_status=baseline_status,
+    )
 
 
 def _suppression_payload(row: SuppressionRow) -> dict[str, object]:

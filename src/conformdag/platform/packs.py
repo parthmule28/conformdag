@@ -13,12 +13,16 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from conformdag.models import Policy, PolicyPack
+from conformdag.models import Policy, PolicyPack, QualityGate
 from conformdag.policy import PolicyValidationError, load_policy_pack, validate_policy_pack
 
 
 class PackError(ValueError):
     """Raised when a pack cannot be read, written, or validated."""
+
+
+class PackNotFoundError(PackError):
+    """Raised when a registered pack or requested pack member does not exist."""
 
 
 class PackService:
@@ -62,6 +66,7 @@ class PackService:
                 "version": policy.version,
                 "status": policy.status.value,
                 "severity": policy.severity.value,
+                "tags": policy.tags,
                 "check_kind": policy.configuration.kind,
                 "check_config": policy.configuration.model_dump(mode="json"),
                 "source_document": str(policy.source.document),
@@ -111,7 +116,51 @@ class PackService:
             before = len(pack.policies)
             pack.policies = [p for p in pack.policies if p.id != policy_id]
             if len(pack.policies) == before:
-                raise PackError(f"policy {policy_id} not found in {pack_name}")
+                raise PackNotFoundError(f"policy {policy_id} not found in {pack_name}")
+            issues = validate_policy_pack(pack)
+            if issues:
+                raise PackError("; ".join(issues))
+            _write_pack(pack, pack_path)
+
+    def list_gates(self, pack_name: str) -> list[dict[str, Any]]:
+        pack_path = self._require_pack(pack_name)
+        pack = load_policy_pack(pack_path, pack_path.parent)
+        return [gate.model_dump(mode="json") for gate in pack.quality_gates]
+
+    def upsert_gate(self, pack_name: str, gate_id: str, gate_data: dict[str, Any]) -> None:
+        with self._lock:
+            pack_path = self._require_pack(pack_name)
+            pack = load_policy_pack(pack_path, pack_path.parent)
+            requested_id = gate_data.get("id")
+            if requested_id is not None and requested_id != gate_id:
+                raise PackError(f"gate id {requested_id!r} does not match requested gate {gate_id!r}")
+            clean = dict(gate_data)
+            clean["id"] = gate_id
+            try:
+                gate = QualityGate.model_validate(clean)
+            except ValueError as exc:
+                raise PackError(str(exc)) from exc
+            idx = next((i for i, existing in enumerate(pack.quality_gates) if existing.id == gate_id), None)
+            if idx is not None:
+                pack.quality_gates[idx] = gate
+            else:
+                pack.quality_gates.append(gate)
+            issues = validate_policy_pack(pack)
+            if issues:
+                raise PackError("; ".join(issues))
+            _write_pack(pack, pack_path)
+
+    def delete_gate(self, pack_name: str, gate_id: str) -> None:
+        with self._lock:
+            pack_path = self._require_pack(pack_name)
+            pack = load_policy_pack(pack_path, pack_path.parent)
+            before = len(pack.quality_gates)
+            pack.quality_gates = [gate for gate in pack.quality_gates if gate.id != gate_id]
+            if len(pack.quality_gates) == before:
+                raise PackNotFoundError(f"gate {gate_id} not found in {pack_name}")
+            issues = validate_policy_pack(pack)
+            if issues:
+                raise PackError("; ".join(issues))
             _write_pack(pack, pack_path)
 
     def validate_pack(self, pack_name: str) -> dict[str, Any]:
@@ -125,7 +174,7 @@ class PackService:
     def _require_pack(self, pack_name: str) -> Path:
         path = self.pack_paths.get(pack_name)
         if path is None:
-            raise PackError(f"pack {pack_name!r} not registered")
+            raise PackNotFoundError(f"pack {pack_name!r} not registered")
         return path
 
     def _resolve_source(self, pack_path: Path, document: str) -> Path:
@@ -168,6 +217,10 @@ def _merge_policy_data(
             clean[key] = policy_data[key]
     if policy_data.get("safe_path") is not None:
         clean["safe_path"] = policy_data["safe_path"]
+    if policy_data.get("tags") is not None:
+        clean["tags"] = policy_data["tags"]
+    elif existing is None:
+        clean.pop("tags", None)
     if "check_config" in policy_data or "check_kind" in policy_data:
         configuration = dict(policy_data["check_config"])
         configuration["kind"] = policy_data["check_kind"]

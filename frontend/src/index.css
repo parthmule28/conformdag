@@ -1,1 +1,151 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ─── Operations-console design tokens ─────────────────────────── */
+
+:root {
+  color-scheme: light;
+
+  /* surfaces — warm paper */
+  --surface: #f6f1e8;
+  --surface-raised: #fdfaf3;
+  --surface-sunken: #eee7d8;
+
+  /* text — ink on paper */
+  --ink: #29241c;
+  --muted: #6f6555;
+
+  /* quiet borders */
+  --border: #ddd2be;
+
+  /* single teal accent */
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --accent-contrast: #ffffff;
+
+  /* semantic statuses */
+  --status-pass: #15803d;
+  --status-fail: #dc2626;
+  --status-error: #c2410c;
+  --status-warning: #a16207;
+  --status-suppressed: #6d28d9;
+  --status-neutral: #57534e;
+
+  --ring: #0f766e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    /* keep these values in sync with the [data-theme="dark"] block below */
+    --surface: #0b111e;
+    --surface-raised: #121a2b;
+    --surface-sunken: #070c15;
+    --ink: #e6ebf2;
+    --muted: #93a1b8;
+    --border: #26324a;
+    --accent: #2dd4bf;
+    --accent-strong: #5eead4;
+    --accent-contrast: #04211c;
+    --status-pass: #4ade80;
+    --status-fail: #f87171;
+    --status-error: #fb923c;
+    --status-warning: #fbbf24;
+    --status-suppressed: #c4b5fd;
+    --status-neutral: #a8a29e;
+    --ring: #2dd4bf;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* keep these values in sync with the media-query block above */
+  --surface: #0b111e;
+  --surface-raised: #121a2b;
+  --surface-sunken: #070c15;
+  --ink: #e6ebf2;
+  --muted: #93a1b8;
+  --border: #26324a;
+  --accent: #2dd4bf;
+  --accent-strong: #5eead4;
+  --accent-contrast: #04211c;
+  --status-pass: #4ade80;
+  --status-fail: #f87171;
+  --status-error: #fb923c;
+  --status-warning: #fbbf24;
+  --status-suppressed: #c4b5fd;
+  --status-neutral: #a8a29e;
+  --ring: #2dd4bf;
+}
+
+/* ─── Tailwind theme mapping ───────────────────────────────────── */
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-sunken: var(--surface-sunken);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-on-accent: var(--accent-contrast);
+  --color-pass: var(--status-pass);
+  --color-fail: var(--status-fail);
+  --color-error: var(--status-error);
+  --color-warning: var(--status-warning);
+  --color-suppressed: var(--status-suppressed);
+  --color-neutral: var(--status-neutral);
+  --color-ring: var(--ring);
+}
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* compact operations-console type scale */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.4;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.45;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.5;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.4;
+  --text-xl: 1.125rem;
+  --text-xl--line-height: 1.35;
+  --text-2xl: 1.375rem;
+  --text-2xl--line-height: 1.25;
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+
+  --shadow-card: 0 1px 2px rgb(20 16 10 / 0.08);
+  --shadow-overlay: 0 12px 32px rgb(10 12 18 / 0.28);
+}
+
+@layer base {
+  body {
+    background-color: var(--surface);
+    color: var(--ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Guided demo tour highlight for the current step's target. */
+.demo-tour-target {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
