@@ -54,7 +54,7 @@
 - Consumes `initialize_session_factory()`, `create_session_factory()`, `run_worker_once()`, `run_worker()`, `request_shutdown()`, and `create_app()` from the existing platform; no raw report/finding insertion.
 - `scripts/e2e_platform.py` consumes `build_demo_workspace`, `seed_demo_scenario`, and `start_demo_worker` rather than owning duplicated DAG, pack, or row construction.
 
-- [ ] **Step 1: Write failing tests for a valid scenario and real scan outcomes**
+- [x] **Step 1: Write failing tests for a valid scenario and real scan outcomes**
 
   Add imports for `build_demo_workspace` and `seed_demo_scenario` in `tests/test_platform.py`. Add a test that builds under `tmp_path`, calls the builder, and asserts the workspace, standards file, and pack exist. Add a seed test that invokes the scenario function, then loads `RepositoryRow`, `ScanRow`, and `FindingRow` and proves:
 
@@ -76,13 +76,13 @@
 
   Add a second test that asserts the active and expired `SuppressionRow` records are real seed records, with timestamps respectively after and before `utcnow()`, and that the active record matches a finding from the current report rather than a synthetic fingerprint.
 
-- [ ] **Step 2: Run the new platform tests and verify they fail**
+- [x] **Step 2: Run the new platform tests and verify they fail**
 
   Run: `mise exec -- uv run pytest tests/test_platform.py -k 'demo_seed' -x --tb=short`
 
   Expected: FAIL because `conformdag.platform.demo` does not exist.
 
-- [ ] **Step 3: Implement the scenario module**
+- [x] **Step 3: Implement the scenario module**
 
   Create `src/conformdag/platform/demo.py`. Move the standards text, pack generation, workspace construction, terminal-status wait, and worker-thread setup out of `scripts/e2e_platform.py`. Keep paths rooted beneath the caller-provided `root`.
 
@@ -92,7 +92,7 @@
 
   Replace `scripts/e2e_platform.py` private constants and seed functions with calls into the module. It remains responsible only for argument parsing, `TemporaryDirectory`, `PlatformSettings`, Uvicorn configuration, and joining the shared worker at shutdown.
 
-- [ ] **Step 4: Run focused tests and static checks**
+- [x] **Step 4: Run focused tests and static checks**
 
   Run:
 
@@ -103,7 +103,7 @@
 
   Expected: PASS with 0 Pyright errors.
 
-- [ ] **Step 5: Commit the reusable scenario**
+- [x] **Step 5: Commit the reusable scenario**
 
   ```bash
   git add src/conformdag/platform/demo.py scripts/e2e_platform.py tests/test_platform.py
@@ -122,7 +122,7 @@
 - It consumes `DemoWorkspace`, scenario seeding, worker startup, `PlatformSettings`, and `create_app()`.
 - It exposes `ensure_port_available(host: str, port: int) -> None` and `demo_url(host: str, port: int) -> str` for unit testing.
 
-- [ ] **Step 1: Write failing launcher tests**
+- [x] **Step 1: Write failing launcher tests**
 
   Add tests that hold a loopback socket open and assert `ensure_port_available` raises `RuntimeError` containing the requested host and port. Add pure URL tests:
 
@@ -133,13 +133,13 @@
 
   Monkeypatch the launcher’s `webbrowser.open` and server factory in a focused test; assert that `--no-open` never invokes the browser and the finally path invokes `request_shutdown`, joins the worker, and exits the temporary-directory context.
 
-- [ ] **Step 2: Run the launcher tests and verify they fail**
+- [x] **Step 2: Run the launcher tests and verify they fail**
 
   Run: `mise exec -- uv run pytest tests/test_platform.py -k 'demo_url or demo_port or demo_launcher' -x --tb=short`
 
   Expected: FAIL because `scripts.demo` and its helpers do not exist.
 
-- [ ] **Step 3: Implement the launcher and Mise task**
+- [x] **Step 3: Implement the launcher and Mise task**
 
   Create `scripts/demo.py` with `argparse`; keep it import-safe by importing Uvicorn and platform dependencies within `main()`. Bind-test the requested loopback endpoint before seeding to report an occupied port early. Create the temporary root, build/seed the scenario, start the worker, construct `PlatformSettings(dsn=workspace.dsn, admin_token=args.token, workspace=workspace.workspace_path)`, and serve the real app with `uvicorn.Server`.
 
@@ -153,7 +153,7 @@
   run = "uv run python scripts/demo.py"
   ```
 
-- [ ] **Step 4: Run launcher tests and manually smoke the command**
+- [x] **Step 4: Run launcher tests and manually smoke the command**
 
   Run:
 
@@ -164,7 +164,7 @@
 
   Expected: tests PASS; smoke output prints `http://127.0.0.1:8765/?demo=1`, starts after the seed completes, and cleans up when `timeout` interrupts it.
 
-- [ ] **Step 5: Commit the launcher**
+- [x] **Step 5: Commit the launcher**
 
   ```bash
   git add scripts/demo.py mise.toml tests/test_platform.py
@@ -197,7 +197,7 @@
 - `DemoTour` uses React Router `useLocation`/`useNavigate`, renders only for enabled URLs, and exposes buttons named `Tour next`, `Tour back`, `Skip tour`, and `Restart tour`.
 - Stable `data-tour` markers identify `overview-signal`, `repository-link`, `scan-link`, `gate-result`, `finding-details`, `finding-remediation`, `policy-pack`, `policy-gate`, `suppression-active`, `suppression-expired`, and `scan-export`.
 
-- [ ] **Step 1: Write failing unit tests for activation and controller behavior**
+- [x] **Step 1: Write failing unit tests for activation and controller behavior**
 
   Create `frontend/src/demo/DemoTour.test.tsx`. Test activation with `?demo=1`, rejection for empty/search values other than exactly `1`, first-step rendering, Next following a fixture anchor with `data-tour="repository-link"`, Back returning to the prior step, Skip hiding the overlay, Restart restoring step zero, and a missing target rendering an accessible “Tour paused” state with only Restart/Skip actions.
 
@@ -211,13 +211,13 @@
   );
   ```
 
-- [ ] **Step 2: Run the focused frontend tests and verify they fail**
+- [x] **Step 2: Run the focused frontend tests and verify they fail**
 
   Run: `cd frontend && npm test -- DemoTour.test.tsx`
 
   Expected: FAIL because the demo-tour module does not exist.
 
-- [ ] **Step 3: Implement pure tour state and accessible overlay**
+- [x] **Step 3: Implement pure tour state and accessible overlay**
 
   In `tour.ts`, implement the search parser, a typed ordered step list, query-param-preserving `toDemoLocation(pathname: string, search: string)`, and pure step-index reducer. Each step declares an explicit advance action: retain route, follow a marked anchor `href`, or invoke a marked button. Use `localStorage` only for optional dismissed/restart state; protect reads with `try/catch` and never require storage availability.
 
@@ -225,7 +225,7 @@
 
   Mount `<DemoTour />` inside `BrowserRouter` in `App.tsx`; it returns `null` unless the exact query parameter enables it. Add only `data-tour` attributes to existing components: overview metric/card, existing repository and scan links, gate section, finding Details button/remediation section, selected pack button, gate panel, active/expired seeded suppression rows, and export anchor. Preserve all existing labels, click handlers, routes, and non-demo behavior.
 
-- [ ] **Step 4: Run frontend unit and type checks**
+- [x] **Step 4: Run frontend unit and type checks**
 
   Run:
 
@@ -236,7 +236,7 @@
 
   Expected: PASS; TypeScript remains strict through the build.
 
-- [ ] **Step 5: Commit the guided-tour implementation**
+- [x] **Step 5: Commit the guided-tour implementation**
 
   ```bash
   git add frontend/src/App.tsx frontend/src/demo frontend/src/pages frontend/src/components
@@ -256,21 +256,21 @@
 - The backend web server continues to start `scripts/e2e_platform.py`, now backed by `platform.demo`.
 - The journey never relies on a visible seeded repository name, policy title, scan ID, or suppression reason to locate a target.
 
-- [ ] **Step 1: Write the failing end-to-end tour test**
+- [x] **Step 1: Write the failing end-to-end tour test**
 
   Add `frontend/e2e/demo-tour.spec.ts`. Resolve the repository/current scan/finding from real `/api/v1` responses, then open `/?demo=1`. Click `Tour next` through the overview, repository, scan/gate, finding/remediation, policy/gate, suppression, and export stages. At each stage assert the expected `data-tour` target is visible and the URL keeps `demo=1`. Assert the finding modal contains a remediation section, the gate has a recorded failed result, active and expired suppression markers are distinct, and the JSON export anchor has a scan export URL. Finally assert Skip hides the dialog and Restart returns it to the overview step.
 
-- [ ] **Step 2: Run the new Playwright test and verify it fails**
+- [x] **Step 2: Run the new Playwright test and verify it fails**
 
   Run: `cd frontend && npm run e2e -- demo-tour.spec.ts`
 
   Expected: FAIL because the tour/markers are absent.
 
-- [ ] **Step 3: Make e2e startup consume the shared scenario and stabilize the journey**
+- [x] **Step 3: Make e2e startup consume the shared scenario and stabilize the journey**
 
   Update the Playwright config comments and `scripts/e2e_platform.py` only as needed to reflect the shared module; retain fixed localhost ports and the healthcheck. Extend `fixtures.ts` with typed helpers that resolve the current completed scan, matching active/expired suppressions, and a finding by API data—not human labels. Do not add frontend API routes, network mocks, sleeps, or selectors based on generated display text.
 
-- [ ] **Step 4: Run the focused and existing browser suites**
+- [x] **Step 4: Run the focused and existing browser suites**
 
   Run:
 
@@ -282,7 +282,7 @@
 
   Expected: PASS in Chromium; existing journeys remain green against the refactored seed process.
 
-- [ ] **Step 5: Commit the golden journey**
+- [x] **Step 5: Commit the golden journey**
 
   ```bash
   git add frontend/e2e frontend/playwright.config.ts scripts/e2e_platform.py
@@ -301,17 +301,17 @@
 - User guide documents the launcher’s `--port`, `--open/--no-open`, temporary-state cleanup, loopback-only behavior, and distinction from Docker Compose.
 - Roadmap marks P3 complete only after the command, tour, documentation, and tests land.
 
-- [ ] **Step 1: Write failing documentation assertions/checklist**
+- [x] **Step 1: Write failing documentation assertions/checklist**
 
   Add a short test in `tests/test_cli.py` or a focused `tests/test_smoke.py` text-contract test that reads `mise.toml`, `README.md`, and `docs/user-guide.md` and asserts they contain `mise run demo`, `--no-open`, and the Docker Compose distinction. This protects the documented command without testing prose layout.
 
-- [ ] **Step 2: Run the documentation test and verify it fails**
+- [x] **Step 2: Run the documentation test and verify it fails**
 
   Run: `mise exec -- uv run pytest tests/test_smoke.py -k demo -x --tb=short`
 
   Expected: FAIL because demo documentation text is absent.
 
-- [ ] **Step 3: Update docs and roadmap**
+- [x] **Step 3: Update docs and roadmap**
 
   Move a concise “Run the demo” section immediately after the README product introduction. Show:
 
@@ -324,7 +324,7 @@
 
   Add a user-guide “Local product demo” section with `mise run demo -- --no-open --port 8765`, temporary SQLite/workspace lifecycle, Ctrl-C cleanup, no Docker/credentials/network requirement, and the statement that it is not a production deployment path. Mark P3 shipped in `docs/roadmap.md` only after these changes are verified.
 
-- [ ] **Step 4: Run all required verification**
+- [x] **Step 4: Run all required verification**
 
   Run:
 
@@ -337,7 +337,7 @@
 
   Expected: all commands PASS; coverage is at least 90%; the full browser suite passes; and there is no whitespace error.
 
-- [ ] **Step 5: Commit documentation and P3 completion evidence**
+- [x] **Step 5: Commit documentation and P3 completion evidence**
 
   ```bash
   git add README.md docs/user-guide.md docs/roadmap.md tests/test_smoke.py
