@@ -25,9 +25,11 @@ adapters isolate side effects at explicit boundaries.
 A policy contract contains a stable ID, version, lifecycle state, owner, provenance,
 scope, invariant, remediation, enforcement type, exception rules, and typed
 configuration. Deterministic evaluator classes implement a common protocol and are
-registered by policy ID. Semantic policy-specific instructions are centralized beside
-the semantic evaluator. This keeps policy contracts readable while making unsupported
-or duplicate implementations detectable by validation and tests.
+registered by check kind in `CHECK_EVALUATORS`. Legacy policy-ID aliases are kept
+separately in `LEGACY_POLICY_EVALUATORS`; they do not define the primary registry key.
+Semantic policy-specific instructions are centralized beside the semantic evaluator.
+This keeps policy contracts readable while making unsupported or duplicate
+implementations detectable by validation and tests.
 
 Policy authors define the organizational contract; ConformDAG enforces its schema and
 execution rules. The beta CLI does not implement multi-user authorization. Role fields

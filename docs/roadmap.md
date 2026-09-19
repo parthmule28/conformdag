@@ -78,7 +78,7 @@ P4/P5/P6/P7/P8 are independent of the UI work and interleave once P1 is stable.
 
 ### Shipped so far
 
-- `0.1.0b1` soak release (PyPI + GHCR images + GitHub Release)
+- `1.0.0b1` soak release (PyPI + GHCR images + GitHub Release)
 - v1 platform: single scan engine, fix engine with verify-by-rescan, agent harness
   (triage → codemod → LLM verifier → human-merged PR), platform server
   (FastAPI + Postgres + worker + Alembic), dashboard SPA, composite GitHub Action,

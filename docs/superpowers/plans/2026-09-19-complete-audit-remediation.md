@@ -101,11 +101,11 @@
 
 ### Phase 7 — Documentation and source of truth
 
-- [ ] MIN-28 stale release references
-- [ ] MIN-29 benchmark count
-- [ ] MIN-30 evaluator registration documentation
-- [ ] MIN-31 dependency inventory and automated consistency check
-- [ ] Documentation/inventory/link checks
+- [x] MIN-28 stale release references
+- [x] MIN-29 benchmark count
+- [x] MIN-30 evaluator registration documentation
+- [x] MIN-31 dependency inventory and automated consistency check
+- [x] Documentation/inventory/link checks — documentation regressions 6 passed; `mise run inventory`, Ruff, Pyright, diff, and relative-link checks clean
 
 ### Phase 8 — Cross-cutting verification
 

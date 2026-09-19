@@ -57,11 +57,16 @@ and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image
   push; a policy added before the tag exists is recorded as branch type and
   can be fixed via the API with an explicit `type=tag` on create.
 
-The public beta is released only from a reviewed `v0.1.0-beta.1` tag on `main`. The
-release workflow first re-runs quality, benchmark, schema, dependency, secret, privacy,
-and image-vulnerability gates. Only then does it publish the GHCR runtime image;
-PyPI trusted publishing runs last. Python checksums are kept outside the distribution
-directory so they cannot be uploaded to PyPI as packages.
+## Historical 0.1.0b1 release evidence
+
+The following records the historical public beta, released from a reviewed
+`v0.1.0-beta.1` tag on `main`. It is retained as provenance for that release and is
+not the current release procedure. The current `1.0.0b1` checklist above is the
+normative release source of truth. The historical workflow first re-ran quality,
+benchmark, schema, dependency, secret, privacy, and image-vulnerability gates. Only
+then did it publish the GHCR runtime image; PyPI trusted publishing ran last. Python
+checksums were kept outside the distribution directory so they could not be uploaded
+to PyPI as packages.
 
 ## Repository and identity
 
