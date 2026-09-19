@@ -390,6 +390,18 @@ def _load_demo_launcher_module() -> ModuleType:
     return module
 
 
+def _load_e2e_launcher_module() -> ModuleType:
+    """Load scripts/e2e_platform.py by path so launcher helpers are exercised as shipped."""
+    launcher_path = Path(__file__).resolve().parents[1] / "scripts" / "e2e_platform.py"
+    spec = importlib.util.spec_from_file_location("conformdag_e2e_launcher", launcher_path)
+    loader = spec.loader if spec is not None else None
+    if spec is None or loader is None:
+        raise ImportError(f"e2e launcher not found at {launcher_path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
 def _free_loopback_port() -> int:
     """Reserve an ephemeral loopback port for a launcher test, then release it."""
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -515,6 +527,46 @@ def test_demo_launcher_survives_sigterm_during_seeding(monkeypatch: pytest.Monke
     assert seed_window_entered == [True]
     assert exit_code == 0
     assert set(Path(tempfile.gettempdir()).glob("conformdag-demo-*")) == before
+    assert not any(thread.name == "conformdag-demo-worker" for thread in threading.enumerate())
+
+
+def test_e2e_launcher_signal_bridge_behaviour_by_phase() -> None:
+    e2e = _load_e2e_launcher_module()
+
+    class _FakeServer:
+        def __init__(self) -> None:
+            self.should_exit = False
+
+    server_holder: list[_FakeServer | None] = [None]
+    bridge = e2e._stop_bridge(server_holder)
+
+    with pytest.raises(KeyboardInterrupt):
+        bridge(signal.SIGTERM, None)
+
+    server = _FakeServer()
+    server_holder[0] = server
+    bridge(signal.SIGINT, None)
+    assert server.should_exit is True
+
+
+def test_e2e_launcher_survives_sigterm_during_seeding(monkeypatch: pytest.MonkeyPatch) -> None:
+    e2e = _load_e2e_launcher_module()
+    real_workspace_builder = e2e.build_demo_workspace
+    seed_window_entered: list[bool] = []
+
+    def _sigterm_during_seed(root: Path) -> DemoWorkspace:
+        seed_window_entered.append(True)
+        os.kill(os.getpid(), signal.SIGTERM)
+        return real_workspace_builder(root)
+
+    monkeypatch.setattr(e2e, "build_demo_workspace", _sigterm_during_seed)
+
+    before = set(Path(tempfile.gettempdir()).glob("conformdag-e2e-*"))
+    exit_code = e2e.main(["--port", str(_free_loopback_port())])
+
+    assert seed_window_entered == [True]
+    assert exit_code == 0
+    assert set(Path(tempfile.gettempdir()).glob("conformdag-e2e-*")) == before
     assert not any(thread.name == "conformdag-demo-worker" for thread in threading.enumerate())
 
 
