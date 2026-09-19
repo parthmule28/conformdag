@@ -214,10 +214,10 @@ function scaledHeight(value: number, max: number): number {
 }
 
 function tickValues(max: number): number[] {
-  // True midpoint of the scale, rounded to a tenth only to strip float noise
-  // (5 → 2.5, 4 → 2); 0 and max stay as the outer ticks.
-  const midpoint = Math.round((max / 2) * 10) / 10;
-  return [max, midpoint, 0];
+  // Finding counts are integers: prefer a readable whole-number midpoint
+  // (5 → 2, 4 → 2) and remove duplicates for very small scales.
+  const midpoint = Math.floor(max / 2);
+  return [...new Set([max, midpoint, 0])];
 }
 
 function formatTrendDate(value: string): string {

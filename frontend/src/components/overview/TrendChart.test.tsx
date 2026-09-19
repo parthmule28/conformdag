@@ -73,12 +73,12 @@ describe("TrendChart", () => {
     });
   });
 
-  it("labels the y-axis with the true midpoint, keeping 0 and max endpoints", () => {
+  it("labels the y-axis with a readable integer midpoint and endpoints", () => {
     const { container } = render(<TrendChart points={PEAK_OF_FIVE} />);
 
     const tickLabels = Array.from(container.querySelectorAll("svg text[x='0']")).map(
       (node) => node.textContent,
     );
-    expect(tickLabels).toEqual(["5", "2.5", "0"]);
+    expect(tickLabels).toEqual(["5", "2", "0"]);
   });
 });
