@@ -30,6 +30,14 @@ class ParseIssueCode(StrEnum):
     INVALID_SOURCE = "INVALID_SOURCE"
 
 
+class ValueState(StrEnum):
+    """Resolution states for configuration values found in source."""
+
+    ABSENT = "ABSENT"
+    RESOLVED = "RESOLVED"
+    UNRESOLVED = "UNRESOLVED"
+
+
 NON_FATAL_DISCOVERY_ISSUES = frozenset(
     {
         ParseIssueCode.SYMLINK_EXCLUDED,
@@ -56,6 +64,14 @@ class ParseIssue:
     message: str
     line: int | None = None
     code: ParseIssueCode = ParseIssueCode.INVALID_SOURCE
+
+
+@dataclass(frozen=True)
+class StaticValue:
+    """A statically resolved value, an explicit null, or an unresolved expression."""
+
+    state: ValueState
+    value: object | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +102,7 @@ class DagRecord:
     tags: tuple[str, ...]
     variable_name: str | None = None
     defaults: dict[str, object] = field(default_factory=_empty_defaults)
+    unresolved_defaults: tuple[str, ...] = ()
     start_date: tuple[int, int, int] | None = None
     start_date_tz: bool | None = None
     catchup: bool | None = None
@@ -432,8 +449,8 @@ class _ModelVisitor(ast.NodeVisitor):
                 for keyword in decorator.keywords:
                     if not keyword.arg:
                         continue
-                    value = _literal_value(keyword.value)
-                    if value is None:
+                    value = self._resolve_value(keyword.value)
+                    if value is _UNRESOLVED_VALUE:
                         unresolved.append(keyword.arg)
                     else:
                         values[keyword.arg] = value
@@ -483,6 +500,7 @@ class _ModelVisitor(ast.NodeVisitor):
         owner_source: str | None = None
         tags: tuple[str, ...] = ()
         defaults: dict[str, object] = {}
+        unresolved_defaults: list[str] = []
         start_date: tuple[int, int, int] | None = None
         start_date_tz: bool | None = None
         catchup: bool | None = None
@@ -497,7 +515,8 @@ class _ModelVisitor(ast.NodeVisitor):
                 owner = keyword.value.value
                 owner_source = "DAG.owner"
             if keyword.arg == "default_args":
-                defaults = self._resolve_mapping(keyword.value)
+                defaults, unresolved = self._resolve_mapping(keyword.value)
+                unresolved_defaults.extend(unresolved)
                 default_owner = defaults.get("owner")
                 if owner is None and isinstance(default_owner, str):
                     owner = default_owner
@@ -524,6 +543,7 @@ class _ModelVisitor(ast.NodeVisitor):
             owner_source,
             tags,
             defaults=defaults,
+            unresolved_defaults=tuple(unresolved_defaults),
             start_date=start_date,
             start_date_tz=start_date_tz,
             catchup=catchup,
@@ -546,7 +566,7 @@ class _ModelVisitor(ast.NodeVisitor):
                     dag_line = bound_line
                     continue
             value = self._resolve_value(keyword.value)
-            if value is None:
+            if value is _UNRESOLVED_VALUE:
                 unresolved.append(keyword.arg)
             else:
                 values[keyword.arg] = value
@@ -577,22 +597,69 @@ class _ModelVisitor(ast.NodeVisitor):
         return None
 
     def _resolve_value(self, node: ast.AST) -> object:
-        value = _literal_value(node)
-        if value is not None:
-            return value
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float, bool, type(None))):
+            return node.value
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            resolved_items: list[object] = []
+            for item in node.elts:
+                value = self._resolve_value(item)
+                if value is _UNRESOLVED_VALUE:
+                    return _UNRESOLVED_VALUE
+                resolved_items.append(value)
+            return resolved_items
+        if isinstance(node, ast.Dict):
+            values: dict[str, object] = {}
+            for key, value_node in zip(node.keys, node.values, strict=True):
+                if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                    return _UNRESOLVED_VALUE
+                value = self._resolve_value(value_node)
+                if value is _UNRESOLVED_VALUE:
+                    return _UNRESOLVED_VALUE
+                values[key.value] = value
+            return values
+        if isinstance(node, ast.Call) and _qualified_name(node.func) == "timedelta":
+            units: dict[str, object] = {}
+            for keyword in node.keywords:
+                if not keyword.arg:
+                    return _UNRESOLVED_VALUE
+                value = self._resolve_value(keyword.value)
+                if value is _UNRESOLVED_VALUE:
+                    return _UNRESOLVED_VALUE
+                units[keyword.arg] = value
+            total = 0.0
+            for unit, multiplier in (
+                ("weeks", 604800),
+                ("days", 86400),
+                ("hours", 3600),
+                ("minutes", 60),
+                ("seconds", 1),
+            ):
+                value = units.get(unit, 0)
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    return _UNRESOLVED_VALUE
+                total += float(value) * multiplier
+            return total
         if isinstance(node, ast.Name):
-            return self.model.assignments.get(node.id)
-        return None
+            return self.model.assignments.get(node.id, _UNRESOLVED_VALUE)
+        return _UNRESOLVED_VALUE
 
-    def _resolve_mapping(self, node: ast.AST) -> dict[str, object]:
-        value = _literal_value(node)
+    def _resolve_mapping(self, node: ast.AST) -> tuple[dict[str, object], tuple[str, ...]]:
+        value = self._resolve_value(node)
         if isinstance(value, dict):
-            return cast(dict[str, object], value)
-        if isinstance(node, ast.Name):
-            assigned = self.model.assignments.get(node.id)
-            if isinstance(assigned, dict):
-                return cast(dict[str, object], assigned)
-        return {}
+            return cast(dict[str, object], value), ()
+        if isinstance(node, ast.Dict):
+            resolved: dict[str, object] = {}
+            unresolved: list[str] = []
+            for key, value_node in zip(node.keys, node.values, strict=True):
+                if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                    continue
+                value = self._resolve_value(value_node)
+                if value is _UNRESOLVED_VALUE:
+                    unresolved.append(key.value)
+                else:
+                    resolved[key.value] = value
+            return resolved, tuple(unresolved)
+        return {}, ()
 
 
 def _literal_value(node: ast.AST) -> object:
@@ -622,6 +689,9 @@ def _literal_value(node: ast.AST) -> object:
             total += float(value) * multiplier
         return total
     return None
+
+
+_UNRESOLVED_VALUE = object()
 
 
 def datetime_parts(node: ast.AST) -> tuple[tuple[int, int, int] | None, bool | None]:

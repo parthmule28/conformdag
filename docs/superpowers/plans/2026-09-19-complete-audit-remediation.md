@@ -44,14 +44,14 @@
 
 ### Phase 2 — Policy, evaluator, and semantic correctness
 
-- [ ] IMP-2 unresolved timeout cannot PASS
-- [ ] IMP-3 check/configuration compatibility validation
-- [ ] MIN-4 one semantic evaluation path
-- [ ] MIN-6 structured provenance read errors
-- [ ] MIN-7 provider-compatible structured output schemas
-- [ ] MIN-8 atomic/nonfatal semantic cache persistence
-- [ ] MIN-9 prose-independent semantic fingerprints
-- [ ] Focused policy/evaluator/semantic/cache/fingerprint tests and affected suite
+- [x] IMP-2 unresolved timeout cannot PASS
+- [x] IMP-3 check/configuration compatibility validation
+- [x] MIN-4 one semantic evaluation path
+- [x] MIN-6 structured provenance read errors
+- [x] MIN-7 provider-compatible structured output schemas
+- [x] MIN-8 atomic/nonfatal semantic cache persistence
+- [x] MIN-9 prose-independent semantic fingerprints
+- [x] Focused policy/evaluator/semantic/cache/fingerprint tests and affected suite
 
 ### Phase 3 — Agent, pack-pull, CLI, runtime isolation
 

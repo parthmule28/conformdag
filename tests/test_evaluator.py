@@ -254,6 +254,29 @@ def test_structural_fingerprint_does_not_depend_on_line_number() -> None:
     assert first == second
 
 
+def test_timeout_distinguishes_absent_resolved_none_and_unresolved_values() -> None:
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
+    policy = next(item for item in pack.policies if item.id == "AIR-DET-003")
+    model = _model(
+        "from datetime import timedelta\n"
+        "from airflow import DAG\n"
+        "from airflow.providers.standard.operators.empty import EmptyOperator\n"
+        "with DAG(dag_id='timeouts') as dag:\n"
+        "    EmptyOperator(task_id='absent')\n"
+        "    EmptyOperator(task_id='none', execution_timeout=None)\n"
+        "    EmptyOperator(task_id='dynamic', execution_timeout=timedelta(seconds=TIMEOUT_SECONDS))\n"
+        "    EmptyOperator(task_id='resolved', execution_timeout=timedelta(seconds=300))\n"
+    )
+
+    findings = CHECK_EVALUATORS["effective-timeout"].evaluate(EvaluationContext(policy, [model]))
+    by_task = {(finding.explanation or "").split(" ", 2)[1]: finding.status for finding in findings}
+
+    assert by_task["absent"] is FindingStatus.PASS
+    assert by_task["none"] is FindingStatus.FAIL
+    assert by_task["dynamic"] is FindingStatus.ERROR
+    assert by_task["resolved"] is FindingStatus.PASS
+
+
 def test_deterministic_policy_suite_evaluates_tags_defaults_io_and_operators() -> None:
     pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
     model = _model(

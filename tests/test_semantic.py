@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +23,7 @@ from conformdag.semantic import (
     build_context,
     redact_text,
     semantic_cache_key,
+    strict_semantic_response_schema,
 )
 
 
@@ -212,6 +214,18 @@ def test_native_structured_output_is_opt_in_and_schema_constrained() -> None:
     assert payload["response_format"]["json_schema"]["strict"] is True
 
 
+def test_strict_semantic_schema_requires_all_properties_and_closes_objects() -> None:
+    schema = strict_semantic_response_schema()
+
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["additionalProperties"] is False
+    assert "anyOf" in schema["properties"]["remediation"]
+    assert schema["$defs"]["SemanticAuditEvidence"]["additionalProperties"] is False
+    assert set(schema["$defs"]["SemanticAuditEvidence"]["required"]) == set(
+        schema["$defs"]["SemanticAuditEvidence"]["properties"]
+    )
+
+
 def test_served_model_mismatch_is_rejected() -> None:
     provider = OpenAICompatibleProvider("https://model.example/v1", "test-model", "key")
     response = httpx.Response(
@@ -261,6 +275,38 @@ def test_cache_hit_is_recorded_without_raw_model_io(tmp_path: Path) -> None:
     stored = (tmp_path / "semantic-cache.json").read_text(encoding="utf-8")
     assert request.evidence not in stored
     assert cached.pricing_provenance is None
+
+
+def test_semantic_cache_write_failure_is_a_nonfatal_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache = SemanticCache(tmp_path / "semantic-cache.json")
+    response = SemanticResponse(status="PASS", evidence="bounded", explanation="safe", confidence=Confidence.HIGH)
+
+    def fail_replace(_self: Path, _target: Path) -> Path:
+        raise OSError("read-only cache")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    assert cache.put("key", response) is False
+
+
+def test_semantic_cache_concurrent_writes_merge_without_losing_entries(tmp_path: Path) -> None:
+    cache = SemanticCache(tmp_path / "semantic-cache.json")
+
+    def write(index: int) -> bool:
+        return cache.put(
+            f"key-{index}",
+            SemanticResponse(
+                status="PASS",
+                evidence=f"bounded-{index}",
+                explanation="safe",
+                confidence=Confidence.HIGH,
+            ),
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        assert all(executor.map(write, range(8)))
+
+    assert all(cache.get(f"key-{index}") is not None for index in range(8))
 
 
 def test_benchmark_semantic_runner_reuses_normalized_cache_and_checks_model(tmp_path: Path) -> None:

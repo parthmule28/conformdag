@@ -135,6 +135,32 @@ def test_semantic_finding_normalizes_audit_citations_and_marks_unknown_locations
     assert finding.audit_evidence[1].location == "missing.py"
 
 
+def test_semantic_fingerprint_ignores_provider_prose() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    first = semantic_finding(
+        policy,
+        SemanticResponse(
+            status="FAIL",
+            evidence="the first explanation of the same decision",
+            explanation="provider prose one",
+            confidence=Confidence.HIGH,
+        ),
+        _context(),
+    )
+    second = semantic_finding(
+        policy,
+        SemanticResponse(
+            status="FAIL",
+            evidence="a completely different wording for the same decision",
+            explanation="provider prose two",
+            confidence=Confidence.LOW,
+        ),
+        _context(),
+    )
+
+    assert first.fingerprint == second.fingerprint
+
+
 def test_normalizes_abstention_as_advisory_finding() -> None:
     policy = next(item for item in _policies() if item.id == "AIR-SEM-004")
     response = SemanticResponse(

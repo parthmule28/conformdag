@@ -20,7 +20,6 @@ from conformdag.config import load_project_config
 from conformdag.evaluator import EvaluationPhaseError, evaluate_deterministic, ruff_rules_for_policies
 from conformdag.models import (
     AirflowProfile,
-    EnforcementType,
     Finding,
     FindingStatus,
     PolicyPack,
@@ -36,7 +35,7 @@ from conformdag.policy import load_suppressions, resolve_configured_policy_pack,
 from conformdag.reporting import apply_suppressions, normalize_report
 from conformdag.ruff_adapter import ruff_binary, run_ruff
 from conformdag.semantic import SemanticContext, SemanticProviderError, build_context
-from conformdag.semantic_evaluator import build_semantic_request, semantic_finding
+from conformdag.semantic_evaluator import run_semantic_evaluation, select_semantic_policies
 
 
 class SemanticProvider(Protocol):
@@ -156,12 +155,7 @@ def scan_repository(
     if semantic_provider is not None:
         if semantic_model is None:
             raise ValueError("semantic_model is required when a semantic provider is supplied")
-        semantic_policies = [
-            policy
-            for policy in sorted(pack.policies, key=lambda item: item.id)
-            if policy.status.value == "ACTIVE"
-            and policy.enforcement.type in (EnforcementType.SEMANTIC, EnforcementType.HYBRID)
-        ]
+        semantic_policies = select_semantic_policies(pack.policies)
         policy_text = "\n\n".join(
             f"{policy.id}: {policy.invariant}\nRemediation: {policy.safe_path or 'none'}"
             for policy in semantic_policies
@@ -179,24 +173,23 @@ def scan_repository(
                     phase="semantic-context",
                 )
             )
-        requests = [
-            build_semantic_request(policy, context).model_copy(
-                update={
-                    "temperature": config.semantic.temperature,
-                    "max_output_tokens": config.semantic.max_output_tokens,
-                }
-            )
-            for policy in semantic_policies
-        ]
         try:
-            responses = semantic_provider.evaluate_many(
-                requests,
+            evaluation = run_semantic_evaluation(
+                semantic_policies,
+                context,
+                semantic_provider,
                 max_concurrency=config.semantic.max_concurrency,
+                temperature=config.semantic.temperature,
+                max_output_tokens=config.semantic.max_output_tokens,
             )
-            if len(responses) != len(requests):
-                raise SemanticProviderError("provider returned an unexpected response count")
-            for policy, request, response in zip(semantic_policies, requests, responses, strict=True):
-                findings.append(semantic_finding(policy, response, context))
+            for policy, request, response, finding in zip(
+                evaluation.policies,
+                evaluation.requests,
+                evaluation.responses,
+                evaluation.findings,
+                strict=True,
+            ):
+                findings.append(finding)
                 prompt_hash = hashlib.sha256(request.system_prompt.encode("utf-8")).hexdigest()
                 prompt_hashes[policy.id] = prompt_hash
                 semantic_runs.append(

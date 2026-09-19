@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -82,6 +83,26 @@ class SemanticProvider(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class SemanticEvaluationResult:
+    """Canonical semantic execution result, including provider provenance inputs."""
+
+    policies: tuple[Policy, ...]
+    requests: tuple[SemanticRequest, ...]
+    responses: tuple[SemanticResponse, ...]
+    findings: tuple[Finding, ...]
+
+
+def select_semantic_policies(policies: Sequence[Policy]) -> list[Policy]:
+    """Select active semantic and hybrid policies in deterministic order."""
+    return [
+        policy
+        for policy in sorted(policies, key=lambda item: item.id)
+        if policy.status.value == "ACTIVE"
+        and policy.enforcement.type in (EnforcementType.SEMANTIC, EnforcementType.HYBRID)
+    ]
+
+
 def build_semantic_request(policy: Policy, context: SemanticContext) -> SemanticRequest:
     """Build a strict request with source content delimited as untrusted evidence."""
     redacted_evidence = redact_text(context.text)
@@ -116,7 +137,32 @@ def semantic_finding(
     evidence = redact_evidence(
         "\n".join(f"[{item.criterion}] {item.excerpt}" for item in audit_evidence) or response.evidence
     )
-    fingerprint_value = f"{policy.id}:{policy.version}:{context.context_hash}:{status.value}:{evidence}"
+    fingerprint_payload = {
+        "policy_id": policy.id,
+        "policy_version": policy.version,
+        "finding_kind": "semantic",
+        "status": status.value,
+        "source_path": source_path.as_posix() if source_path is not None else None,
+        "context_hash": context.context_hash,
+        "citations": sorted(
+            [
+                {
+                    "criterion": item.criterion,
+                    "source_type": item.source_type,
+                    "location": item.location,
+                    "unresolved": item.unresolved,
+                }
+                for item in audit_evidence
+            ],
+            key=lambda item: (
+                str(item["criterion"]),
+                str(item["source_type"]),
+                str(item["location"]),
+                bool(item["unresolved"]),
+            ),
+        ),
+    }
+    fingerprint_value = json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(fingerprint_value.encode("utf-8")).hexdigest()
     return Finding(
         policy_id=policy.id,
@@ -159,29 +205,39 @@ def _normalize_audit_evidence(response: SemanticResponse, context: SemanticConte
     return normalized
 
 
+def run_semantic_evaluation(
+    policies: Sequence[Policy],
+    context: SemanticContext,
+    provider: SemanticProvider,
+    source_path: Path | None = None,
+    max_concurrency: int = 4,
+    temperature: float = 0.0,
+    max_output_tokens: int = 4000,
+) -> SemanticEvaluationResult:
+    """Run the one canonical semantic policy pipeline and retain its metadata."""
+    selected = tuple(select_semantic_policies(policies))
+    requests = tuple(
+        build_semantic_request(policy, context).model_copy(
+            update={"temperature": temperature, "max_output_tokens": max_output_tokens}
+        )
+        for policy in selected
+    )
+    responses = tuple(provider.evaluate_many(requests, max_concurrency=max_concurrency))
+    if len(responses) != len(requests):
+        raise SemanticProviderError("provider returned an unexpected response count")
+    findings = tuple(
+        semantic_finding(policy, response, context, source_path)
+        for policy, response in zip(selected, responses, strict=True)
+    )
+    return SemanticEvaluationResult(selected, requests, responses, findings)
+
+
 def evaluate_semantic_policies(
     policies: Sequence[Policy],
     context: SemanticContext,
     provider: SemanticProvider,
     source_path: Path | None = None,
+    max_concurrency: int = 4,
 ) -> list[Finding]:
-    """Evaluate active semantic policies in policy order and preserve result order."""
-    selected = [
-        policy
-        for policy in sorted(policies, key=lambda item: item.id)
-        if policy.status.value == "ACTIVE"
-        and policy.enforcement.type
-        in (
-            EnforcementType.SEMANTIC,
-            EnforcementType.HYBRID,
-        )
-    ]
-    requests = [build_semantic_request(policy, context) for policy in selected]
-    try:
-        responses = provider.evaluate_many(requests, max_concurrency=4)
-    except SemanticProviderError:
-        raise
-    return [
-        semantic_finding(policy, response, context, source_path)
-        for policy, response in zip(selected, responses, strict=True)
-    ]
+    """Compatibility wrapper returning only normalized semantic findings."""
+    return list(run_semantic_evaluation(policies, context, provider, source_path, max_concurrency).findings)

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-from conformdag.models import Confidence, FindingStatus, SemanticRequest, SemanticResponse
+from conformdag.models import Confidence, FindingStatus, Policy, SemanticRequest, SemanticResponse
 from conformdag.scan import scan_repository
 
 
@@ -188,6 +188,46 @@ def test_scan_merges_opt_in_semantic_findings_and_audit_metadata(tmp_path: Path)
     assert len(report.run.semantic_runs) == 4
     assert all(run.usage == {"total_tokens": 10} for run in report.run.semantic_runs)
     assert all(policy_id not in report.policies_skipped for policy_id in report.run.prompt_hashes)
+
+
+def test_scan_delegates_semantic_execution_to_canonical_runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "policies").mkdir()
+    (tmp_path / "standards").mkdir()
+    (tmp_path / "dags").mkdir()
+    copyfile("policies/pack.yaml", tmp_path / "policies/pack.yaml")
+    copyfile("standards/dag-authoring.md", tmp_path / "standards/dag-authoring.md")
+    (tmp_path / "dags" / "example.py").write_text(
+        "from airflow import DAG\ndag = DAG(owner='platform')\n", encoding="utf-8"
+    )
+    calls: list[int] = []
+    from conformdag.semantic import SemanticContext
+    from conformdag.semantic_evaluator import SemanticEvaluationResult, SemanticProvider, run_semantic_evaluation
+
+    def wrapped(
+        policies: Sequence[Policy],
+        context: SemanticContext,
+        provider: SemanticProvider,
+        source_path: Path | None = None,
+        max_concurrency: int = 4,
+        temperature: float = 0.0,
+        max_output_tokens: int = 4000,
+    ) -> SemanticEvaluationResult:
+        calls.append(1)
+        return run_semantic_evaluation(
+            policies, context, provider, source_path, max_concurrency, temperature, max_output_tokens
+        )
+
+    monkeypatch.setattr("conformdag.scan.run_semantic_evaluation", wrapped)
+
+    report = scan_repository(
+        tmp_path,
+        semantic_provider=_SemanticProvider(),
+        semantic_provider_name="provider",
+        semantic_model="model",
+    )
+
+    assert report.complete is True
+    assert calls == [1]
 
 
 def test_scan_accepts_external_policy_pack_from_working_directory(tmp_path: Path) -> None:
