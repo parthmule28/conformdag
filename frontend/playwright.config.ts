@@ -3,7 +3,9 @@
  *
  * Two web servers are started before the suite runs:
  * - the disposable backend on port 8642 (`scripts/e2e_platform.py`), which
- *   serves the real `/api/v1` routes from a temporary SQLite database; and
+ *   seeds the shared demo scenario (`conformdag.platform.demo`) into a
+ *   temporary SQLite database and serves the real `/api/v1` routes from it;
+ *   and
  * - the Vite dev server on port 4173, whose existing `/api` proxy forwards
  *   browser traffic to the seeded backend.
  *

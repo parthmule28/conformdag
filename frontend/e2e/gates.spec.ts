@@ -1,7 +1,9 @@
 /**
  * Journey 5: add and edit a quality gate, validate the pack, scan the healthy
- * repository and render the returned gate result, then open the seeded broken
- * repository's scan and assert it is incomplete with "Gates not evaluated".
+ * repository and render the returned gate result (the seeded zero-findings
+ * gate fails on the demo workspace's non-conforming DAG while the added gate
+ * passes), then open the seeded broken repository's scan and assert it is
+ * incomplete with "Gates not evaluated".
  */
 import {
   BROKEN_REPOSITORY_NAME,
@@ -85,11 +87,14 @@ test("gate add/edit drives a real gate result, and the broken scan stays incompl
 
   await page.goto(`/scans/${scanId}`);
   await expect(page).toHaveURL(new RegExp(`/scans/${scanId}$`));
+  // The engine records the first failing gate as the verdict. The demo
+  // workspace's healthy DAG is deliberately non-conforming after the
+  // baseline, so the seeded zero-findings gate fails on the triggered scan.
   const gateResult = page.getByRole("region", { name: "Gate result" });
-  await expect(gateResult.getByText("Gate passed")).toBeVisible();
+  await expect(gateResult.getByText("Gate failed")).toBeVisible();
   const gateRules = gateResult.getByRole("table", { name: "Gate rules" });
   await expect(gateRules).toContainText("max-findings");
-  await expect(gateRules.getByText("PASS")).toBeVisible();
+  await expect(gateRules.getByRole("row", { name: /limit is 0/ })).toContainText("FAIL");
 
   await page.goto(`/scans/${brokenScanId}`);
   await expect(page).toHaveURL(new RegExp(`/scans/${brokenScanId}$`));

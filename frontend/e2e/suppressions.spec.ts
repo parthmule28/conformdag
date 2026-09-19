@@ -5,25 +5,20 @@
  */
 import {
   HEALTHY_REPOSITORY_NAME,
+  currentCompletedScan,
   expect,
   firstFinding,
   repositoryByName,
-  scanHistory,
   test,
   useAdminToken,
 } from "./fixtures";
-import type { ScanSummary } from "../src/api";
 
 test("create a suppression and distinguish the seeded expired waiver", async ({ page }) => {
   await useAdminToken(page);
 
   const healthy = await repositoryByName(page.request, HEALTHY_REPOSITORY_NAME);
-  const seededScans = await scanHistory(page.request, healthy.id);
-  const baselineScan = seededScans.find(
-    (scan) => scan.scan_id === healthy.baseline_scan_id,
-  );
-  expect(baselineScan).toBeDefined();
-  const finding = await firstFinding(page.request, (baselineScan as ScanSummary).scan_id);
+  const current = await currentCompletedScan(page.request, healthy.id);
+  const finding = await firstFinding(page.request, current.scan_id);
 
   await page.goto("/suppressions");
   await expect(page).toHaveURL(/\/suppressions$/);
@@ -31,14 +26,17 @@ test("create a suppression and distinguish the seeded expired waiver", async ({ 
   const table = page.getByRole("table", { name: "Suppressions" });
   await expect(table).toBeVisible();
 
-  // The seeded expired waiver: visually distinct, and excluded from Active.
+  // The seeded expired waiver: visually distinct, excluded from Active, and
+  // the only row presented under Expired (the seeded active waiver stays a
+  // current SUPPRESSED record).
   const expiredCell = table.getByText("Expired", { exact: true });
   await expect(expiredCell).toBeVisible();
   await page.getByLabel("State").selectOption("active");
   await expect(expiredCell).toBeHidden();
-  await expect(table.getByText("SUPPRESSED")).toHaveCount(0);
+  await expect(table.getByText("SUPPRESSED").first()).toBeVisible();
   await page.getByLabel("State").selectOption("expired");
   await expect(expiredCell).toBeVisible();
+  await expect(table.getByText("SUPPRESSED")).toHaveCount(0);
   await page.getByLabel("State").selectOption("");
 
   await page.getByRole("button", { name: "New suppression" }).click();
@@ -52,7 +50,11 @@ test("create a suppression and distinguish the seeded expired waiver", async ({ 
   await dialog.getByRole("button", { name: "Save suppression" }).click();
   await expect(dialog).toBeHidden();
 
-  const newRow = table.getByRole("row", { name: new RegExp(finding.fingerprint) });
+  // The fingerprint is shared with the seeded active waiver for this finding;
+  // the created row is distinguished by the owner the journey entered.
+  const newRow = table
+    .getByRole("row", { name: new RegExp(finding.fingerprint) })
+    .filter({ hasText: "e2e-owner" });
   await expect(newRow).toBeVisible();
   await expect(newRow.getByText("SUPPRESSED")).toBeVisible();
   await expect(newRow.getByText("e2e-owner")).toBeVisible();

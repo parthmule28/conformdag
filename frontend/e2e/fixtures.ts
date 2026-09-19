@@ -9,7 +9,7 @@
  */
 import { expect, test as base, type APIRequestContext, type Page } from "@playwright/test";
 
-import type { Finding, Repository, ScanSummary } from "../src/api";
+import type { Finding, Repository, ScanSummary, Suppression } from "../src/api";
 
 /** The seeded admin token; the seed process is started with the same value. */
 export const ADMIN_TOKEN = process.env.CONFORMDAG_PLATFORM_TOKEN ?? "secret-token";
@@ -58,15 +58,65 @@ export async function scanHistory(
   return apiGet<ScanSummary[]>(request, `/repos/${repositoryId}/scans`);
 }
 
+/** Reads every FAIL finding of one scan through the real HTTP route. */
+export async function failFindings(
+  request: APIRequestContext,
+  scanId: string,
+): Promise<Finding[]> {
+  const response = await request.get(`/api/v1/scans/${scanId}/findings?status=FAIL`);
+  expect(response.ok(), `GET findings for ${scanId} failed with ${response.status()}`).toBe(true);
+  return (await response.json()) as Finding[];
+}
+
 export async function firstFinding(
   request: APIRequestContext,
   scanId: string,
 ): Promise<Finding> {
-  const response = await request.get(`/api/v1/scans/${scanId}/findings?status=FAIL`);
-  expect(response.ok(), `GET findings for ${scanId} failed with ${response.status()}`).toBe(true);
-  const items = (await response.json()) as Finding[];
+  const items = await failFindings(request, scanId);
   expect(items.length, `scan ${scanId} seeds at least one FAIL finding`).toBeGreaterThan(0);
   return items[0] as Finding;
+}
+
+/**
+ * Resolves the repository's current completed scan: the newest complete entry
+ * of the scan history (the history route returns newest first).
+ */
+export async function currentCompletedScan(
+  request: APIRequestContext,
+  repositoryId: string,
+): Promise<ScanSummary> {
+  const scans = await scanHistory(request, repositoryId);
+  const current = scans.find((scan) => scan.complete === true);
+  expect(current, `repository ${repositoryId} has a completed scan`).toBeDefined();
+  return current as ScanSummary;
+}
+
+/**
+ * Mirrors the console's expiry rule (hooks/usePlatformQueries): an unparsable
+ * or past expiry counts as expired so nothing unknown is presented as a
+ * current waiver. The server re-checks expiry at scan time.
+ */
+export function isSuppressionExpired(suppression: Suppression, now: Date = new Date()): boolean {
+  const expires = new Date(suppression.expires_at);
+  return Number.isNaN(expires.getTime()) || expires.getTime() <= now.getTime();
+}
+
+export interface SuppressionStates {
+  active: Suppression[];
+  expired: Suppression[];
+}
+
+/** Splits the suppression inventory into active and expired records by API data. */
+export async function suppressionsByState(
+  request: APIRequestContext,
+): Promise<SuppressionStates> {
+  const response = await request.get("/api/v1/suppressions");
+  expect(response.ok(), `GET suppressions failed with ${response.status()}`).toBe(true);
+  const items = (await response.json()) as Suppression[];
+  return {
+    active: items.filter((suppression) => !isSuppressionExpired(suppression)),
+    expired: items.filter((suppression) => isSuppressionExpired(suppression)),
+  };
 }
 
 export const test = base.extend({});
