@@ -113,7 +113,7 @@
 - [x] Multi-worker platform scenario — platform state, migration, heartbeat, cancellation, and API suite 171 passed
 - [x] Clean release build — `mise run build`; wheel and sdist each contain 3 dashboard assets
 - [x] Production browser suite — frontend 6/6 journeys passed; fresh wheel install passed packaged deep-link/theme/tour/API/asset checks
-- [x] Complete Python/frontend/platform/integration verification — fresh `mise run check` 466 passed; coverage 90.94%; runtime 15 passed; frontend 123 Vitest tests and 6 Playwright journeys passed; live Compose Postgres/API/worker boot, security, privacy, schema, inventory, and 240-case benchmark gates passed
+- [x] Complete Python/frontend/platform/integration verification — fresh `mise run check` 481 passed; coverage 90.90%; runtime 15 passed; frontend 148 Vitest tests and 7 Playwright journeys passed; packaged wheel SPA/API/404 smoke, security, privacy, schema, inventory, and 240-case benchmark gates passed
 - [x] Final accounting for all 47 IDs and remaining risks — 2 Critical + 10 Important + 35 Minor; every ID is closed in Phases 1–7
 
 ## Implementation Method
