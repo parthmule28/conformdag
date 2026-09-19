@@ -22,10 +22,7 @@ export interface MetricStripProps {
 
 export function MetricStrip({ metrics, className }: MetricStripProps) {
   return (
-    <dl
-      data-tour="overview-signal"
-      className={cx("grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6", className)}
-    >
+    <dl className={cx("grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6", className)}>
       {metrics.map((metric) => (
         <div
           key={metric.label}
