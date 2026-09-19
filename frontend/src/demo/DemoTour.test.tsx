@@ -90,6 +90,32 @@ function Harness({ initialEntries = ["/?demo=1"], markers = ALL_MARKERS }: Harne
   );
 }
 
+/** Like Harness, but the marked fixtures only exist on the overview route,
+ * so pages away from `/` genuinely lack the tour targets that live there. */
+function RoutedHarness({ initialEntries = ["/policies?demo=1"], markers = ALL_MARKERS }: HarnessProps) {
+  return (
+    <MemoryRouter initialEntries={initialEntries}>
+      <LocationProbe />
+      <OverviewMarkers markers={markers} />
+      <DemoTour maxWaitFrames={2} />
+    </MemoryRouter>
+  );
+}
+
+function OverviewMarkers({ markers }: { markers: TourTarget[] }) {
+  const { pathname } = useLocation();
+  if (pathname !== "/") {
+    return null;
+  }
+  return (
+    <>
+      {markers.map((marker) => (
+        <MarkerNode key={marker} marker={marker} />
+      ))}
+    </>
+  );
+}
+
 function tourDialog() {
   return screen.getByRole("dialog", { name: "ConformDAG demo tour" });
 }
@@ -286,6 +312,20 @@ describe("DemoTour navigation", () => {
 });
 
 describe("DemoTour missing targets", () => {
+  it("restart navigates to the first step's route when the tour paused away from it", async () => {
+    render(
+      <RoutedHarness initialEntries={["/policies?demo=1"]} markers={["overview-signal"]} />,
+    );
+    expect(await screen.findByText("Tour paused")).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/policies?demo=1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart tour" }));
+
+    expect(screen.getByTestId("location")).toHaveTextContent("/?demo=1");
+    expectStepTitle(FIRST_STEP_TITLE);
+    expect(screen.queryByText("Tour paused")).not.toBeInTheDocument();
+  });
+
   it("pauses safely when a step target never appears, offering only Restart and Skip", async () => {
     render(<Harness markers={["overview-signal", "repository-link"]} />);
     clickNext();

@@ -405,7 +405,7 @@ describe("ScanPage", () => {
     expect(within(suppressedRow).getByText("Existing")).toBeInTheDocument();
 
     const dialog = await openDetail("PARSE-002");
-    expect(within(dialog).getByRole("button", { name: "Close" })).toHaveFocus();
+    expect(dialog).toHaveFocus();
     expect(within(dialog).getByText("Suppressed finding")).toBeInTheDocument();
     expect(within(dialog).getByText(/known parser limitation/)).toBeInTheDocument();
     expect(within(dialog).getByText("DAG could not be parsed")).toBeInTheDocument();

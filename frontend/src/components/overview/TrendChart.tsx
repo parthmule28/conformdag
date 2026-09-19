@@ -214,7 +214,10 @@ function scaledHeight(value: number, max: number): number {
 }
 
 function tickValues(max: number): number[] {
-  return [...new Set([max, Math.ceil(max / 2), 0])];
+  // True midpoint of the scale, rounded to a tenth only to strip float noise
+  // (5 → 2.5, 4 → 2); 0 and max stay as the outer ticks.
+  const midpoint = Math.round((max / 2) * 10) / 10;
+  return [max, midpoint, 0];
 }
 
 function formatTrendDate(value: string): string {
