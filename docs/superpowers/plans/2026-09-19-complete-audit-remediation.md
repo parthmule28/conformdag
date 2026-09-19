@@ -39,7 +39,7 @@
 - [x] MIN-1 atomic parse-cache writes
 - [x] MIN-3 typed discovery issue categories
 - [x] MIN-10 canonical Ruff selector semantics
-- [x] Focused Ruff, discovery, symlink, cache, scanner, and fix-engine tests
+- [x] Focused Ruff, discovery, symlink, cache, scanner, fix-engine, and followed-internal-symlink identity tests
 - [x] Diff/status review and architecture deviations recorded
 
 ### Phase 2 — Policy, evaluator, and semantic correctness
@@ -55,7 +55,7 @@
 
 ### Phase 3 — Agent, pack-pull, CLI, runtime isolation
 
-- [x] IMP-9 explicit verified-file staging
+- [x] IMP-9 content-exact verified-patch publication with dirty-target rejection
 - [x] MIN-2 preserved intentional CLI failures
 - [x] MIN-5 pack name/timeout/last-known-good hardening
 - [x] MIN-11 runtime manifests outside scanned repositories
@@ -65,7 +65,7 @@
 
 - [x] IMP-5 atomic cancellation
 - [x] IMP-6 worker heartbeat ownership
-- [x] IMP-7 application-owned logging
+- [x] IMP-7 application-owned logging with one-record migration/startup emission
 - [x] MIN-12 serialized first-boot migrations
 - [x] MIN-13 locked PackService snapshots
 - [x] MIN-14 constant-time auth and safe CORS
@@ -75,17 +75,17 @@
 - [x] MIN-18 worker timing validation
 - [x] MIN-19 retention ordering and claim indexes
 - [x] MIN-20 unique suppression identity
-- [x] Platform, migration, API, logging, and concurrency suites — 169 passed; Ruff, format, and Pyright clean
+- [x] Platform, migration, API, logging, and concurrency suites — 191 passed; Ruff, format, and Pyright clean
 
 ### Phase 5 — Release, packaging, runtime, supply chain
 
-- [x] CR-2 enforceable reviewed immutable runtime identity policy
+- [x] CR-2 enforceable release-specific reviewed immutable runtime identity policy
 - [x] IMP-8 frontend build is a package-build prerequisite
 - [x] MIN-32 occurrence-level artifact privacy checks
 - [x] MIN-33 reviewed SHA-pinned release Actions
 - [x] MIN-34 production Compose credentials are required
 - [x] MIN-35 correct `.superpowers/` ignore decision
-- [x] Clean frontend/wheel/install/server smoke verification — 34 affected tests passed; wheel/sdist include static assets; installed server API/SPA/404 smoke passed
+- [x] Clean frontend/wheel/install/server smoke verification — 37 focused runtime/distribution tests passed; wheel/sdist include static assets; installed server API/SPA/404 smoke passed
 
 ### Phase 6 — Production SPA and frontend
 
@@ -97,7 +97,7 @@
 - [x] MIN-25 FieldShell ID contract
 - [x] MIN-26 pre-paint theme bootstrap
 - [x] MIN-27 frontend consistency cleanup
-- [x] Frontend tests and packaged-server Playwright verification — platform 171 passed; frontend 121 passed; build, Ruff, Pyright, and packaged Playwright checks passed
+- [x] Frontend tests and packaged-server Playwright verification — platform 191 passed; frontend 153 passed; build, Ruff, Pyright, and 7 Playwright journeys passed
 
 ### Phase 7 — Documentation and source of truth
 
@@ -105,15 +105,15 @@
 - [x] MIN-29 benchmark count
 - [x] MIN-30 evaluator registration documentation
 - [x] MIN-31 dependency inventory and automated consistency check
-- [x] Documentation/inventory/link checks — documentation regressions 6 passed; `mise run inventory`, Ruff, Pyright, diff, and relative-link checks clean
+- [x] Documentation/inventory/link checks — documentation regressions 11 passed; `mise run inventory`, Ruff, Pyright, diff, and relative-link checks clean
 
 ### Phase 8 — Cross-cutting verification
 
 - [x] Adversarial repository fixture — scanner/evaluator/fix regression set 96 passed
-- [x] Multi-worker platform scenario — platform state, migration, heartbeat, cancellation, and API suite 171 passed
+- [x] Multi-worker platform scenario — platform state, migration, heartbeat, cancellation, logging, and API suite 191 passed
 - [x] Clean release build — `mise run build`; wheel and sdist each contain 3 dashboard assets
 - [x] Production browser suite — frontend 6/6 journeys passed; fresh wheel install passed packaged deep-link/theme/tour/API/asset checks
-- [x] Complete Python/frontend/platform/integration verification — fresh `mise run check` 482 passed; coverage 90.90%; runtime 15 passed; frontend 148 Vitest tests and 7 Playwright journeys passed; packaged wheel SPA/API/404 smoke, security, privacy, schema, inventory, and 240-case benchmark gates passed
+- [x] Complete Python/frontend/platform/integration verification — fresh `mise run check` 503 passed; coverage 90.95%; runtime 19 passed; frontend 153 Vitest tests and 7 Playwright journeys passed; packaged wheel SPA/API/404 smoke, security, privacy, schema, inventory, and 240-case benchmark gates passed
 - [x] Final accounting for all 47 IDs and remaining risks — 2 Critical + 10 Important + 35 Minor; every ID is closed in Phases 1–7
 
 ## Implementation Method

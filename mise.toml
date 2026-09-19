@@ -107,4 +107,4 @@ run = "docker scout cves $CONFORMDAG_IMAGE"
 
 [tasks.check]
 description = "Run the default local quality gate"
-depends = ["format-check", "lint", "typecheck", "test", "validate:packs"]
+depends = ["format-check", "lint", "typecheck", "test", "validate:packs", "inventory"]
