@@ -5,7 +5,7 @@ COPY runtime/airflow-3.3.0/constraints.txt /opt/conformdag/constraints.txt
 RUN apt-get update \
     && ACCEPT_EULA=Y apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/* \
-    && sed '/^apache-airflow-providers-google==/d' /opt/conformdag/constraints.txt > /tmp/conformdag-base-constraints.txt \
+    && sed -E '/^(apache-airflow|apache-airflow-providers-google|google-cloud-aiplatform|GitPython|litellm|pyasn1|aiohttp|cryptography|snowflake-connector-python|snowflake-sqlalchemy|sqlparse|tornado)==/d' /opt/conformdag/constraints.txt > /tmp/conformdag-base-constraints.txt \
     && python -m pip install --no-cache-dir -r /tmp/conformdag-base-constraints.txt \
     && python -m pip install --no-cache-dir --upgrade \
         apache-airflow==3.3.0 \

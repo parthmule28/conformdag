@@ -200,6 +200,16 @@ def test_package_build_requires_the_frontend_build() -> None:
     assert "ui-build" in config["tasks"]["build"]["depends"]
 
 
+def test_runtime_dockerfile_excludes_overridden_airflow_constraints() -> None:
+    dockerfile = Path("runtime/airflow-3.3.0/Dockerfile").read_text(encoding="utf-8")
+
+    assert (
+        "sed -E '/^(apache-airflow|apache-airflow-providers-google|google-cloud-aiplatform|"
+        "GitPython|litellm|pyasn1|aiohttp|cryptography|snowflake-connector-python|"
+        "snowflake-sqlalchemy|sqlparse|tornado)==/d'"
+    ) in dockerfile
+
+
 def test_release_workflow_uses_reviewed_sha_pins() -> None:
     uses = [
         line.split("uses:", 1)[1].strip().split(" #", 1)[0]
