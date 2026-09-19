@@ -299,6 +299,24 @@ def test_demo_seed_creates_baseline_and_later_gate_failure(tmp_path: Path) -> No
         assert findings
 
 
+def test_demo_seed_makes_the_healthy_current_scan_newest(tmp_path: Path) -> None:
+    """The tour follows the overview's newest repository link, so the healthy
+    current gate-failed scan must be the newest scan platform-wide; otherwise
+    the guided demo lands on the broken repository and pauses."""
+    workspace = build_demo_workspace(tmp_path)
+    scenario = seed_demo_scenario(workspace)
+    demo_factory = create_session_factory(workspace.dsn)
+
+    with demo_factory() as session:
+        newest = (
+            session.scalars(select(ScanRow).order_by(ScanRow.created_at.desc(), ScanRow.id.desc()))
+            .first()
+        )
+        assert newest is not None
+        assert newest.id == scenario.ids["current_scan"]
+        assert newest.repository_id == scenario.ids["repository"]
+
+
 def test_demo_seed_suppressions_use_real_current_findings(tmp_path: Path) -> None:
     workspace = build_demo_workspace(tmp_path)
     scenario = seed_demo_scenario(workspace)

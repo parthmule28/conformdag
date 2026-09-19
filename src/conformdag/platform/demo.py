@@ -388,6 +388,21 @@ def seed_demo_scenario(workspace: DemoWorkspace) -> DemoScenario:
     ids["active_suppression"] = active_suppression_id
     ids["expired_suppression"] = expired_suppression_id
 
+    # The broken repository's scan completes before the healthy current scan so
+    # the healthy gate-failed scan is the newest scan platform-wide; the guided
+    # tour follows the overview's newest repository link and must land on the
+    # failing scan, not on the broken repository.
+    with session_factory() as session:
+        broken_scan_id = _queue_scan(session, ids["broken_repository"])
+    ids["broken_scan"] = broken_scan_id
+    _complete_scan(
+        session_factory,
+        workspace.dsn,
+        broken_scan_id,
+        expected_status="failed",
+        expected_complete=False,
+    )
+
     with session_factory() as session:
         current_scan_id = _queue_scan(session, ids["repository"])
     ids["current_scan"] = current_scan_id
@@ -399,17 +414,6 @@ def seed_demo_scenario(workspace: DemoWorkspace) -> DemoScenario:
         expected_complete=True,
     )
     _validate_current_scan(session_factory, current_scan_id)
-
-    with session_factory() as session:
-        broken_scan_id = _queue_scan(session, ids["broken_repository"])
-    ids["broken_scan"] = broken_scan_id
-    _complete_scan(
-        session_factory,
-        workspace.dsn,
-        broken_scan_id,
-        expected_status="failed",
-        expected_complete=False,
-    )
 
     return DemoScenario(ids=MappingProxyType(dict(ids)))
 

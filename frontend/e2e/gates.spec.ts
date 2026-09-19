@@ -1,9 +1,10 @@
 /**
  * Journey 5: add and edit a quality gate, validate the pack, scan the healthy
- * repository and render the returned gate result (the seeded zero-findings
- * gate fails on the demo workspace's non-conforming DAG while the added gate
- * passes), then open the seeded broken repository's scan and assert it is
- * incomplete with "Gates not evaluated".
+ * repository and render the returned gate result. The engine records the
+ * first failing gate as the verdict, so the seeded zero-findings gate fails
+ * on the demo workspace's non-conforming DAG and the added gate's passing
+ * rule is not part of the recorded verdict. Then the seeded broken
+ * repository's scan is asserted incomplete with "Gates not evaluated".
  */
 import {
   BROKEN_REPOSITORY_NAME,

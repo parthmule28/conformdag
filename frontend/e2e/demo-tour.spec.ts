@@ -7,7 +7,6 @@
  * returns it to the overview step.
  */
 import {
-  ADMIN_TOKEN,
   currentCompletedScan,
   expect,
   failFindings,
@@ -18,34 +17,13 @@ import {
   HEALTHY_REPOSITORY_NAME,
 } from "./fixtures";
 import type { Finding, Suppression } from "../src/api";
-import type { ScanTransitionResponse } from "../src/api";
 
 test("demo tour advances through every stage, then skips and restarts", async ({ page }) => {
-  // The tour's first hop follows the overview's newest repository link, and
-  // the story requires it to land on the failing scan of the healthy
-  // workspace. The seed's broken repository owns the newest scan, so the
-  // journey first scans the healthy workspace through the same API route the
-  // console uses and waits (bounded) for the worker to complete it.
-  const healthy = await repositoryByName(page.request, HEALTHY_REPOSITORY_NAME);
-  const triggered = await page.request.post(`/api/v1/repos/${healthy.id}/scans`, {
-    headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
-  });
-  expect(triggered.ok(), `POST scans failed with ${triggered.status()}`).toBe(true);
-  const { scan_id: triggeredScanId } = (await triggered.json()) as ScanTransitionResponse;
-  await expect
-    .poll(
-      async () => {
-        const status = await page.request.get(`/api/v1/scans/${triggeredScanId}`);
-        expect(status.ok(), `GET scan ${triggeredScanId} failed with ${status.status()}`).toBe(true);
-        return ((await status.json()) as { complete: boolean | null }).complete;
-      },
-      { timeout: 30_000, message: "the triggered scan completes" },
-    )
-    .toBe(true);
-
   // Resolve the golden-story data from the platform, never from display text.
+  // The shared seed makes the healthy current gate-failed scan the newest
+  // scan, so the tour's first hop lands here without any test-only setup.
+  const healthy = await repositoryByName(page.request, HEALTHY_REPOSITORY_NAME);
   const current = await currentCompletedScan(page.request, healthy.id);
-  expect(current.scan_id, "the triggered scan is the current one").toBe(triggeredScanId);
   expect(current.gate_passed, "the current scan records a failed gate").toBe(false);
 
   const finding = await firstFinding(page.request, current.scan_id);
@@ -109,6 +87,7 @@ test("demo tour advances through every stage, then skips and restarts", async ({
 
   // Policy pack → quality gate: the tour presses the marked pack button.
   await tourNext.click();
+  await expect(page).toHaveURL(/\/policies\?demo=1$/);
   await expect(target("policy-gate")).toBeVisible();
 
   // Quality gate → suppressions: tour-owned navigation.
