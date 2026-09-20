@@ -5,11 +5,12 @@ This directory is the execution backlog for the C01–C64 consolidation program.
 ## Read order
 
 1. `../superpowers/specs/2026-09-20-consolidation-backlog-design.md` — artifact design and prompt contract.
-2. `architecture-rules.md` — invariants every slice must preserve.
-3. `baseline.md` — measured starting state and evidence commands.
-4. `backlog.md` — program index, dependencies, risk, and phase gates.
-5. `progress.md` — execution ledger.
-6. `prompts/CNN-*.md` — the ready-to-paste Build prompt for one PR.
+2. `../adr/0004-modular-monolith-application-boundaries.md` — the proposed durable boundary decision for this program.
+3. `architecture-rules.md` — invariants every slice must preserve.
+4. `baseline.md` — measured starting state and evidence commands.
+5. `backlog.md` — program index, dependencies, risk, and phase gates.
+6. `progress.md` — execution ledger.
+7. `prompts/CNN-*.md` — the ready-to-paste Build prompt for one PR.
 
 ## How to execute one slice
 

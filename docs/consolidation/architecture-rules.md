@@ -1,15 +1,19 @@
 # Consolidation Architecture Rules
 
-These rules are the standing contract for C01–C64. A later slice may refine a rule only by recording a reviewed decision in an ADR and updating the affected prompts.
+These rules are the standing contract for C01–C64. The boundary decision is
+recorded in [ADR 0004](../adr/0004-modular-monolith-application-boundaries.md).
+A later slice may refine a rule only by recording a reviewed decision in an ADR
+and updating the affected prompts.
 
 ## Product invariants
 
 1. **One scan engine.** `src/conformdag/scan.py:scan_repository()` remains the canonical core evaluation primitive until an application workflow wraps it with parity evidence. CLI, platform, agent, future MCP, and future schedulers must not implement separate evaluation paths.
-2. **Verify-by-rescan fixing.** The fix engine remains `scan → generate patch → apply in isolation → rescan → present only verified patches`. `--apply` is the only write path.
+2. **Verify-by-rescan fixing.** The fix engine remains `scan → generate patch → apply in isolation → rescan → present only verified patches`. `--apply` is the fix engine's only source-code mutation path.
 3. **Human merge authority.** Agent automation may triage, verify, branch, and open a PR; it may not merge or approve its own changes.
 4. **Offline default.** Core scans do not execute repository Python, access the network, or call semantic providers unless an explicit invocation enables the relevant boundary.
-5. **Canonical report.** `ScanReport` is the public serialized product result. Terminal, JSON, SARIF, HTML, platform persistence, future MCP, and report diff are projections or consumers of it.
+5. **Canonical report.** `ScanReport` is the canonical typed product result and JSON is its public serialized form. Terminal, SARIF, HTML, platform persistence, future MCP, and report diff are projections or consumers of it.
 6. **Stable identity.** Finding and report fingerprints are deterministic, documented, and reviewed before changes to their inputs or versions.
+7. **One authoritative check catalogue.** Check kinds, evaluator metadata, fixability, scaffolding, and legacy aliases derive from one catalogue; policy IDs are compatibility metadata, not a second registry key.
 
 ## Layer ownership
 

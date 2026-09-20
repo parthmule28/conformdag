@@ -10,7 +10,7 @@ This ledger records evidence for C01–C64. It starts at `planned` because this 
 
 | Checkpoint | Status | Evidence |
 | --- | --- | --- |
-| Backlog contract (pre-C01) | accepted | `baseline.md`, `architecture-rules.md`, default gate on `68a837c`; C01 product PR remains planned |
+| Backlog contract (pre-C01) | accepted | bootstrap commit `920f2b1`; C01 remains in review |
 | C01–C10 application boundary | planned | No product slice accepted |
 | C11–C20 domain/reporting/policy boundary | planned | No product slice accepted |
 | C21–C32 model/platform/adapter boundary | planned | No product slice accepted |
@@ -22,7 +22,7 @@ This ledger records evidence for C01–C64. It starts at `planned` because this 
 
 | ID | Status | Owner/PR | Focused evidence | Review notes |
 | --- | --- | --- | --- | --- |
-| [C01](prompts/C01-baseline-contract.md) | planned | — | — | — |
+| [C01](prompts/C01-baseline-contract.md) | review | `docs/c01-baseline-contract` (PR pending) | `origin/main @ c20b9a19`; `mise run check`: 501 passed, 2 skipped, 19 deselected; `mise run test:coverage`: 90.64%; 522 collected; inventory passed; `git diff --check`; local-link/index validation | ADR 0004 proposed; documentation-only change; no product code or generated schema changes; awaiting independent review |
 | [C02](prompts/C02-domain-vocabulary.md) | planned | — | — | — |
 | [C03](prompts/C03-check-catalogue.md) | planned | — | — | — |
 | [C04](prompts/C04-analysis-package.md) | planned | — | — | — |
