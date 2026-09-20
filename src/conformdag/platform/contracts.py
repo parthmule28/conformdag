@@ -1,4 +1,4 @@
-"""Explicit wire contracts for the platform's finding, scan-summary, and aggregate responses."""
+"""Explicit wire contracts for the platform's finding, policy, and aggregate responses."""
 
 from __future__ import annotations
 
@@ -81,6 +81,22 @@ class RepositoryTrendsResponse(BaseModel):
 
     repository_id: str
     points: list[TrendPoint]
+
+
+class PolicyVocabularyRequest(BaseModel):
+    """Additive canonical vocabulary accepted by policy mutation requests."""
+
+    deterministic_checks: list[str] | None = None
+    configuration: dict[str, Any] | None = None
+
+
+class PolicyVocabularyResponse(BaseModel):
+    """Canonical policy vocabulary plus the beta compatibility projection."""
+
+    deterministic_checks: list[str]
+    configuration: dict[str, Any]
+    check_kind: str
+    check_config: dict[str, Any]
 
 
 class GateUpsertRequest(BaseModel):

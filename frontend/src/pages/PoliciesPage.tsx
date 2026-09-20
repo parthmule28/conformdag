@@ -27,12 +27,12 @@ const LIFECYCLE_STATUSES = [
 
 interface PolicyFilterState {
   tag: string;
-  checkKind: string;
+  deterministicCheck: string;
   severity: string;
   status: string;
 }
 
-const EMPTY_FILTERS: PolicyFilterState = { tag: "", checkKind: "", severity: "", status: "" };
+const EMPTY_FILTERS: PolicyFilterState = { tag: "", deterministicCheck: "", severity: "", status: "" };
 
 /**
  * Policy governance surface: pack summaries with server-reported validation
@@ -63,11 +63,11 @@ export default function PoliciesPage() {
   };
 
   const tagOptions = [...new Set(policies.flatMap((policy) => policy.tags))].sort();
-  const kindOptions = [...new Set(policies.map((policy) => policy.check_kind))].sort();
+  const deterministicCheckOptions = [...new Set(policies.flatMap((policy) => policy.deterministic_checks))].sort();
   const filteredPolicies = policies.filter(
     (policy) =>
       (filters.tag === "" || policy.tags.includes(filters.tag)) &&
-      (filters.checkKind === "" || policy.check_kind === filters.checkKind) &&
+      (filters.deterministicCheck === "" || policy.deterministic_checks.includes(filters.deterministicCheck)) &&
       (filters.severity === "" || policy.severity === filters.severity) &&
       (filters.status === "" || policy.status === filters.status),
   );
@@ -121,14 +121,14 @@ export default function PoliciesPage() {
                   ))}
                 </Select>
                 <Select
-                  label="Check kind"
-                  value={filters.checkKind}
-                  onChange={(event) => patchFilters({ checkKind: event.target.value })}
+                  label="Deterministic check"
+                  value={filters.deterministicCheck}
+                  onChange={(event) => patchFilters({ deterministicCheck: event.target.value })}
                 >
-                  <option value="">All kinds</option>
-                  {kindOptions.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {kind}
+                  <option value="">All checks</option>
+                  {deterministicCheckOptions.map((check) => (
+                    <option key={check} value={check}>
+                      {check}
                     </option>
                   ))}
                 </Select>

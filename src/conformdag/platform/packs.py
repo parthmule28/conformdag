@@ -9,11 +9,13 @@ import tempfile
 import threading
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from pydantic import TypeAdapter
 from ruamel.yaml import YAML
 
-from conformdag.models import Policy, PolicyPack, QualityGate
+from conformdag.models import Policy, PolicyConfiguration, PolicyPack, QualityGate
+from conformdag.platform.contracts import PolicyVocabularyResponse
 from conformdag.policy import PolicyValidationError, load_policy_pack, validate_policy_pack
 
 
@@ -23,6 +25,9 @@ class PackError(ValueError):
 
 class PackNotFoundError(PackError):
     """Raised when a registered pack or requested pack member does not exist."""
+
+
+_POLICY_CONFIGURATION_ADAPTER: TypeAdapter[PolicyConfiguration] = TypeAdapter(PolicyConfiguration)
 
 
 class PackService:
@@ -70,8 +75,6 @@ class PackService:
                     "status": policy.status.value,
                     "severity": policy.severity.value,
                     "tags": policy.tags,
-                    "check_kind": policy.configuration.kind,
-                    "check_config": policy.configuration.model_dump(mode="json"),
                     "source_document": str(policy.source.document),
                     "source_section": policy.source.section,
                     "source_version": policy.source.version,
@@ -81,6 +84,12 @@ class PackService:
                     "scope": policy.scope.model_dump(mode="json"),
                     "exceptions": policy.exceptions.model_dump(mode="json"),
                     "enforcement": policy.enforcement.model_dump(mode="json"),
+                    **PolicyVocabularyResponse(
+                        deterministic_checks=policy.enforcement.deterministic_checks,
+                        configuration=policy.configuration.model_dump(mode="json"),
+                        check_kind=policy.configuration.kind,
+                        check_config=policy.configuration.model_dump(mode="json"),
+                    ).model_dump(mode="json"),
                 }
                 for policy in pack.policies
             ]
@@ -226,12 +235,8 @@ def _merge_policy_data(
         clean["tags"] = policy_data["tags"]
     elif existing is None:
         clean.pop("tags", None)
-    if "check_config" in policy_data or "check_kind" in policy_data:
-        configuration = dict(policy_data["check_config"])
-        configuration["kind"] = policy_data["check_kind"]
-        clean["configuration"] = configuration
-    elif "configuration" in policy_data:
-        clean["configuration"] = policy_data["configuration"]
+    _merge_configuration_vocabulary(clean, policy_data)
+    _merge_deterministic_vocabulary(clean, policy_data, existing)
     source: dict[str, Any] = {
         "document": policy_data["source_document"],
         "section": policy_data["source_section"],
@@ -242,9 +247,95 @@ def _merge_policy_data(
     elif existing is not None:
         source["version"] = existing.source.version
     clean["source"] = source
-    for key in ("source_document", "source_section", "source_version", "check_kind", "check_config"):
+    for key in (
+        "source_document",
+        "source_section",
+        "source_version",
+        "deterministic_checks",
+        "check_kind",
+        "check_config",
+    ):
         clean.pop(key, None)
     return clean
+
+
+def _normalize_configuration(value: object) -> dict[str, Any]:
+    """Validate and serialize one typed policy configuration for comparison."""
+    try:
+        configuration: PolicyConfiguration = _POLICY_CONFIGURATION_ADAPTER.validate_python(value)
+    except ValueError as exc:
+        raise PackError(f"invalid policy configuration: {exc}") from exc
+    return configuration.model_dump(mode="json")
+
+
+def _merge_configuration_vocabulary(clean: dict[str, Any], policy_data: dict[str, Any]) -> None:
+    """Resolve canonical and beta configuration names without silent precedence."""
+    has_configuration = "configuration" in policy_data
+    has_check_kind = "check_kind" in policy_data
+    has_check_config = "check_config" in policy_data
+    if has_check_kind != has_check_config:
+        raise PackError("check_kind and check_config must be supplied together")
+
+    canonical: dict[str, Any] | None = None
+    if has_configuration:
+        canonical = _normalize_configuration(policy_data["configuration"])
+
+    if has_check_kind:
+        check_kind = policy_data["check_kind"]
+        check_config = policy_data["check_config"]
+        if not isinstance(check_kind, str) or not isinstance(check_config, dict):
+            raise PackError("legacy check_kind and check_config must have valid types")
+        legacy_config = cast("dict[str, Any]", check_config)
+        legacy: dict[str, Any] = dict(legacy_config)
+        embedded_kind: object = legacy.get("kind")
+        if embedded_kind is not None and embedded_kind != check_kind:
+            raise PackError("configuration vocabulary conflicts: check_kind does not match check_config.kind")
+        legacy["kind"] = check_kind
+        legacy_normalized = _normalize_configuration(legacy)
+        if canonical is not None and canonical != legacy_normalized:
+            raise PackError("configuration vocabulary conflicts between configuration and legacy fields")
+        canonical = legacy_normalized
+
+    if canonical is not None:
+        clean["configuration"] = canonical
+
+
+def _merge_deterministic_vocabulary(
+    clean: dict[str, Any], policy_data: dict[str, Any], existing: Policy | None
+) -> None:
+    """Resolve the additive check list against the nested enforcement projection."""
+    has_checks = "deterministic_checks" in policy_data
+    has_enforcement = "enforcement" in policy_data
+    if not has_checks:
+        return
+
+    raw_checks = policy_data["deterministic_checks"]
+    if not isinstance(raw_checks, list):
+        raise PackError("deterministic_checks must be a list of strings")
+    checks_as_objects = cast("list[object]", raw_checks)
+    if not all(isinstance(check, str) for check in checks_as_objects):
+        raise PackError("deterministic_checks must be a list of strings")
+    checks = cast("list[str]", raw_checks)
+
+    if has_enforcement:
+        raw_enforcement = clean.get("enforcement")
+        if not isinstance(raw_enforcement, dict):
+            raise PackError("enforcement must be an object")
+        enforcement = dict(cast("dict[str, Any]", raw_enforcement))
+        clean["enforcement"] = enforcement
+        nested_checks = enforcement.get("deterministic_checks")
+        if nested_checks is not None and nested_checks != checks:
+            raise PackError("deterministic check vocabulary conflicts with enforcement.deterministic_checks")
+        enforcement["deterministic_checks"] = list(checks)
+        return
+
+    if existing is not None:
+        raw_enforcement = clean.get("enforcement")
+        if not isinstance(raw_enforcement, dict):
+            raise PackError("existing policy enforcement must be an object")
+        enforcement = dict(cast("dict[str, Any]", raw_enforcement))
+        clean["enforcement"] = enforcement
+        enforcement["deterministic_checks"] = list(checks)
 
 
 def _write_pack(pack: PolicyPack, path: Path) -> None:

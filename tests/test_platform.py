@@ -48,7 +48,7 @@ from conformdag.models import (
     ScanReport,
     Severity,
 )
-from conformdag.platform.app import PlatformSettings, create_app
+from conformdag.platform.app import PlatformSettings, PolicyUpsertRequest, create_app
 from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
@@ -4160,6 +4160,10 @@ def test_pack_policy_save_endpoint_persists_dashboard_check_fields(client: TestC
     assert policy.title == "Updated owner policy"
     assert policy.configuration.kind == "required-owner"
     assert policy.configuration.allowed_values == ["platform"]
+    listed = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert listed["deterministic_checks"] == ["effective-owner"]
+    assert listed["configuration"] == listed["check_config"]
+    assert listed["check_kind"] == "required-owner"
 
 
 def test_policy_upsert_endpoint_rejects_unknown_evaluator_with_422(client: TestClient, tmp_path: Path) -> None:
@@ -4208,6 +4212,199 @@ def _load_dashboard_policy(client: TestClient, pack_name: str, policy_id: str) -
     assert response.status_code == 200
     policies = cast("list[dict[str, Any]]", response.json())
     return next(policy for policy in policies if policy["id"] == policy_id)
+
+
+def _policy_update_base(pack_path: Path, tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Build the stable editable fields and canonical vocabulary for one fixture policy."""
+    policy = next(policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001")
+    editable = {
+        "title": policy.title,
+        "version": policy.version,
+        "status": policy.status.value,
+        "severity": policy.severity.value,
+        "source_document": str(policy.source.document),
+        "source_section": policy.source.section,
+        "invariant": policy.invariant,
+    }
+    configuration = policy.configuration.model_dump(mode="json")
+    enforcement = policy.enforcement.model_dump(mode="json")
+    return editable, configuration, enforcement
+
+
+def test_policy_upsert_accepts_new_vocabulary_and_persists_only_canonical_fields(
+    client: TestClient, tmp_path: Path
+) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    editable, configuration, enforcement = _policy_update_base(pack_path, tmp_path)
+    payload = {
+        **editable,
+        "deterministic_checks": ["effective-owner"],
+        "configuration": configuration,
+        "enforcement": enforcement,
+    }
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json=payload,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200, response.json()
+    saved = next(policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001")
+    assert saved.enforcement.deterministic_checks == ["effective-owner"]
+    assert saved.configuration.model_dump(mode="json") == configuration
+
+    raw_pack = YAML(typ="safe").load(pack_path.read_text(encoding="utf-8"))  # pyright: ignore[reportUnknownMemberType]
+    raw_policy = cast("dict[str, Any]", raw_pack["policies"][0])
+    assert "deterministic_checks" not in raw_policy
+    assert "configuration" in raw_policy
+    assert "check_kind" not in raw_policy
+    assert "check_config" not in raw_policy
+
+    listed = _load_dashboard_policy(client, "org", "AIR-DET-001")
+    assert listed["deterministic_checks"] == ["effective-owner"]
+    assert listed["configuration"] == configuration
+    assert listed["check_kind"] == "required-owner"
+    assert listed["check_config"] == configuration
+
+
+def test_policy_upsert_creates_policy_with_new_vocabulary_only(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    editable, configuration, enforcement = _policy_update_base(pack_path, tmp_path)
+    source_policy = next(
+        policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001"
+    )
+    payload = {
+        **editable,
+        "title": "New vocabulary policy",
+        "deterministic_checks": ["effective-owner"],
+        "configuration": configuration,
+        "enforcement": enforcement,
+        "ownership": source_policy.ownership.model_dump(mode="json"),
+        "scope": source_policy.scope.model_dump(mode="json"),
+        "exceptions": source_policy.exceptions.model_dump(mode="json"),
+    }
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-NEW-001",
+        json=payload,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200, response.json()
+    saved = next(policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-NEW-001")
+    assert saved.enforcement.deterministic_checks == ["effective-owner"]
+    assert saved.configuration.model_dump(mode="json") == configuration
+
+
+def test_policy_upsert_new_checks_only_preserves_other_enforcement_fields(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    editable, configuration, enforcement = _policy_update_base(pack_path, tmp_path)
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json={**editable, "deterministic_checks": [], "configuration": configuration},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200, response.json()
+    saved = next(policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001")
+    assert saved.enforcement.deterministic_checks == []
+    assert saved.enforcement.type.value == enforcement["type"]
+    assert saved.enforcement.blocking == enforcement["blocking"]
+    assert saved.configuration.model_dump(mode="json") == configuration
+
+
+def test_policy_upsert_omitted_vocabulary_preserves_existing_canonical_fields(
+    client: TestClient, tmp_path: Path
+) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    editable, configuration, enforcement = _policy_update_base(pack_path, tmp_path)
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json=editable,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200, response.json()
+    saved = next(policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001")
+    assert saved.configuration.model_dump(mode="json") == configuration
+    assert saved.enforcement.model_dump(mode="json") == enforcement
+
+
+def test_policy_upsert_accepts_equal_new_and_legacy_vocabularies(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    editable, configuration, enforcement = _policy_update_base(pack_path, tmp_path)
+    payload = {
+        **editable,
+        "deterministic_checks": ["effective-owner"],
+        "configuration": configuration,
+        "check_kind": "required-owner",
+        "check_config": configuration,
+        "enforcement": enforcement,
+    }
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json=payload,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_policy_upsert_schema_marks_legacy_fields_deprecated() -> None:
+    schema = PolicyUpsertRequest.model_json_schema()
+    properties = cast("dict[str, Any]", schema["properties"])
+
+    assert properties["check_kind"]["deprecated"] is True
+    assert properties["check_config"]["deprecated"] is True
+
+
+@pytest.mark.parametrize(
+    ("conflicting_fields", "message"),
+    [
+        (
+            {"check_kind": "required-tags"},
+            "configuration vocabulary conflicts",
+        ),
+        (
+            {"check_config": {"kind": "required-owner", "allowed_values": ["different"]}},
+            "configuration vocabulary conflicts",
+        ),
+        (
+            {"enforcement": {"type": "deterministic", "deterministic_checks": ["tags"]}},
+            "deterministic check vocabulary conflicts",
+        ),
+    ],
+)
+def test_policy_upsert_rejects_conflicting_vocabulary(
+    client: TestClient,
+    tmp_path: Path,
+    conflicting_fields: dict[str, Any],
+    message: str,
+) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    editable, configuration, enforcement = _policy_update_base(pack_path, tmp_path)
+    payload = {
+        **editable,
+        "deterministic_checks": ["effective-owner"],
+        "configuration": configuration,
+        "check_kind": "required-owner",
+        "check_config": configuration,
+        "enforcement": enforcement,
+        **conflicting_fields,
+    }
+    before = pack_path.read_bytes()
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-DET-001",
+        json=payload,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+    assert message in response.json()["detail"]
+    assert pack_path.read_bytes() == before
 
 
 def test_dashboard_policy_update_preserves_contract_metadata(client: TestClient, tmp_path: Path) -> None:

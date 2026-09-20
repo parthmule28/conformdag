@@ -22,7 +22,7 @@ export function PolicyTable({ policies, onEdit }: PolicyTableProps) {
           <Th>Policy</Th>
           <Th>Status</Th>
           <Th>Severity</Th>
-          <Th>Check kind</Th>
+          <Th>Deterministic checks</Th>
           <Th>Tags</Th>
           <Th>Source</Th>
           <Th>Actions</Th>
@@ -37,7 +37,13 @@ export function PolicyTable({ policies, onEdit }: PolicyTableProps) {
             </Td>
             <Td>{policy.status}</Td>
             <Td>{policy.severity}</Td>
-            <Td>{policy.check_kind}</Td>
+            <Td>
+              {policy.deterministic_checks.length === 0 ? (
+                <span className="text-muted">&mdash;</span>
+              ) : (
+                policy.deterministic_checks.join(", ")
+              )}
+            </Td>
             <Td>
               {policy.tags.length === 0 ? (
                 <span className="text-muted">&mdash;</span>
