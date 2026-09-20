@@ -5,3 +5,4 @@ Record durable decisions here using numbered Markdown files, for example `0001-a
 - [0001 Architecture principles](0001-architecture-principles.md)
 - [0002 ConformDAG 1.0.0 product thesis](0002-v1-product-thesis.md)
 - [0003 Agentic platform architecture](0003-v1-agentic-platform-architecture.md)
+- [0004 Modular-monolith application boundaries](0004-modular-monolith-application-boundaries.md)
