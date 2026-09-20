@@ -22,7 +22,7 @@ This ledger records evidence for C01–C64. It starts at `planned` because this 
 
 | ID | Status | Owner/PR | Focused evidence | Review notes |
 | --- | --- | --- | --- | --- |
-| [C01](prompts/C01-baseline-contract.md) | review | `docs/c01-baseline-contract` (PR pending) | `origin/main @ c20b9a19`; `mise run check`: 501 passed, 2 skipped, 19 deselected; `mise run test:coverage`: 90.64%; 522 collected; inventory passed; `git diff --check`; local-link/index validation | ADR 0004 proposed; documentation-only change; no product code or generated schema changes; awaiting independent review |
+| [C01](prompts/C01-baseline-contract.md) | accepted | [PR #25](https://github.com/parthmule28/conformdag/pull/25) | `origin/main @ c20b9a19`; `mise run check`: 501 passed, 2 skipped, 19 deselected; `mise run test:coverage`: 90.64%; 522 collected; inventory passed; local-link/index validation; PR CI: Fast checks, macOS, browser, benchmark, release, and Airflow runtime passed; semantic smoke skipped as opt-in | ADR 0004 accepted; independent review passed; documentation-only change; no product code or generated schema changes |
 | [C02](prompts/C02-domain-vocabulary.md) | planned | — | — | — |
 | [C03](prompts/C03-check-catalogue.md) | planned | — | — | — |
 | [C04](prompts/C04-analysis-package.md) | planned | — | — | — |
