@@ -4,13 +4,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from conformdag.analysis import SourceFile, analyze_source
-from conformdag.checks.airflow.safety import RuffAirEvaluator, TopLevelIOEvaluator
+from conformdag.checks.airflow.safety import ForbiddenOperatorEvaluator, RuffAirEvaluator, TopLevelIOEvaluator
 from conformdag.checks.common import EvaluationContext
 from conformdag.models import (
+    AirflowProfile,
     EnforcementConfig,
     EnforcementType,
+    FindingStatus,
+    ForbiddenOperatorsConfig,
     LifecycleStatus,
+    OperatorRule,
     Ownership,
     Policy,
     PolicySource,
@@ -56,6 +62,44 @@ def test_top_level_io_evaluator_is_directly_owned_by_safety_module() -> None:
     findings = TopLevelIOEvaluator().evaluate(EvaluationContext(policy, [model]))
 
     assert findings
+
+
+@pytest.mark.parametrize(
+    ("minimum", "maximum", "expected_match"),
+    (("3.3.0", None, True), ("3.4.0", None, False), (None, "3.2.0", False), (None, "3.3.0", True)),
+)
+def test_forbidden_operator_respects_airflow_version_bounds(
+    minimum: str | None,
+    maximum: str | None,
+    expected_match: bool,
+) -> None:
+    model = _model(
+        "from airflow.operators.python import PythonOperator\n"
+        "task = PythonOperator(task_id='task')\n"
+    )
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
+    original = next(item for item in pack.policies if item.id == "AIR-DET-006")
+    policy = original.model_copy(
+        update={
+            "configuration": ForbiddenOperatorsConfig(
+                operators={
+                    "airflow.operators.python.PythonOperator": OperatorRule(
+                        replacement="use-taskflow",
+                        min_airflow_version=minimum,
+                        max_airflow_version=maximum,
+                    )
+                }
+            )
+        }
+    )
+
+    findings = ForbiddenOperatorEvaluator().evaluate(
+        EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_3_3_0)
+    )
+
+    assert bool(findings) is expected_match
+    if expected_match:
+        assert findings[0].status is FindingStatus.FAIL
 
 
 def test_ruff_evaluator_uses_safety_module_patch_seam(tmp_path: Path, monkeypatch: Any) -> None:
