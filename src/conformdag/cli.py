@@ -20,8 +20,8 @@ from conformdag.benchmark import (
     render_benchmark_report,
     run_deterministic_benchmark,
 )
+from conformdag.checks.registry import CHECK_EVALUATORS, check_spec
 from conformdag.config import load_project_config, semantic_api_key
-from conformdag.evaluator import CHECK_EVALUATORS
 from conformdag.fixing import run_fix
 from conformdag.gates import evaluate_pack_gates
 from conformdag.models import (
@@ -63,7 +63,6 @@ app.add_typer(agent_app, name="agent")
 app.add_typer(baseline_app, name="baseline")
 app.add_typer(pack_app, name="pack")
 console = Console()
-RUFF_AIR_RULES = ["AIR001", "AIR002", "AIR301", "AIR302", "AIR311", "AIR312"]
 RUNTIME_OPTION = typer.Option(
     None,
     "--runtime",
@@ -137,51 +136,13 @@ def _validate_semantic_base_url(value: str) -> str:
 
 
 def _policy_configuration(kind: str) -> dict[str, object]:
-    configurations: dict[str, dict[str, object]] = {
-        "effective-owner": {"kind": "required-owner", "allowed_values": ["platform"]},
-        "tags": {
-            "kind": "required-tags",
-            "required_keys": ["domain", "owner"],
-            "allowed_values": {"domain": ["data", "analytics", "platform"]},
-        },
-        "effective-timeout": {
-            "kind": "execution-timeout",
-            "min_seconds": 1,
-            "max_seconds": 86400,
-            "approved_default_seconds": 3600,
-        },
-        "retry-bounds": {
-            "kind": "retry-bounds",
-            "min_retries": 0,
-            "max_retries": 5,
-            "min_delay_seconds": 0,
-            "max_delay_seconds": 3600,
-            "allow_zero_retries": True,
-        },
-        "module-scope-io": {
-            "kind": "top-level-io",
-            "forbidden_calls": ["requests.get", "boto3.client", "subprocess.run"],
-            "uncertain_as_review": True,
-        },
-        "operator-allow-list": {
-            "kind": "forbidden-operators",
-            "operators": {"airflow.operators.python.PythonOperator": "use-taskflow"},
-        },
-        "start-date-freshness": {"kind": "start-date-freshness", "max_age_years": 2, "require_timezone": True},
-        "catchup-policy": {"kind": "catchup-policy", "allow_catchup": False},
-        "module-scope-variables": {"kind": "module-scope-variables", "patterns": ["Variable.get"]},
-        "sensitive-logging": {
-            "kind": "sensitive-logging",
-            "secret_patterns": ["password", "token", "secret"],
-            "logging_calls": ["logging.info", "logging.warning", "logging.error"],
-        },
-        "dynamic-dag-factory": {"kind": "dynamic-dag-factory", "allow": False},
-        "ruff-air": {"kind": "ruff-air", "rules": list(RUFF_AIR_RULES)},
-    }
     try:
-        return configurations[kind].copy()
+        spec = check_spec(kind)
     except KeyError as exc:
         raise ValueError(f"no policy scaffold is defined for check kind {kind!r}") from exc
+    if spec.evaluator is None or spec.scaffold_factory is None:
+        raise ValueError(f"no policy scaffold is defined for check kind {kind!r}")
+    return spec.scaffold_factory()
 
 
 def _source_section(document_text: str) -> str:

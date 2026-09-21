@@ -63,7 +63,10 @@ def test_benchmark_documentation_records_manifest_shape() -> None:
 
 def test_architecture_documents_check_kind_and_legacy_registries() -> None:
     architecture = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
+    normalized = " ".join(architecture.split())
 
+    assert "`conformdag.checks.registry` owns the authoritative `CheckSpec` catalogue" in normalized
+    assert "Evaluator implementations remain in `evaluator.py` until C05" in normalized
     assert "registered by check kind in `CHECK_EVALUATORS`" in architecture
     assert "Legacy policy-ID aliases" in architecture
     assert "`LEGACY_POLICY_EVALUATORS`" in architecture

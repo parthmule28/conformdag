@@ -9,6 +9,15 @@ import pytest
 from typer.testing import CliRunner
 
 from conformdag.analysis import SourceFile, SourceModel, analyze_source
+from conformdag.checks.registry import (
+    AUTOFIX_KINDS as CATALOG_AUTOFIX_KINDS,
+)
+from conformdag.checks.registry import (
+    MANUAL_KINDS as CATALOG_MANUAL_KINDS,
+)
+from conformdag.checks.registry import (
+    PROPOSED_ONLY_KINDS as CATALOG_PROPOSED_ONLY_KINDS,
+)
 from conformdag.cli import app
 from conformdag.evaluator import CHECK_EVALUATORS, EvaluationContext
 from conformdag.fixing import run_fix
@@ -52,6 +61,9 @@ from conftest import VIOLATIONS_PY
 
 
 def test_fixability_matrix_is_explicit_for_every_known_kind() -> None:
+    assert AUTOFIX_KINDS is CATALOG_AUTOFIX_KINDS
+    assert PROPOSED_ONLY_KINDS is CATALOG_PROPOSED_ONLY_KINDS
+    assert MANUAL_KINDS is CATALOG_MANUAL_KINDS
     assert (
         frozenset({"required-owner", "required-tags", "execution-timeout", "retry-bounds", "catchup-policy"})
         == AUTOFIX_KINDS
@@ -75,6 +87,10 @@ def test_fixability_matrix_is_explicit_for_every_known_kind() -> None:
     )
     assert not AUTOFIX_KINDS & PROPOSED_ONLY_KINDS
     assert not AUTOFIX_KINDS & MANUAL_KINDS
+    assert "forbidden-operators" in MANUAL_KINDS
+    assert "top-level-io" in PROPOSED_ONLY_KINDS
+    assert "operator-allow-list" not in MANUAL_KINDS
+    assert "module-scope-io" not in PROPOSED_ONLY_KINDS
 
 
 def test_catchup_policy_codemod_replaces_catchup_kwarg() -> None:

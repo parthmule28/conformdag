@@ -107,7 +107,8 @@ def load_policy_pack(path: Path, repository_root: Path | None = None) -> PolicyP
 
 def validate_policy_pack(pack: PolicyPack) -> list[str]:
     """Return registry and quality-gate issues that make a pack unrunnable."""
-    from conformdag.evaluator import CHECK_EVALUATORS, policy_configuration_issues
+    from conformdag.checks.registry import CHECK_EVALUATORS
+    from conformdag.evaluator import policy_configuration_issues
     from conformdag.gates import validate_quality_gates
     from conformdag.ruff_adapter import validate_ruff_selectors
 

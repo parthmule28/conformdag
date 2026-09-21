@@ -9,7 +9,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from conformdag.analysis import (
     CallRecord,
@@ -46,6 +46,33 @@ from conformdag.models import (
     TopLevelIOConfig,
 )
 from conformdag.ruff_adapter import ruff_rule_matches, run_ruff
+
+if TYPE_CHECKING:
+    from conformdag.checks import registry as _registry_types
+
+    CHECK_CONFIGURATION_KINDS = _registry_types.CHECK_CONFIGURATION_KINDS
+    CHECK_EVALUATORS = _registry_types.CHECK_EVALUATORS
+    LEGACY_POLICY_CONFIGURATION_KINDS = _registry_types.LEGACY_POLICY_CONFIGURATION_KINDS
+    LEGACY_POLICY_EVALUATORS = _registry_types.LEGACY_POLICY_EVALUATORS
+
+
+_REGISTRY_COMPATIBILITY_NAMES = frozenset(
+    {
+        "CHECK_CONFIGURATION_KINDS",
+        "CHECK_EVALUATORS",
+        "LEGACY_POLICY_CONFIGURATION_KINDS",
+        "LEGACY_POLICY_EVALUATORS",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve legacy registry views for external imports only."""
+    if name not in _REGISTRY_COMPATIBILITY_NAMES:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from conformdag.checks import registry
+
+    return getattr(registry, name)
 
 
 class EvaluationPhaseError(RuntimeError):
@@ -942,71 +969,28 @@ class RuffAirEvaluator:
         return findings
 
 
-CHECK_EVALUATORS: dict[str, DeterministicEvaluator] = {
-    "effective-owner": OwnerEvaluator(),
-    "tags": TagEvaluator(),
-    "effective-timeout": TimeoutEvaluator(),
-    "retry-bounds": RetryEvaluator(),
-    "module-scope-io": TopLevelIOEvaluator(),
-    "operator-allow-list": ForbiddenOperatorEvaluator(),
-    "start-date-freshness": StartDateFreshnessEvaluator(),
-    "catchup-policy": CatchupPolicyEvaluator(),
-    "module-scope-variables": ModuleScopeVariablesEvaluator(),
-    "sensitive-logging": SensitiveLoggingEvaluator(),
-    "dynamic-dag-factory": DynamicDagFactoryEvaluator(),
-    "ruff-air": RuffAirEvaluator(),
-}
+def _check_registry() -> Any:
+    """Return the registry without importing it during evaluator module setup."""
+    from conformdag.checks import registry
 
-CHECK_CONFIGURATION_KINDS: dict[str, str] = {
-    "effective-owner": "required-owner",
-    "tags": "required-tags",
-    "effective-timeout": "execution-timeout",
-    "retry-bounds": "retry-bounds",
-    "module-scope-io": "top-level-io",
-    "operator-allow-list": "forbidden-operators",
-    "start-date-freshness": "start-date-freshness",
-    "catchup-policy": "catchup-policy",
-    "module-scope-variables": "module-scope-variables",
-    "sensitive-logging": "sensitive-logging",
-    "dynamic-dag-factory": "dynamic-dag-factory",
-    "ruff-air": "ruff-air",
-}
-
-LEGACY_POLICY_EVALUATORS: dict[str, DeterministicEvaluator] = {
-    "AIR-DET-001": CHECK_EVALUATORS["effective-owner"],
-    "AIR-DET-002": CHECK_EVALUATORS["tags"],
-    "AIR-DET-003": CHECK_EVALUATORS["effective-timeout"],
-    "AIR-DET-004": CHECK_EVALUATORS["retry-bounds"],
-    "AIR-DET-005": CHECK_EVALUATORS["module-scope-io"],
-    "AIR-DET-006": CHECK_EVALUATORS["operator-allow-list"],
-    "AIR-DET-012": CHECK_EVALUATORS["ruff-air"],
-}
-
-LEGACY_POLICY_CONFIGURATION_KINDS: dict[str, str] = {
-    "AIR-DET-001": "required-owner",
-    "AIR-DET-002": "required-tags",
-    "AIR-DET-003": "execution-timeout",
-    "AIR-DET-004": "retry-bounds",
-    "AIR-DET-005": "top-level-io",
-    "AIR-DET-006": "forbidden-operators",
-    "AIR-DET-012": "ruff-air",
-}
+    return registry
 
 
 def policy_configuration_issues(policy: Policy) -> list[str]:
     """Return configuration-shape errors before an evaluator can run."""
     if policy.status.value != "ACTIVE":
         return []
+    registry = _check_registry()
     checks = policy.enforcement.deterministic_checks
     actual_kind = getattr(policy.configuration, "kind", None)
     issues = [
         f"{policy.id}: deterministic check {check!r} requires configuration kind {expected!r}, got {actual_kind!r}"
         for check in checks
-        for expected in [CHECK_CONFIGURATION_KINDS.get(check)]
+        for expected in [registry.CHECK_CONFIGURATION_KINDS.get(check)]
         if expected is not None and actual_kind != expected
     ]
-    if not checks and policy.id in LEGACY_POLICY_CONFIGURATION_KINDS:
-        expected = LEGACY_POLICY_CONFIGURATION_KINDS[policy.id]
+    if not checks and policy.id in registry.LEGACY_POLICY_CONFIGURATION_KINDS:
+        expected = registry.LEGACY_POLICY_CONFIGURATION_KINDS[policy.id]
         if actual_kind != expected:
             issues.append(
                 f"{policy.id}: legacy evaluator requires configuration kind {expected!r}, got {actual_kind!r}"
@@ -1015,11 +999,12 @@ def policy_configuration_issues(policy: Policy) -> list[str]:
 
 
 def _evaluator_for_policy(policy: Policy) -> DeterministicEvaluator | None:
+    registry = _check_registry()
     for check in policy.enforcement.deterministic_checks:
-        evaluator = CHECK_EVALUATORS.get(check)
+        evaluator = registry.CHECK_EVALUATORS.get(check)
         if evaluator is not None:
             return evaluator
-    return LEGACY_POLICY_EVALUATORS.get(policy.id)
+    return registry.LEGACY_POLICY_EVALUATORS.get(policy.id)
 
 
 def evaluate_deterministic(

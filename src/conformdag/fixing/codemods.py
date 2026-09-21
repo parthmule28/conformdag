@@ -7,26 +7,21 @@ import json
 from collections.abc import Callable
 from typing import Any, Final, cast
 
+from conformdag.checks.registry import (
+    AUTOFIX_KINDS as _AUTOFIX_KINDS,
+)
+from conformdag.checks.registry import (
+    MANUAL_KINDS as _MANUAL_KINDS,
+)
+from conformdag.checks.registry import (
+    PROPOSED_ONLY_KINDS as _PROPOSED_ONLY_KINDS,
+)
 from conformdag.fixing.specs import EditSpan
 from conformdag.models import RemediationAction, RemediationPayload
 
-AUTOFIX_KINDS: Final[frozenset[str]] = frozenset(
-    {"required-owner", "required-tags", "execution-timeout", "retry-bounds", "catchup-policy"}
-)
-PROPOSED_ONLY_KINDS: Final[frozenset[str]] = frozenset({"top-level-io"})
-MANUAL_KINDS: Final[frozenset[str]] = frozenset(
-    {
-        "forbidden-operators",
-        "idempotence",
-        "orchestration-boundary",
-        "sensitive-logging",
-        "approved-abstractions",
-        "ruff-air",
-        "start-date-freshness",
-        "module-scope-variables",
-        "dynamic-dag-factory",
-    }
-)
+AUTOFIX_KINDS: Final[frozenset[str]] = _AUTOFIX_KINDS
+MANUAL_KINDS: Final[frozenset[str]] = _MANUAL_KINDS
+PROPOSED_ONLY_KINDS: Final[frozenset[str]] = _PROPOSED_ONLY_KINDS
 
 Codemod = Callable[[str, RemediationPayload], list[EditSpan] | None]
 
