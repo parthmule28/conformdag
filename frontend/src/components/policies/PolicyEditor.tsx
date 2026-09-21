@@ -250,8 +250,9 @@ export function PolicyEditor({ packName, policy, onClose }: PolicyEditorProps) {
           />
         </div>
         <p className="text-xs text-muted">
-          Ownership, scope, exceptions, and enforcement metadata are preserved as-is, and the
-          platform re-validates provenance on save.
+          Ownership, scope, and exception metadata are preserved; enforcement metadata is
+          preserved except for its synchronized deterministic check list.
+          The platform re-validates provenance on save.
         </p>
       </form>
     </Modal>

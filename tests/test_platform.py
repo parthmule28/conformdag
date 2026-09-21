@@ -4297,6 +4297,38 @@ def test_policy_upsert_creates_policy_with_new_vocabulary_only(client: TestClien
     assert saved.configuration.model_dump(mode="json") == configuration
 
 
+def test_policy_upsert_creates_policy_with_legacy_vocabulary_only(client: TestClient, tmp_path: Path) -> None:
+    pack_path = _register_org_pack(client, tmp_path)
+    editable, configuration, enforcement = _policy_update_base(pack_path, tmp_path)
+    source_policy = next(
+        policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-DET-001"
+    )
+    payload = {
+        **editable,
+        "title": "Legacy vocabulary policy",
+        "check_kind": configuration["kind"],
+        "check_config": configuration,
+        "enforcement": enforcement,
+        "ownership": source_policy.ownership.model_dump(mode="json"),
+        "scope": source_policy.scope.model_dump(mode="json"),
+        "exceptions": source_policy.exceptions.model_dump(mode="json"),
+    }
+
+    response = _as_httpx(client).put(
+        "/api/v1/packs/org/policies/AIR-LEGACY-001",
+        json=payload,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200, response.json()
+    saved = next(policy for policy in load_policy_pack(pack_path, tmp_path).policies if policy.id == "AIR-LEGACY-001")
+    assert saved.configuration.model_dump(mode="json") == configuration
+    assert saved.enforcement.model_dump(mode="json") == enforcement
+    assert saved.ownership.owner == source_policy.ownership.owner
+    assert saved.scope.files == source_policy.scope.files
+    assert saved.exceptions.require_reason == source_policy.exceptions.require_reason
+
+
 def test_policy_upsert_new_checks_only_preserves_other_enforcement_fields(client: TestClient, tmp_path: Path) -> None:
     pack_path = _register_org_pack(client, tmp_path)
     editable, configuration, enforcement = _policy_update_base(pack_path, tmp_path)
