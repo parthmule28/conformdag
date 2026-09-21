@@ -68,6 +68,44 @@ def test_ruff_air_check_kind_is_registered() -> None:
     assert "ruff-air" in CHECK_EVALUATORS
 
 
+def test_deterministic_routing_uses_registry_after_compatibility_globals_are_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.evaluator as evaluator_module
+
+    policy = Policy.model_construct(
+        id="AIR-TST-001",
+        title="Owner",
+        version="1.0.0",
+        status=LifecycleStatus.ACTIVE,
+        severity=Severity.MEDIUM,
+        airflow_profiles=[],
+        ownership=Ownership(owner="platform"),
+        source=PolicySource(document=Path("standards.md"), section="Owners", content_hash="hash"),
+        invariant="An owner is present.",
+        safe_path="Add an owner.",
+        enforcement=EnforcementConfig(
+            type=EnforcementType.DETERMINISTIC,
+            deterministic_checks=["effective-owner"],
+            blocking=True,
+        ),
+        configuration=RequiredOwnerConfig(allowed_values=["platform"]),
+    )
+    for name in (
+        "CHECK_EVALUATORS",
+        "CHECK_CONFIGURATION_KINDS",
+        "LEGACY_POLICY_EVALUATORS",
+        "LEGACY_POLICY_CONFIGURATION_KINDS",
+    ):
+        monkeypatch.delitem(evaluator_module.__dict__, name, raising=False)
+
+    findings, evaluated, skipped = evaluate_deterministic([policy], [])
+
+    assert findings == []
+    assert evaluated == ["AIR-TST-001"]
+    assert skipped == []
+
+
 def test_ruff_air_evaluator_maps_violations_to_findings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     model = _model("from airflow import DAG\ndag = DAG(dag_id='x')\n", "dags/dag.py")
     policy = _ruff_policy()
