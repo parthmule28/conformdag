@@ -142,8 +142,16 @@ atomic-write, prune, and error-handling bodies.
 The facade re-exports all model classes under their historical
 `conformdag.analysis` names. This keeps existing cache entries whose pickle
 globals point at the old module importable after `analysis.py` becomes a
-package. A regression test will write a legacy-path pickle for a `SourceModel`
-and verify that the new `ParseCache` loads it as the current model class.
+package. To keep the serialized cache format unchanged for new entries too,
+the cache-participating model classes physically owned by `models.py` retain
+`__module__ = "conformdag.analysis"` compatibility metadata. The set is
+`ParseIssueCode`, `ValueState`, `SourceFile`, `ParseIssue`, `StaticValue`,
+`ImportRecord`, `CallRecord`, `DagRecord`, `TaskRecord`,
+`ConstantAssignment`, `SecretAssignment`, and `SourceModel`; this covers the
+source model graph and its nested records without moving ownership back to the
+facade. A regression test will both write a new cache entry and inspect its
+pickle globals for the historical module path, and load a legacy-path
+`SourceModel` entry through the new `ParseCache`.
 
 ## Test strategy
 

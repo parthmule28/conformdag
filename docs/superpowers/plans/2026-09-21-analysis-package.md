@@ -1,6 +1,6 @@
 # Analysis Package Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for native, single-session implementation of this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Split the monolithic Airflow source-analysis module into explicit models, discovery, cache, and Airflow-analysis modules while preserving the complete `conformdag.analysis` import facade and behavior.
 
@@ -26,7 +26,7 @@
 - **Facade compatibility:** all 21 public names and all existing consumer imports resolve to the same objects as their direct owner modules; pin this in `tests/analysis/test_models.py`.
 - **Package/file transition:** the new package must import cleanly without a stale `analysis.py`, and the facade must not create sibling import cycles; pin package import and owner identity in `test_models.py`.
 - **Discovery containment:** nested excludes and internal/external/broken symlinks retain their exact selected-file set and issue codes; pin direct `discovery.py` behavior in `test_discovery.py`.
-- **Cache persistence:** empty/corrupt entries remain misses, failed atomic replacement preserves the last good entry, prune tolerates a racing deletion, and old `conformdag.analysis.*` pickle globals remain loadable; pin each in `test_cache.py`.
+- **Cache persistence:** empty/corrupt entries remain misses, failed atomic replacement preserves the last good entry, prune tolerates a racing deletion, new writes retain historical `conformdag.analysis.*` globals, and old entries remain loadable; pin each in `test_cache.py`.
 - **AST safety and semantics:** no repository code executes, TaskFlow context and unresolved values remain unchanged, and module-scope calls/date extraction retain their existing results; pin direct `airflow.py` behavior in `test_airflow.py`.
 
 ---
@@ -122,7 +122,12 @@
   ```
 
   Also retain the existing failed-`Path.replace`, racing-prune, and corrupt
-  pickle cases. For legacy compatibility, temporarily set the
+  pickle cases. Add a post-C04 serialization assertion: after `cache.put()`,
+  decode the pickle opcodes with `pickletools.genops()` and assert that the
+  string globals contain `"conformdag.analysis"` but not
+  `"conformdag.analysis.models"`. This proves newly written entries retain the
+  historical module path rather than merely proving that the facade can read
+  old data. For legacy compatibility, temporarily set the
   `__module__` values of `ParseIssueCode`, `ValueState`, `SourceFile`,
   `ParseIssue`, `StaticValue`, `ImportRecord`, `CallRecord`, `DagRecord`,
   `TaskRecord`, `ConstantAssignment`, `SecretAssignment`, and `SourceModel`
@@ -184,6 +189,22 @@
   all named default factories. Keep dataclass mutability/frozenness, field
   order, defaults, enum values, and type annotations exactly as they are.
   Do not move `DEFAULT_EXCLUDES` or discovery issue sets into this module.
+  After those definitions, retain the historical pickle globals for every
+  class in the cached `SourceModel` graph while keeping the physical owner in
+  `models.py`:
+
+  ```python
+  for _cache_model in (
+      ParseIssueCode, ValueState, SourceFile, ParseIssue, StaticValue,
+      ImportRecord, CallRecord, DagRecord, TaskRecord, ConstantAssignment,
+      SecretAssignment, SourceModel,
+  ):
+      _cache_model.__module__ = "conformdag.analysis"
+  del _cache_model
+  ```
+
+  The facade must expose each class before cache operations serialize it. This
+  metadata is a compatibility mechanism, not a second model implementation.
 
 - [ ] **Step 2: Move discovery ownership and imports.**
 
