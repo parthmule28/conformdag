@@ -57,5 +57,5 @@ You are the Build agent for C05. Split the deterministic evaluator monolith into
 - [ ] Every evaluator has one family module owner.
 - [ ] `conformdag.evaluator` remains import-compatible.
 - [ ] Ruff and structural fingerprint behavior is unchanged.
-- [ ] No adapter dependency entered checks.
+- [ ] No CLI, FastAPI, platform, or semantic-provider dependency entered checks; the Ruff adapter remains the intentional single ownership seam in `checks.airflow.safety`.
 - [ ] Commit with `refactor: split deterministic checks`; open the PR without merging.

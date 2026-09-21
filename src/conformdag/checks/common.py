@@ -72,7 +72,7 @@ def structural_fingerprint(policy: Policy, path: str, anchor: str, status: Findi
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def finding(
+def _finding(
     policy: Policy,
     model: SourceModel,
     line: int,
@@ -97,4 +97,5 @@ def finding(
     )
 
 
-_finding = finding
+# Retain the approved private contract while family modules use the descriptive alias.
+finding = _finding

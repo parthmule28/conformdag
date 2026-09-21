@@ -47,7 +47,7 @@
 - Consumes: the current `conformdag.evaluator` names and the planned direct module paths.
 - Produces: failing tests that pin family ownership, facade identity, common contracts, and routing/Ruff seams before moving implementation bodies.
 
-- [ ] **Step 1: Write the failing direct-import and identity tests.**
+- [x] **Step 1: Write the failing direct-import and identity tests.**
 
 Use this exact evaluator ownership map:
 
@@ -81,7 +81,7 @@ Also assert that `EvaluationContext`, `DeterministicEvaluator`, `fix_target`,
 from the facade are the same objects from `checks.common`, and that facade
 registry views are the exact dictionaries from `checks.registry`.
 
-- [ ] **Step 2: Add direct family characterization cases.**
+- [x] **Step 2: Add direct family characterization cases.**
 
 Keep the existing end-to-end evaluator tests as the behavior oracle and add
 one direct ownership test in each focused module. The tests must instantiate
@@ -90,7 +90,7 @@ models/policies already used by the characterization suite. The safety test
 must patch `conformdag.checks.airflow.safety.run_ruff`, not the old facade
 path, for both a mapped violation and the no-binary fallback.
 
-- [ ] **Step 3: Run the new tests and record the expected pre-move failure.**
+- [x] **Step 3: Run the new tests and record the expected pre-move failure.**
 
 Run:
 
@@ -112,7 +112,7 @@ weaken the tests to make the pre-move run pass.
 - Consumes: the current contract/helper definitions in `src/conformdag/evaluator.py`.
 - Produces: `EvaluationPhaseError`, `EvaluationContext`, `DeterministicEvaluator`, `fix_target`, `policy_applies`, `redact_evidence`, `structural_fingerprint`, and `_finding` for all family modules.
 
-- [ ] **Step 1: Move the imports and definitions without changing bodies.**
+- [x] **Step 1: Move the imports and definitions without changing bodies.**
 
 Create `checks/common.py` with the exact current signatures:
 
@@ -143,7 +143,7 @@ Copy `policy_applies`, `redact_evidence`, `structural_fingerprint`, and
 `_finding` verbatim, including imports and type annotations. Do not import the
 registry, Ruff adapter, or any application layer.
 
-- [ ] **Step 2: Run common tests.**
+- [x] **Step 2: Run common tests.**
 
 Run:
 
@@ -164,7 +164,7 @@ Expected: the direct common tests pass without importing the evaluator facade.
 - Consumes: `checks.common` and the existing analysis/model types.
 - Produces: `OwnerEvaluator` and `TagEvaluator`, with unchanged `policy_id`, `evaluate()` signatures, finding payloads, sort order, and helper calls.
 
-- [ ] **Step 1: Add a minimal Airflow package initializer.**
+- [x] **Step 1: Add a minimal Airflow package initializer.**
 
 Create `src/conformdag/checks/airflow/__init__.py` with only a package
 docstring and no imports. At this checkpoint `metadata.py` is the only family
@@ -172,13 +172,13 @@ module that exists, so importing nonexistent scheduling or safety siblings
 would make the metadata test fail for an avoidable package-initialization
 reason.
 
-- [ ] **Step 2: Move `OwnerEvaluator` and `TagEvaluator` verbatim.**
+- [x] **Step 2: Move `OwnerEvaluator` and `TagEvaluator` verbatim.**
 
 Update only their imports to `conformdag.checks.common` and leave all finding
 construction, casts, sorting, and policy IDs unchanged. Do not leave a second
 class definition in `evaluator.py` after the facade is installed.
 
-- [ ] **Step 3: Run direct metadata tests.**
+- [x] **Step 3: Run direct metadata tests.**
 
 Run:
 
@@ -202,20 +202,20 @@ modules.
 - Consumes: `checks.common`, `SourceModel`, `DagRecord`, `StaticValue`, `TaskRecord`, `ValueState`, and the five scheduling configuration models.
 - Produces: `_dag_for_task`, `_effective_value`, `TimeoutEvaluator`, `RetryEvaluator`, `StartDateFreshnessEvaluator`, and `CatchupPolicyEvaluator`.
 
-- [ ] **Step 1: Move the effective-value helpers first.**
+- [x] **Step 1: Move the effective-value helpers first.**
 
 Copy `_dag_for_task` and `_effective_value` without changing precedence:
 task unresolved kwargs, task values, DAG unresolved defaults, DAG defaults,
 then absent. Keep the same `ValueState` values and DAG lookup order.
 
-- [ ] **Step 2: Move the four scheduling evaluator classes verbatim.**
+- [x] **Step 2: Move the four scheduling evaluator classes verbatim.**
 
 Copy `TimeoutEvaluator`, `RetryEvaluator`, `StartDateFreshnessEvaluator`, and
 `CatchupPolicyEvaluator`, including `_target_seconds`, `_unresolved_finding`,
 and `_payload`. Replace only old helper imports with local module imports and
 `checks.common` imports.
 
-- [ ] **Step 3: Run scheduling characterization tests.**
+- [x] **Step 3: Run scheduling characterization tests.**
 
 Run:
 
@@ -237,7 +237,7 @@ fingerprints.
 - Consumes: `checks.common`, analysis call/constant/import records, safety configuration models, and `conformdag.ruff_adapter`.
 - Produces: `_version_tuple`, the six safety evaluator classes, `_resolve_imported_call`, `_ruff_path`, `ruff_policies_for_scan`, and `ruff_rules_for_policies`.
 
-- [ ] **Step 1: Move non-Ruff safety evaluators and the operator-version helper verbatim.**
+- [x] **Step 1: Move non-Ruff safety evaluators and the operator-version helper verbatim.**
 
 Move `_version_tuple` with `ForbiddenOperatorEvaluator`, then move
 `TopLevelIOEvaluator`, `_resolve_imported_call`,
@@ -246,14 +246,14 @@ Move `_version_tuple` with `ForbiddenOperatorEvaluator`, then move
 module-scope filtering, operator profile/version checks, secret detection, and
 all remediation payloads.
 
-- [ ] **Step 2: Move Ruff selection and mapping verbatim.**
+- [x] **Step 2: Move Ruff selection and mapping verbatim.**
 
 Move `_ruff_path`, `ruff_policies_for_scan`, `ruff_rules_for_policies`, and
 `RuffAirEvaluator`. Import `run_ruff` and `ruff_rule_matches` in this module.
 Keep path normalization, scanned-file filtering, malformed-location guards,
 selector matching, and the `source fixes are disabled` remediation unchanged.
 
-- [ ] **Step 3: Move Ruff tests to the owning patch seam.**
+- [x] **Step 3: Move Ruff tests to the owning patch seam.**
 
 Change only evaluator tests that patch the old implementation seam to:
 
@@ -263,7 +263,7 @@ monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", fake_run_ruff)
 
 Retain adapter-level tests that patch `conformdag.ruff_adapter` directly.
 
-- [ ] **Step 4: Run safety and Ruff tests.**
+- [x] **Step 4: Run safety and Ruff tests.**
 
 Run:
 
@@ -274,7 +274,7 @@ mise exec -- uv run pytest tests/checks/test_safety.py tests/test_evaluator.py -
 Expected: PASS, including symlink scan identity and the single Ruff fallback
 path.
 
-- [ ] **Step 5: Complete the Airflow package initializer after all family modules exist.**
+- [x] **Step 5: Complete the Airflow package initializer after all family modules exist.**
 
 Replace the minimal initializer with imports for exactly the twelve classes:
 
@@ -298,7 +298,7 @@ from conformdag.checks.airflow.scheduling import (
 
 Keep the initializer free of evaluation logic and private helper exports.
 
-- [ ] **Step 6: Add the focused operator-version regression.**
+- [x] **Step 6: Add the focused operator-version regression.**
 
 In `tests/checks/test_safety.py`, evaluate the same imported
 `PythonOperator` call with an `OperatorRule` under these exact cases:
@@ -328,13 +328,13 @@ directions without adding another Airflow profile enum.
 - Consumes: `checks.common`, `checks.airflow.safety`, and the existing registry views.
 - Produces: `_check_registry`, `policy_configuration_issues`, `_evaluator_for_policy`, and `evaluate_deterministic()` with the current signatures and tuple result.
 
-- [ ] **Step 1: Move routing helpers and preserve lazy registry lookup.**
+- [x] **Step 1: Move routing helpers and preserve lazy registry lookup.**
 
 Create `checks/evaluate.py` with the existing bodies of `_check_registry`,
 `policy_configuration_issues`, and `_evaluator_for_policy`. Keep registry
 access local to the helper so import order remains safe.
 
-- [ ] **Step 2: Move `evaluate_deterministic()` verbatim.**
+- [x] **Step 2: Move `evaluate_deterministic()` verbatim.**
 
 Retain sorted policy IDs, configuration validation before evaluation, active
 deterministic/hybrid filtering, profile applicability, legacy fallback, and
@@ -342,7 +342,7 @@ the `(findings, evaluated, skipped)` return contract. Use the `safety` module
 object for both `safety.ruff_rules_for_policies(...)` and
 `safety.run_ruff(...)`, so the union invocation remains one patchable owner.
 
-- [ ] **Step 3: Point the registry at family modules.**
+- [x] **Step 3: Point the registry at family modules.**
 
 Change only `_build_check_specs()` imports from `conformdag.evaluator` to the
 metadata, scheduling, and safety modules. Change the `TYPE_CHECKING` protocol
@@ -350,7 +350,7 @@ import to `from conformdag.checks.common import DeterministicEvaluator`.
 Leave every `CheckSpec` entry and every derived compatibility dictionary
 unchanged.
 
-- [ ] **Step 4: Run routing, registry, and pre-facade characterization tests.**
+- [x] **Step 4: Run routing, registry, and pre-facade characterization tests.**
 
 Run:
 
@@ -374,7 +374,7 @@ true until Task 7 replaces the monolith with the compatibility facade.
 - Consumes: all common, family, safety, and evaluate module exports.
 - Produces: the unchanged `conformdag.evaluator` import surface with no evaluator implementation or catalogue duplication.
 
-- [ ] **Step 1: Replace the monolith with a documented facade.**
+- [x] **Step 1: Replace the monolith with a documented facade.**
 
 Use this module-docstring contract:
 
@@ -394,13 +394,13 @@ family classes, `evaluate_deterministic`, `policy_configuration_issues`,
 so registry views still resolve from `conformdag.checks.registry`. Do not
 define replacement dictionaries or wrapper evaluator classes.
 
-- [ ] **Step 2: Keep existing consumers on the facade.**
+- [x] **Step 2: Keep existing consumers on the facade.**
 
 Leave `scan.py`, `policy.py`, `semantic_evaluator.py`, benchmark code, and
 existing external-facing tests importing from `conformdag.evaluator` unless a
 direct import is required to eliminate a cycle.
 
-- [ ] **Step 3: Update architecture text and assert parity.**
+- [x] **Step 3: Update architecture text and assert parity.**
 
 Change `docs/architecture.md` to state that `checks.common`,
 `checks.airflow.*`, and `checks.evaluate` own deterministic evaluation while
@@ -408,7 +408,7 @@ Change `docs/architecture.md` to state that `checks.common`,
 registry views are the exact registry dictionaries and facade class/helper
 identities remain stable.
 
-- [ ] **Step 4: Run the complete focused suite.**
+- [x] **Step 4: Run the complete focused suite.**
 
 Run:
 
@@ -428,7 +428,7 @@ Expected: all focused tests pass with no finding or report diffs.
 - Consumes: the completed modular evaluator and verification matrix.
 - Produces: a reviewable C05 branch and PR; no merge.
 
-- [ ] **Step 1: Run the full verification matrix.**
+- [x] **Step 1: Run the full verification matrix.**
 
 Run each command and retain its exit status/output:
 
@@ -443,14 +443,14 @@ The default suite must include the 80-case round-trip population. Coverage
 must meet the repository's 90% gate; Ruff, Pyright, policy-pack validation,
 inventory, and all non-runtime tests must pass.
 
-- [ ] **Step 2: Update the slice ledger with factual evidence.**
+- [x] **Step 2: Update the slice ledger with factual evidence.**
 
 Change C04 from `review` to `accepted` and record PR #28's merge commit
 `3a651fe8b516b18fb8de2994e76c262635ce7482`. Change C05 from `planned` to
 `review`, record the new branch/PR, and summarize focused/full verification
 results without claiming human acceptance before merge.
 
-- [ ] **Step 3: Commit the implementation.**
+- [x] **Step 3: Commit the implementation.**
 
 Run:
 
@@ -462,7 +462,7 @@ git commit -m "refactor: split deterministic checks"
 
 Do not stage the pre-existing untracked `.serena/` directory.
 
-- [ ] **Step 4: Request independent review and open the PR.**
+- [x] **Step 4: Request independent review and open the PR.**
 
 Use the repository's independent review workflow to inspect import direction,
 registry ownership, finding/fingerprint parity, and Ruff behavior. Address
