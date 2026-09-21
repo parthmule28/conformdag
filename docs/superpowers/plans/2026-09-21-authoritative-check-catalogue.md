@@ -382,7 +382,7 @@ The implementation changes are intentionally limited to these ownership boundari
 
 - [ ] **Step 4: Update the C03 progress row.**
 
-  Record the branch, commit/PR reference, test counts, coverage, schema/pack/build evidence, and the explicit limitation that semantic-only entries remain non-executable until C05. Keep C02’s accepted evidence unchanged.
+  Record the branch, commit/PR reference, test counts, coverage, schema/pack/build evidence, and the explicit limitation that semantic-only entries remain non-executable until they are separately implemented in a future scoped slice. Keep C02’s accepted evidence unchanged.
 
 - [ ] **Step 5: Inspect and commit the final evidence.**
 
@@ -412,8 +412,8 @@ The implementation changes are intentionally limited to these ownership boundari
   - `mise run build`: <record result>
   - Focused registry/evaluator/fixing/CLI/policy/round-trip tests: <record result>
 
-  Semantic-only entries remain non-executable until the separately scoped C05
-  evaluator modularization work.
+  Semantic-only entries remain non-executable until they are separately
+  implemented in a future scoped slice.
   ```
 
   ```bash
