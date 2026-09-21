@@ -1,6 +1,6 @@
 # Deterministic Checks Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for native, single-session implementation of this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Split the deterministic evaluator into common, Airflow family, and orchestration modules while preserving the C03 catalogue and the `conformdag.evaluator` import facade.
 
@@ -16,6 +16,7 @@
 - `conformdag.checks.registry` remains the one authoritative catalogue; do not create a second registry in the facade.
 - Checks must not import CLI, FastAPI, platform, or semantic-provider code.
 - Do not alter policy model fields or fix-engine flow.
+- Do not pull C06 application-scan orchestration, runtime/baseline/gate composition, CLI delegation, or platform workflow into C05.
 - Preserve `EvaluationContext`, `DeterministicEvaluator`, `policy_applies`, `structural_fingerprint`, `fix_target`, and `evaluate_deterministic()` compatibility.
 - Preserve the C03 catalogue's 15 entries and 12 executable evaluator-backed entries.
 - Commit with `refactor: split deterministic checks`; open the PR without merging.
@@ -24,6 +25,7 @@
 
 - **Import cycles and initialization order:** registry-first and facade-first imports must expose identical catalogue dictionaries and evaluator instances. Test in `tests/checks/test_imports.py`.
 - **Ruff ownership and path identity:** precomputed violations, fallback execution, symlink scan paths, malformed locations, and selector filtering must remain unchanged. Test in `tests/checks/test_safety.py` and retain the existing adapter characterization tests.
+- **Operator version bounds:** min/max Airflow version rules must continue to skip out-of-range profiles and report in-range profiles. Test in `tests/checks/test_safety.py`.
 - **Routing semantics:** inactive, non-deterministic, profile-inapplicable, unsupported, legacy, and configuration-invalid policies must retain their existing evaluated/skipped/error behavior. Test in `tests/checks/test_evaluate.py` and retain `tests/test_evaluator.py`.
 - **Facade identity:** every moved evaluator class and shared public helper must be the same object reachable through `conformdag.evaluator`, not a wrapper or duplicate. Test in `tests/checks/test_imports.py`.
 - **Compatibility documentation:** the facade must state its rationale, introduction version, and removal condition, and architecture documentation must describe the post-C05 ownership. Test with the existing documentation suite and `git diff --check`.
@@ -162,11 +164,13 @@ Expected: the direct common tests pass without importing the evaluator facade.
 - Consumes: `checks.common` and the existing analysis/model types.
 - Produces: `OwnerEvaluator` and `TagEvaluator`, with unchanged `policy_id`, `evaluate()` signatures, finding payloads, sort order, and helper calls.
 
-- [ ] **Step 1: Add the thin Airflow package initializer.**
+- [ ] **Step 1: Add a minimal Airflow package initializer.**
 
-Re-export exactly the twelve evaluator classes from their family modules. Do
-not put evaluation logic in `__init__.py` and do not re-export private
-helpers.
+Create `src/conformdag/checks/airflow/__init__.py` with only a package
+docstring and no imports. At this checkpoint `metadata.py` is the only family
+module that exists, so importing nonexistent scheduling or safety siblings
+would make the metadata test fail for an avoidable package-initialization
+reason.
 
 - [ ] **Step 2: Move `OwnerEvaluator` and `TagEvaluator` verbatim.**
 
@@ -184,6 +188,9 @@ mise exec -- uv run pytest tests/checks/test_metadata.py tests/test_reporting.py
 
 Expected: direct classes produce the same owner/tag findings as the existing
 facade imports.
+
+The initializer remains minimal until Task 5 has created both remaining family
+modules.
 
 ### Task 4: Move scheduling evaluators and effective-value helpers
 
@@ -228,11 +235,12 @@ fingerprints.
 
 **Interfaces:**
 - Consumes: `checks.common`, analysis call/constant/import records, safety configuration models, and `conformdag.ruff_adapter`.
-- Produces: the six safety evaluator classes, `_resolve_imported_call`, `_ruff_path`, `ruff_policies_for_scan`, and `ruff_rules_for_policies`.
+- Produces: `_version_tuple`, the six safety evaluator classes, `_resolve_imported_call`, `_ruff_path`, `ruff_policies_for_scan`, and `ruff_rules_for_policies`.
 
-- [ ] **Step 1: Move non-Ruff safety evaluators verbatim.**
+- [ ] **Step 1: Move non-Ruff safety evaluators and the operator-version helper verbatim.**
 
-Move `TopLevelIOEvaluator`, `_resolve_imported_call`,
+Move `_version_tuple` with `ForbiddenOperatorEvaluator`, then move
+`TopLevelIOEvaluator`, `_resolve_imported_call`,
 `ForbiddenOperatorEvaluator`, `ModuleScopeVariablesEvaluator`,
 `SensitiveLoggingEvaluator`, and `DynamicDagFactoryEvaluator`. Preserve
 module-scope filtering, operator profile/version checks, secret detection, and
@@ -265,6 +273,48 @@ mise exec -- uv run pytest tests/checks/test_safety.py tests/test_evaluator.py -
 
 Expected: PASS, including symlink scan identity and the single Ruff fallback
 path.
+
+- [ ] **Step 5: Complete the Airflow package initializer after all family modules exist.**
+
+Replace the minimal initializer with imports for exactly the twelve classes:
+
+```python
+from conformdag.checks.airflow.metadata import OwnerEvaluator, TagEvaluator
+from conformdag.checks.airflow.safety import (
+    DynamicDagFactoryEvaluator,
+    ForbiddenOperatorEvaluator,
+    ModuleScopeVariablesEvaluator,
+    RuffAirEvaluator,
+    SensitiveLoggingEvaluator,
+    TopLevelIOEvaluator,
+)
+from conformdag.checks.airflow.scheduling import (
+    CatchupPolicyEvaluator,
+    RetryEvaluator,
+    StartDateFreshnessEvaluator,
+    TimeoutEvaluator,
+)
+```
+
+Keep the initializer free of evaluation logic and private helper exports.
+
+- [ ] **Step 6: Add the focused operator-version regression.**
+
+In `tests/checks/test_safety.py`, evaluate the same imported
+`PythonOperator` call with an `OperatorRule` under these exact cases:
+
+```python
+("3.3.0", None, True),
+("3.4.0", None, False),
+(None, "3.2.0", False),
+(None, "3.3.0", True),
+```
+
+Use `AirflowProfile.AIRFLOW_3_3_0` for the context and assert that findings
+exist only for the two in-range cases (`expected_match is True`). Out-of-range
+rules are skipped and therefore produce no finding; in-range rules produce a
+`FindingStatus.FAIL` finding. This pins `_version_tuple` and both comparison
+directions without adding another Airflow profile enum.
 
 ### Task 6: Move orchestration and update the C03 registry
 
@@ -300,16 +350,18 @@ import to `from conformdag.checks.common import DeterministicEvaluator`.
 Leave every `CheckSpec` entry and every derived compatibility dictionary
 unchanged.
 
-- [ ] **Step 4: Run routing, registry, and import-order tests.**
+- [ ] **Step 4: Run routing, registry, and pre-facade characterization tests.**
 
 Run:
 
 ```bash
-mise exec -- uv run pytest tests/checks tests/test_evaluator.py tests/test_check_pack.py tests/test_scan.py tests/test_fixing.py -x --tb=short
+mise exec -- uv run pytest tests/checks/test_registry.py tests/checks/test_evaluate.py tests/checks/test_common.py tests/checks/test_metadata.py tests/checks/test_scheduling.py tests/checks/test_safety.py tests/test_evaluator.py tests/test_check_pack.py tests/test_scan.py tests/test_fixing.py -x --tb=short
 ```
 
-Expected: PASS, including registry-first/facade-first subprocess imports and
-the existing fixing characterization cases.
+Expected: PASS, including routing, family behavior, registry ownership, and
+the existing fixing characterization cases. Do not include
+`tests/checks/test_imports.py` yet: it asserts facade identity that cannot be
+true until Task 7 replaces the monolith with the compatibility facade.
 
 ### Task 7: Install the compatibility facade and update architecture documentation
 

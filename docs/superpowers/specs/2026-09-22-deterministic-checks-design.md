@@ -29,6 +29,9 @@ boundaries for later slices.
   code.
 - Do not change policy model fields, schemas, fix-engine flow, or scan
   orchestration.
+- Keep complete application orchestration, runtime/baseline/gate composition,
+  CLI delegation, and platform workflow ownership out of C05; C06 owns those
+  concerns while `scan_repository()` remains the core primitive.
 
 ## Ownership map
 
@@ -37,13 +40,15 @@ boundaries for later slices.
 | `checks/common.py` | `EvaluationPhaseError`, `EvaluationContext`, `DeterministicEvaluator`, `fix_target`, `policy_applies`, `redact_evidence`, `structural_fingerprint`, and the shared `_finding` builder |
 | `checks/airflow/metadata.py` | `OwnerEvaluator`, `TagEvaluator` |
 | `checks/airflow/scheduling.py` | `_dag_for_task`, `_effective_value`, `TimeoutEvaluator`, `RetryEvaluator`, `StartDateFreshnessEvaluator`, `CatchupPolicyEvaluator` |
-| `checks/airflow/safety.py` | `TopLevelIOEvaluator`, `ForbiddenOperatorEvaluator`, `ModuleScopeVariablesEvaluator`, `SensitiveLoggingEvaluator`, `DynamicDagFactoryEvaluator`, `RuffAirEvaluator`, imported-call/path helpers, and Ruff policy/rule helpers |
-| `checks/evaluate.py` | registry lookup, policy configuration validation, deterministic routing, shared Ruff orchestration, and `evaluate_deterministic()` |
+| `checks/airflow/safety.py` | `_version_tuple`, `TopLevelIOEvaluator`, `ForbiddenOperatorEvaluator`, `ModuleScopeVariablesEvaluator`, `SensitiveLoggingEvaluator`, `DynamicDagFactoryEvaluator`, `RuffAirEvaluator`, imported-call/path helpers, and Ruff policy/rule helpers |
+| `checks/evaluate.py` | registry lookup, policy configuration validation, deterministic routing, shared Ruff orchestration, and `evaluate_deterministic()`; it does not own complete application scans, runtime, baselines, gates, or CLI composition |
 | `evaluator.py` | compatibility imports and the existing lazy registry compatibility views; no evaluator instances or second registry |
 
-The `checks.airflow` package initializer re-exports family classes for direct
-use but contains no evaluation logic. Family modules depend on
-`checks.common`; they do not depend on the facade or the registry.
+The `checks.airflow` package initializer starts as a minimal module while the
+family files are created, then re-exports all twelve family classes only after
+metadata, scheduling, and safety exist. It contains no evaluation logic.
+Family modules depend on `checks.common`; they do not depend on the facade or
+the registry.
 
 ## Import direction
 
@@ -90,7 +95,7 @@ Focused tests will establish:
    dictionaries and evaluator instances.
 3. The existing evaluator characterization suite still covers the findings,
    and direct family tests cover the moved ownership and Ruff patch seam.
-4. Ruff fallback, precomputed violations, symlink scan identity, and selector
-   filtering remain unchanged.
+4. Airflow operator min/max version bounds, Ruff fallback, precomputed
+   violations, symlink scan identity, and selector filtering remain unchanged.
 5. Full non-runtime tests, coverage, schema synchronization, Ruff, Pyright,
    policy-pack validation, and the round-trip fixing population remain green.
