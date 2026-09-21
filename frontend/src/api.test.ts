@@ -83,8 +83,10 @@ const POLICY_FIXTURE = {
   status: "ACTIVE",
   severity: "HIGH",
   tags: ["ownership", "core"],
-  check_kind: "effective-owner",
-  check_config: { owner: "data-platform" },
+  check_kind: "required-owner",
+  check_config: { kind: "required-owner", owner: "data-platform" },
+  deterministic_checks: ["effective-owner"],
+  configuration: { kind: "required-owner", owner: "data-platform" },
   source_document: "standards.md",
   source_section: "§3 Owners",
   source_version: "2026-09",
@@ -278,8 +280,8 @@ describe("error contract", () => {
         version: "",
         status: "ACTIVE",
         severity: "HIGH",
-        check_kind: "effective-owner",
-        check_config: {},
+        deterministic_checks: ["effective-owner"],
+        configuration: { kind: "required-owner" },
         source_document: "standards.md",
         source_section: "§3 Owners",
         invariant: "invariant",
@@ -560,6 +562,8 @@ describe("policy pack routes", () => {
     expect(lastCall().url).toBe("/api/v1/packs/core-pack/policies");
     expect(policies[0]?.tags).toEqual(["ownership", "core"]);
     expect(policies[0]?.enforcement.deterministic_checks).toEqual(["effective-owner"]);
+    expect(policies[0]?.deterministic_checks).toEqual(["effective-owner"]);
+    expect(policies[0]?.configuration).toEqual({ kind: "required-owner", owner: "data-platform" });
   });
 
   it("upserts a policy with PUT and a tags-bearing body", async () => {
@@ -568,8 +572,8 @@ describe("policy pack routes", () => {
       version: POLICY_FIXTURE.version,
       status: POLICY_FIXTURE.status,
       severity: POLICY_FIXTURE.severity,
-      check_kind: POLICY_FIXTURE.check_kind,
-      check_config: POLICY_FIXTURE.check_config,
+      deterministic_checks: POLICY_FIXTURE.deterministic_checks,
+      configuration: POLICY_FIXTURE.configuration,
       source_document: POLICY_FIXTURE.source_document,
       source_section: POLICY_FIXTURE.source_section,
       invariant: POLICY_FIXTURE.invariant,
@@ -590,8 +594,8 @@ describe("policy pack routes", () => {
       version: "3",
       status: "ACTIVE",
       severity: "HIGH",
-      check_kind: "effective-owner",
-      check_config: {},
+      deterministic_checks: ["effective-owner"],
+      configuration: { kind: "required-owner" },
       source_document: "standards.md",
       source_section: "§3 Owners",
       invariant: "invariant",

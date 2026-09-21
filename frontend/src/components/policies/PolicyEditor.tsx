@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import type { PolicyInfo, PolicyUpsertRequest } from "../../api";
+import type { PolicyConfiguration, PolicyInfo, PolicyUpsertRequest } from "../../api";
 import {
   describeApiError,
   useUpdatePolicyMutation,
@@ -25,8 +25,8 @@ interface PolicyDraft {
   severity: string;
   invariant: string;
   tagsText: string;
-  checkKind: string;
-  checkConfigText: string;
+  deterministicChecksText: string;
+  configurationText: string;
   sourceDocument: string;
   sourceSection: string;
   sourceVersion: string;
@@ -41,8 +41,8 @@ function draftFromPolicy(policy: PolicyInfo): PolicyDraft {
     severity: policy.severity,
     invariant: policy.invariant,
     tagsText: policy.tags.join(", "),
-    checkKind: policy.check_kind,
-    checkConfigText: JSON.stringify(policy.check_config, null, 2),
+    deterministicChecksText: policy.deterministic_checks.join(", "),
+    configurationText: JSON.stringify(policy.configuration, null, 2),
     sourceDocument: policy.source_document,
     sourceSection: policy.source_section,
     sourceVersion: policy.source_version ?? "",
@@ -58,20 +58,20 @@ function parseTags(tagsText: string): string[] {
 }
 
 /**
- * Parses the check-configuration JSON draft. Parse errors are returned as a
+ * Parses the configuration JSON draft. Parse errors are returned as a
  * form error so a broken draft stays in the editor and can never be saved.
  */
-function parseCheckConfig(text: string): { config: Record<string, unknown> | null; error: string | null } {
+function parseConfiguration(text: string): { configuration: Record<string, unknown> | null; error: string | null } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { config: null, error: "Check configuration must be valid JSON." };
+    return { configuration: null, error: "Configuration must be valid JSON." };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { config: null, error: "Check configuration must be a JSON object." };
+    return { configuration: null, error: "Configuration must be a JSON object." };
   }
-  return { config: parsed as Record<string, unknown>, error: null };
+  return { configuration: parsed as Record<string, unknown>, error: null };
 }
 
 export interface PolicyEditorProps {
@@ -82,9 +82,10 @@ export interface PolicyEditorProps {
 
 /**
  * Modal editor for one existing policy. The payload always carries the
- * loaded contract metadata (ownership, scope, exceptions, enforcement)
- * untouched, so an edit is lossless; tags travel as an explicit ordered list
- * (including `[]` when cleared). Server rejections keep the draft open.
+ * loaded contract metadata (ownership, scope, and exceptions) untouched, and
+ * synchronizes the nested enforcement check list with the canonical field so
+ * an edit remains lossless; tags travel as an explicit ordered list (including
+ * `[]` when cleared). Server rejections keep the draft open.
  */
 export function PolicyEditor({ packName, policy, onClose }: PolicyEditorProps) {
   const [draft, setDraft] = useState<PolicyDraft>(() => draftFromPolicy(policy));
@@ -93,18 +94,21 @@ export function PolicyEditor({ packName, policy, onClose }: PolicyEditorProps) {
 
   const patch = (part: Partial<PolicyDraft>) => setDraft((previous) => ({ ...previous, ...part }));
 
-  const { config: checkConfig, error: configError } = parseCheckConfig(draft.checkConfigText);
+  const { configuration, error: configurationError } = parseConfiguration(draft.configurationText);
+  const deterministicChecks = draft.deterministicChecksText
+    .split(",")
+    .map((check) => check.trim())
+    .filter((check) => check !== "");
   const requiredMissing =
     draft.title.trim() === "" ||
     draft.version.trim() === "" ||
     draft.invariant.trim() === "" ||
-    draft.checkKind.trim() === "" ||
     draft.sourceDocument.trim() === "" ||
     draft.sourceSection.trim() === "";
-  const saveBlocked = configError !== null || requiredMissing;
+  const saveBlocked = configurationError !== null || requiredMissing;
 
   const handleSave = (): void => {
-    if (saveBlocked || checkConfig === null) {
+    if (saveBlocked || configuration === null) {
       return;
     }
     setSaveError(null);
@@ -113,8 +117,8 @@ export function PolicyEditor({ packName, policy, onClose }: PolicyEditorProps) {
       version: draft.version.trim(),
       status: draft.status,
       severity: draft.severity,
-      check_kind: draft.checkKind.trim(),
-      check_config: checkConfig,
+      deterministic_checks: deterministicChecks,
+      configuration: configuration as PolicyConfiguration,
       source_document: draft.sourceDocument.trim(),
       source_section: draft.sourceSection.trim(),
       invariant: draft.invariant,
@@ -123,7 +127,7 @@ export function PolicyEditor({ packName, policy, onClose }: PolicyEditorProps) {
       ownership: policy.ownership,
       scope: policy.scope,
       exceptions: policy.exceptions,
-      enforcement: policy.enforcement,
+      enforcement: { ...policy.enforcement, deterministic_checks: deterministicChecks },
       tags: parseTags(draft.tagsText),
     };
     update.mutate(
@@ -210,9 +214,10 @@ export function PolicyEditor({ packName, policy, onClose }: PolicyEditorProps) {
         />
         <div className="grid gap-3 sm:grid-cols-2">
           <Input
-            label="Check kind"
-            value={draft.checkKind}
-            onChange={(event) => patch({ checkKind: event.target.value })}
+            label="Deterministic checks"
+            hint="Comma-separated; leave empty for semantic-only policies."
+            value={draft.deterministicChecksText}
+            onChange={(event) => patch({ deterministicChecksText: event.target.value })}
           />
           <Input
             label="Safe path"
@@ -221,11 +226,11 @@ export function PolicyEditor({ packName, policy, onClose }: PolicyEditorProps) {
           />
         </div>
         <Textarea
-          label="Check configuration"
+          label="Configuration"
           rows={6}
-          error={configError ?? undefined}
-          value={draft.checkConfigText}
-          onChange={(event) => patch({ checkConfigText: event.target.value })}
+          error={configurationError ?? undefined}
+          value={draft.configurationText}
+          onChange={(event) => patch({ configurationText: event.target.value })}
         />
         <div className="grid gap-3 sm:grid-cols-3">
           <Input
@@ -245,8 +250,9 @@ export function PolicyEditor({ packName, policy, onClose }: PolicyEditorProps) {
           />
         </div>
         <p className="text-xs text-muted">
-          Ownership, scope, exceptions, and enforcement metadata are preserved as-is, and the
-          platform re-validates provenance on save.
+          Ownership, scope, and exception metadata are preserved; enforcement metadata is
+          preserved except for its synchronized deterministic check list.
+          The platform re-validates provenance on save.
         </p>
       </form>
     </Modal>

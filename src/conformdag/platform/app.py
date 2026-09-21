@@ -32,6 +32,7 @@ from conformdag.platform.contracts import (
     GateResponse,
     GateUpsertRequest,
     OverviewResponse,
+    PolicyVocabularyRequest,
     RepositoryTrendsResponse,
     ScanSummaryResponse,
 )
@@ -139,8 +140,13 @@ class WorkspaceLoadRequest(BaseModel):
     path: str | None = None
 
 
-class PolicyUpsertRequest(BaseModel):
+class PolicyUpsertRequest(PolicyVocabularyRequest):
     """Payload for creating or updating a policy in a pack.
+
+    ``deterministic_checks`` and ``configuration`` are the canonical transport
+    vocabulary. ``check_kind`` and ``check_config`` are retained as a beta
+    compatibility view: ``check_kind`` means ``configuration.kind`` and never
+    means a deterministic evaluator check.
 
     Editable fields are required. Contract metadata fields (``source_version``,
     ``ownership``, ``scope``, ``exceptions``, ``enforcement``, ``safe_path``)
@@ -153,8 +159,16 @@ class PolicyUpsertRequest(BaseModel):
     version: str
     status: str
     severity: str
-    check_kind: str
-    check_config: dict[str, Any]
+    check_kind: str | None = Field(
+        default=None,
+        deprecated=True,
+        description="Compatibility alias for configuration.kind; never a deterministic check kind.",
+    )
+    check_config: dict[str, Any] | None = Field(
+        default=None,
+        deprecated=True,
+        description="Compatibility alias for the canonical configuration object.",
+    )
     source_document: str
     source_section: str
     invariant: str
@@ -701,7 +715,7 @@ def _pack_upsert_policy(
 ) -> dict[str, str]:
     service: PackService = request.app.state.pack_service
     try:
-        service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json"))
+        service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json", exclude_none=True))
     except PackNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (PackError, PolicyValidationError) as exc:

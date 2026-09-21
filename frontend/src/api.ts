@@ -265,6 +265,11 @@ export interface PolicyEnforcement {
   blocking: boolean;
 }
 
+export interface PolicyConfiguration {
+  kind: string;
+  [key: string]: unknown;
+}
+
 export interface PolicyInfo {
   id: string;
   title: string;
@@ -272,7 +277,11 @@ export interface PolicyInfo {
   status: string;
   severity: string;
   tags: string[];
+  deterministic_checks: string[];
+  configuration: PolicyConfiguration;
+  /** @deprecated Compatibility projection; use configuration.kind. */
   check_kind: string;
+  /** @deprecated Compatibility projection; use configuration. */
   check_config: Record<string, unknown>;
   source_document: string;
   source_section: string;
@@ -290,8 +299,8 @@ export interface PolicyUpsertRequest {
   version: string;
   status: string;
   severity: string;
-  check_kind: string;
-  check_config: Record<string, unknown>;
+  deterministic_checks: string[];
+  configuration: PolicyConfiguration;
   source_document: string;
   source_section: string;
   invariant: string;

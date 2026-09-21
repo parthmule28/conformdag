@@ -75,6 +75,8 @@ const POLICY_OWN: PolicyInfo = {
   tags: ["owner", "core"],
   check_kind: "required-owner",
   check_config: { kind: "required-owner", allowed: ["team-a"] },
+  deterministic_checks: ["effective-owner"],
+  configuration: { kind: "required-owner", allowed: ["team-a"] },
   source_document: "standards/ownership.md",
   source_section: "Owner of record",
   source_version: "2026-09",
@@ -91,7 +93,7 @@ const POLICY_OWN: PolicyInfo = {
   exceptions: { require_reason: true, require_expiry: true },
   enforcement: {
     type: "deterministic",
-    deterministic_checks: ["required-owner"],
+    deterministic_checks: ["effective-owner"],
     model_check: false,
     allow_abstention: false,
     blocking: true,
@@ -107,6 +109,8 @@ const POLICY_DOC: PolicyInfo = {
   tags: ["docs"],
   check_kind: "required-tags",
   check_config: { kind: "required-tags", required: ["docstring"] },
+  deterministic_checks: [],
+  configuration: { kind: "required-tags", required: ["docstring"] },
   source_document: "standards/documentation.md",
   source_section: "Docstrings",
   source_version: null,
@@ -226,7 +230,7 @@ describe("PoliciesPage", () => {
     expect(screen.getByRole("heading", { name: "Policies in core" })).toBeInTheDocument();
     expect(screen.getByText("standards/ownership.md")).toBeInTheDocument();
     const ownRow = rowForPolicy("OWN-001");
-    expect(within(ownRow).getByText("required-owner")).toBeInTheDocument();
+    expect(within(ownRow).getByText("effective-owner")).toBeInTheDocument();
 
     const releaseRow = rowForGate("release");
     const nightlyRow = rowForGate("nightly");
@@ -238,7 +242,7 @@ describe("PoliciesPage", () => {
     expect(nightlyRow).toHaveTextContent("at most 10 findings");
   });
 
-  it("filters policies by domain tag, check kind, severity, and lifecycle status", async () => {
+  it("filters policies by domain tag, deterministic check, severity, and lifecycle status", async () => {
     await renderAndSelectCore();
 
     fireEvent.change(screen.getByLabelText("Domain tag"), { target: { value: "docs" } });
@@ -246,11 +250,13 @@ describe("PoliciesPage", () => {
     expect(screen.getByText("DOC-002")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Domain tag"), { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText("Check kind"), { target: { value: "required-owner" } });
+    fireEvent.change(screen.getByLabelText("Deterministic check"), {
+      target: { value: "effective-owner" },
+    });
     expect(screen.getByText("OWN-001")).toBeInTheDocument();
     expect(screen.queryByText("DOC-002")).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Check kind"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Deterministic check"), { target: { value: "" } });
     fireEvent.change(screen.getByLabelText("Severity"), { target: { value: "low" } });
     expect(screen.queryByText("OWN-001")).not.toBeInTheDocument();
     expect(screen.getByText("DOC-002")).toBeInTheDocument();
@@ -277,8 +283,8 @@ describe("PoliciesPage", () => {
       "Every DAG declares an effective owner",
     );
     expect(within(dialog).getByLabelText("Tags")).toHaveValue("owner, core");
-    expect(within(dialog).getByLabelText("Check configuration")).toHaveValue(
-      JSON.stringify(POLICY_OWN.check_config, null, 2),
+    expect(within(dialog).getByLabelText("Configuration")).toHaveValue(
+      JSON.stringify(POLICY_OWN.configuration, null, 2),
     );
 
     fireEvent.change(within(dialog).getByLabelText("Title"), {
@@ -293,15 +299,17 @@ describe("PoliciesPage", () => {
     const call = updatePolicyMock.mock.calls[0];
     expect(call?.[0]).toBe("core");
     expect(call?.[1]).toBe("OWN-001");
-    const payload = call?.[2];
+    const payload = call?.[2] as unknown as Record<string, unknown> | undefined;
     expect(payload?.title).toBe("Every DAG declares an accountable owner");
     expect(payload?.version).toBe("2");
     expect(payload?.status).toBe("ACTIVE");
     expect(payload?.severity).toBe("high");
     expect(payload?.invariant).toBe(POLICY_OWN.invariant);
     expect(payload?.tags).toEqual(["owner", "core", "reliability"]);
-    expect(payload?.check_kind).toBe("required-owner");
-    expect(payload?.check_config).toEqual(POLICY_OWN.check_config);
+    expect(payload?.deterministic_checks).toEqual(["effective-owner"]);
+    expect(payload?.configuration).toEqual(POLICY_OWN.configuration);
+    expect(payload).not.toHaveProperty("check_kind");
+    expect(payload).not.toHaveProperty("check_config");
     expect(payload?.source_document).toBe("standards/ownership.md");
     expect(payload?.source_section).toBe("Owner of record");
     expect(payload?.source_version).toBe("2026-09");
@@ -358,18 +366,18 @@ describe("PoliciesPage", () => {
     expect(within(dialog).getByLabelText("Title")).toHaveValue("Renamed policy");
   });
 
-  it("blocks saving while the check configuration is not valid JSON", async () => {
+  it("blocks saving while the configuration is not valid JSON", async () => {
     await renderAndSelectCore();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit policy OWN-001" }));
     const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByLabelText("Check configuration"), {
+    fireEvent.change(within(dialog).getByLabelText("Configuration"), {
       target: { value: "{not-json" },
     });
     expect(within(dialog).getByText(/must be valid JSON/)).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Save changes" })).toBeDisabled();
 
-    fireEvent.change(within(dialog).getByLabelText("Check configuration"), {
+    fireEvent.change(within(dialog).getByLabelText("Configuration"), {
       target: { value: '{"kind": "required-owner"}' },
     });
     expect(within(dialog).queryByText(/must be valid JSON/)).not.toBeInTheDocument();
