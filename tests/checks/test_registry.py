@@ -6,12 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 from textwrap import dedent
-from typing import Final
+from typing import Final, cast
 
 import pytest
-from conformdag.checks import registry
 from pydantic import TypeAdapter
 
+from conformdag.checks import registry
 from conformdag.fixing.codemods import (
     AUTOFIX_KINDS,
     FIXERS,
@@ -115,19 +115,23 @@ EXPECTED_SCAFFOLDS: Final[dict[str, dict[str, object]]] = {
     "ruff-air": {"kind": "ruff-air", "rules": ["AIR001", "AIR002", "AIR301", "AIR302", "AIR311", "AIR312"]},
 }
 
-_CONFIGURATION_ADAPTER = TypeAdapter(PolicyConfiguration)
+_CONFIGURATION_ADAPTER: TypeAdapter[PolicyConfiguration] = TypeAdapter(PolicyConfiguration)
 
 
 def _assert_mutable_containers_are_distinct(left: object, right: object) -> None:
     if isinstance(left, dict) and isinstance(right, dict):
-        assert left is not right
-        assert left.keys() == right.keys()
-        for key in left:
-            _assert_mutable_containers_are_distinct(left[key], right[key])
+        left_dict = cast(dict[str, object], left)
+        right_dict = cast(dict[str, object], right)
+        assert left_dict is not right_dict
+        assert left_dict.keys() == right_dict.keys()
+        for key in left_dict:
+            _assert_mutable_containers_are_distinct(left_dict[key], right_dict[key])
     elif isinstance(left, list) and isinstance(right, list):
-        assert left is not right
-        assert len(left) == len(right)
-        for left_item, right_item in zip(left, right, strict=True):
+        left_list = cast(list[object], left)
+        right_list = cast(list[object], right)
+        assert left_list is not right_list
+        assert len(left_list) == len(right_list)
+        for left_item, right_item in zip(left_list, right_list, strict=True):
             _assert_mutable_containers_are_distinct(left_item, right_item)
 
 
