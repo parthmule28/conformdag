@@ -1,6 +1,6 @@
 # C03 Authoritative Check Catalogue Design
 
-**Status:** approved conversational design; written spec awaiting review
+**Status:** approved
 **Slice:** C03 — Authoritative Check Catalogue
 **Date:** 2026-09-21
 
