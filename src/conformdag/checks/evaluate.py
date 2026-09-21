@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from conformdag.analysis import SourceModel
 from conformdag.checks.airflow import safety
@@ -71,7 +71,9 @@ def evaluate_deterministic(
     if shared_ruff_violations is None and repository_root is not None:
         rules = safety.ruff_rules_for_policies(ordered_policies, airflow_profile)
         if rules:
-            shared_ruff_violations = safety.run_ruff(repository_root, rules, [model.source.path for model in models]) or []
+            shared_ruff_violations = (
+                safety.run_ruff(repository_root, rules, [model.source.path for model in models]) or []
+            )
     findings: list[Finding] = []
     evaluated: list[str] = []
     skipped: list[str] = []

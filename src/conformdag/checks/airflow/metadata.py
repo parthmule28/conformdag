@@ -11,7 +11,7 @@ from conformdag.analysis import DagRecord, SourceModel
 from conformdag.checks.common import (
     EvaluationContext,
     EvaluationPhaseError,
-    _finding,
+    finding,
     fix_target,
     redact_evidence,
     structural_fingerprint,
@@ -161,7 +161,7 @@ class TagEvaluator:
                             hint=f"adds compliant tags {additions!r} to the DAG tags list",
                         )
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         dag.line,

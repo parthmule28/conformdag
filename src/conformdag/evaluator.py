@@ -5,6 +5,9 @@ contracts, classes, and routing from ``conformdag.evaluator``. Remove only
 after those imports have an explicit deprecation and compatibility plan.
 """
 
+# Re-exported names form this module's compatibility surface.
+# ruff: noqa: F401
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -17,9 +20,6 @@ from conformdag.checks.airflow.safety import (
     RuffAirEvaluator,
     SensitiveLoggingEvaluator,
     TopLevelIOEvaluator,
-    _resolve_imported_call,
-    _ruff_path,
-    _version_tuple,
     ruff_policies_for_scan,
     ruff_rule_matches,
     ruff_rules_for_policies,
@@ -30,25 +30,52 @@ from conformdag.checks.airflow.scheduling import (
     RetryEvaluator,
     StartDateFreshnessEvaluator,
     TimeoutEvaluator,
-    _dag_for_task,
-    _effective_value,
 )
 from conformdag.checks.common import (
     DeterministicEvaluator,
     EvaluationContext,
     EvaluationPhaseError,
-    _finding,
     fix_target,
     policy_applies,
     redact_evidence,
     structural_fingerprint,
 )
 from conformdag.checks.evaluate import (
-    _check_registry,
-    _evaluator_for_policy,
     evaluate_deterministic,
     policy_configuration_issues,
 )
+
+__all__ = [
+    "CatchupPolicyEvaluator",
+    "CHECK_CONFIGURATION_KINDS",
+    "CHECK_EVALUATORS",
+    "DeterministicEvaluator",
+    "DynamicDagFactoryEvaluator",
+    "EvaluationContext",
+    "EvaluationPhaseError",
+    "ForbiddenOperatorEvaluator",
+    "LEGACY_POLICY_CONFIGURATION_KINDS",
+    "LEGACY_POLICY_EVALUATORS",
+    "ModuleScopeVariablesEvaluator",
+    "OwnerEvaluator",
+    "RetryEvaluator",
+    "RuffAirEvaluator",
+    "SensitiveLoggingEvaluator",
+    "StartDateFreshnessEvaluator",
+    "TagEvaluator",
+    "TimeoutEvaluator",
+    "TopLevelIOEvaluator",
+    "evaluate_deterministic",
+    "fix_target",
+    "policy_applies",
+    "policy_configuration_issues",
+    "redact_evidence",
+    "ruff_policies_for_scan",
+    "ruff_rule_matches",
+    "ruff_rules_for_policies",
+    "run_ruff",
+    "structural_fingerprint",
+]
 
 if TYPE_CHECKING:
     from conformdag.checks import registry as _registry_types

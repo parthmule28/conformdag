@@ -73,10 +73,7 @@ def test_forbidden_operator_respects_airflow_version_bounds(
     maximum: str | None,
     expected_match: bool,
 ) -> None:
-    model = _model(
-        "from airflow.operators.python import PythonOperator\n"
-        "task = PythonOperator(task_id='task')\n"
-    )
+    model = _model("from airflow.operators.python import PythonOperator\ntask = PythonOperator(task_id='task')\n")
     pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
     original = next(item for item in pack.policies if item.id == "AIR-DET-006")
     policy = original.model_copy(
@@ -93,16 +90,14 @@ def test_forbidden_operator_respects_airflow_version_bounds(
         }
     )
 
-    findings = ForbiddenOperatorEvaluator().evaluate(
-        EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_3_3_0)
-    )
+    findings = ForbiddenOperatorEvaluator().evaluate(EvaluationContext(policy, [model], AirflowProfile.AIRFLOW_3_3_0))
 
     assert bool(findings) is expected_match
     if expected_match:
         assert findings[0].status is FindingStatus.FAIL
 
 
-def test_ruff_evaluator_uses_safety_module_patch_seam(tmp_path: Path, monkeypatch: Any) -> None:
+def test_ruff_evaluator_uses_safety_module_patch_seam(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     model = _model("from airflow import DAG\ndag = DAG(dag_id='x')\n", "dags/dag.py")
     violations: list[dict[str, Any]] = [
         {
@@ -112,24 +107,28 @@ def test_ruff_evaluator_uses_safety_module_patch_seam(tmp_path: Path, monkeypatc
             "message": "DAG lacks a schedule argument",
         }
     ]
-    monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", lambda *_args: violations)
 
-    findings = RuffAirEvaluator().evaluate(
-        EvaluationContext(_ruff_policy(), [model], repository_root=tmp_path)
-    )
+    def fake_run_ruff(*_args: object) -> list[dict[str, Any]]:
+        return violations
+
+    monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", fake_run_ruff)
+
+    findings = RuffAirEvaluator().evaluate(EvaluationContext(_ruff_policy(), [model], repository_root=tmp_path))
 
     assert len(findings) == 1
     assert findings[0].location.start_line == 2
 
 
 def test_ruff_evaluator_returns_no_findings_when_fallback_has_no_binary(
-    tmp_path: Path, monkeypatch: Any
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     model = _model("from airflow import DAG\ndag = DAG(dag_id='x')\n")
-    monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", lambda *_args: None)
 
-    findings = RuffAirEvaluator().evaluate(
-        EvaluationContext(_ruff_policy(), [model], repository_root=tmp_path)
-    )
+    def fake_run_ruff(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", fake_run_ruff)
+
+    findings = RuffAirEvaluator().evaluate(EvaluationContext(_ruff_policy(), [model], repository_root=tmp_path))
 
     assert findings == []

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 from conformdag.analysis import DagRecord, SourceModel, StaticValue, TaskRecord, ValueState
-from conformdag.checks.common import EvaluationContext, _finding, fix_target
+from conformdag.checks.common import EvaluationContext, finding, fix_target
 from conformdag.models import (
     CatchupPolicyConfig,
     ExecutionTimeoutConfig,
@@ -56,7 +56,7 @@ class TimeoutEvaluator:
                 resolved = _effective_value(model, task, "execution_timeout")
                 if resolved.state is ValueState.UNRESOLVED:
                     findings.append(
-                        _finding(
+                        finding(
                             context.policy,
                             model,
                             task.line,
@@ -99,7 +99,7 @@ class TimeoutEvaluator:
                             hint=f"sets execution_timeout=timedelta(seconds={int(target_seconds)}) on the task",
                         )
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         task.line,
@@ -165,7 +165,7 @@ class RetryEvaluator:
                 if status is FindingStatus.FAIL:
                     payload = self._payload(configuration, task, retries, delay)
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         task.line,
@@ -186,7 +186,7 @@ class RetryEvaluator:
     ) -> Finding:
         task_label = task.task_id or task.qualified_name
         names = ", ".join(unresolved)
-        return _finding(
+        return finding(
             context.policy,
             model,
             task.line,
@@ -272,7 +272,7 @@ class StartDateFreshnessEvaluator:
             for dag in model.dags:
                 if dag.start_date is None:
                     findings.append(
-                        _finding(
+                        finding(
                             context.policy,
                             model,
                             dag.line,
@@ -306,7 +306,7 @@ class StartDateFreshnessEvaluator:
                     problems.append("start_date has no timezone")
                 anchor = f"dag:{dag.variable_name or dag.line}:start_date"
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         dag.line,
@@ -339,7 +339,7 @@ class CatchupPolicyEvaluator:
                     continue
                 anchor = f"dag:{dag.variable_name or dag.line}:catchup"
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         dag.line,

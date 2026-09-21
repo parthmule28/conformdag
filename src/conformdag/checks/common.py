@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -73,7 +72,7 @@ def structural_fingerprint(policy: Policy, path: str, anchor: str, status: Findi
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _finding(
+def finding(
     policy: Policy,
     model: SourceModel,
     line: int,
@@ -96,3 +95,6 @@ def _finding(
         fix=fix_payload,
         fingerprint=structural_fingerprint(policy, model.source.relative_path, anchor, status),
     )
+
+
+_finding = finding

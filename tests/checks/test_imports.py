@@ -9,7 +9,6 @@ import pytest
 from conformdag import evaluator
 from conformdag.checks import common, registry
 
-
 EVALUATOR_OWNERS: Mapping[str, str] = {
     "OwnerEvaluator": "conformdag.checks.airflow.metadata",
     "TagEvaluator": "conformdag.checks.airflow.metadata",

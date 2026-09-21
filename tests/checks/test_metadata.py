@@ -31,10 +31,7 @@ def test_owner_evaluator_is_directly_owned_by_metadata_module() -> None:
 
 
 def test_tag_evaluator_is_directly_owned_by_metadata_module() -> None:
-    model = _model(
-        "from airflow import DAG\n"
-        "dag = DAG(dag_id='x', tags=['domain:data', 'owner:platform'])\n"
-    )
+    model = _model("from airflow import DAG\ndag = DAG(dag_id='x', tags=['domain:data', 'owner:platform'])\n")
 
     findings = TagEvaluator().evaluate(EvaluationContext(_policy("AIR-DET-002"), [model]))
 

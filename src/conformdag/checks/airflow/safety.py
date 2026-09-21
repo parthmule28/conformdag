@@ -9,7 +9,7 @@ from typing import Any, cast
 from conformdag.analysis import CallRecord, SourceModel, secret_like
 from conformdag.checks.common import (
     EvaluationContext,
-    _finding,
+    finding,
     fix_target,
     policy_applies,
     redact_evidence,
@@ -49,7 +49,7 @@ class TopLevelIOEvaluator:
                     continue
                 if call.uncertain and configuration.uncertain_as_review:
                     findings.append(
-                        _finding(
+                        finding(
                             context.policy,
                             model,
                             call.line,
@@ -71,7 +71,7 @@ class TopLevelIOEvaluator:
                 )
                 if matched:
                     findings.append(
-                        _finding(
+                        finding(
                             context.policy,
                             model,
                             call.line,
@@ -142,7 +142,7 @@ class ForbiddenOperatorEvaluator:
                 else:
                     replacement = rule
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         call.line,
@@ -178,7 +178,7 @@ class ModuleScopeVariablesEvaluator:
                     continue
                 anchor = f"call:{call.qualified_name}:{call.line}"
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         call.line,
@@ -214,7 +214,7 @@ class SensitiveLoggingEvaluator:
                 if not looks_secret:
                     continue
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         constant.line,
@@ -247,7 +247,7 @@ class DynamicDagFactoryEvaluator:
             for line in model.dynamic_dag_lines:
                 anchor = f"dynamic-dag:{model.source.relative_path}:{line}"
                 findings.append(
-                    _finding(
+                    finding(
                         context.policy,
                         model,
                         line,
