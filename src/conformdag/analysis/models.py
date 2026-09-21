@@ -176,6 +176,13 @@ class SourceModel:
 
 
 def _preserve_legacy_pickle_modules() -> None:
+    """Preserve parse-cache pickle compatibility.
+
+    Introduced in 1.0.0b1 / C04 because pre-C04 cache entries reference
+    ``conformdag.analysis.*`` globals. Remove only after compatibility with
+    those cache entries and downgrade-compatible writes is intentionally
+    dropped, preferably behind explicit cache versioning or invalidation.
+    """
     for cache_model in (
         ParseIssueCode,
         ValueState,
