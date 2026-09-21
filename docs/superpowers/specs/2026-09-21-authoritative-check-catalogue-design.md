@@ -60,9 +60,9 @@ change any serialized product contract.
   instance for executable deterministic kinds, or `None` for the three
   non-executable entries.
 - `fixability: Fixability` — `AUTOFIX`, `PROPOSED_ONLY`, or `MANUAL`.
-- `fix_kind: str | None` — the remediation kind used by the existing fixer
-  payloads; populated for autofix/proposed entries and absent for manual
-  entries.
+- `fix_kind: str` — the existing `RemediationPayload.fix_kind` vocabulary
+  value. Every current entry has an explicit value, including manual entries;
+  it is not assumed to equal the evaluator `kind`.
 - `scaffold_factory: Callable[[], dict[str, object]] | None` — a factory
   returning a fresh, schema-valid configuration payload for executable kinds.
 - `legacy_policy_ids: tuple[str, ...]` — policy IDs that historically route
@@ -75,6 +75,30 @@ order so CLI iteration and generated output remain stable.
 The three semantic-only entries are catalogue metadata only. They have no
 evaluator and are not exposed as executable deterministic checks by the CLI or
 policy validation. Their existing typed model configurations remain unchanged.
+
+The catalogue preserves this current vocabulary mapping:
+
+| Evaluator/catalogue kind | Configuration kind | `fix_kind` | Execution | Fixability |
+| --- | --- | --- | --- | --- |
+| `effective-owner` | `required-owner` | `required-owner` | executable | autofix |
+| `tags` | `required-tags` | `required-tags` | executable | autofix |
+| `effective-timeout` | `execution-timeout` | `execution-timeout` | executable | autofix |
+| `retry-bounds` | `retry-bounds` | `retry-bounds` | executable | autofix |
+| `module-scope-io` | `top-level-io` | `top-level-io` | executable | proposed-only |
+| `operator-allow-list` | `forbidden-operators` | `forbidden-operators` | executable | manual |
+| `start-date-freshness` | `start-date-freshness` | `start-date-freshness` | executable | manual |
+| `catchup-policy` | `catchup-policy` | `catchup-policy` | executable | autofix |
+| `module-scope-variables` | `module-scope-variables` | `module-scope-variables` | executable | manual |
+| `sensitive-logging` | `sensitive-logging` | `sensitive-logging` | executable | manual |
+| `dynamic-dag-factory` | `dynamic-dag-factory` | `dynamic-dag-factory` | executable | manual |
+| `ruff-air` | `ruff-air` | `ruff-air` | executable | manual |
+| `idempotence` | `idempotence` | `idempotence` | non-executable | manual |
+| `orchestration-boundary` | `orchestration-boundary` | `orchestration-boundary` | non-executable | manual |
+| `approved-abstractions` | `approved-abstractions` | `approved-abstractions` | non-executable | manual |
+
+The table is a design invariant, not a second runtime registry. The Python
+`CheckSpec` entries are the only implementation data; the table documents the
+legacy vocabulary that those entries must encode.
 
 ## Derived compatibility views
 
@@ -90,8 +114,11 @@ The registry derives these views from `CHECK_SPECS`:
 - `LEGACY_POLICY_CONFIGURATION_KINDS`: the legacy configuration-kind view
   derived through `LEGACY_POLICY_CHECKS` and `CheckSpec.configuration_kind`.
 - `AUTOFIX_KINDS`, `PROPOSED_ONLY_KINDS`, and `MANUAL_KINDS`: disjoint
-  fixability sets derived from every catalogue entry, including the three
-  semantic-only manual entries.
+  compatibility sets of `spec.fix_kind` values derived from every catalogue
+  entry, including the three semantic-only manual entries. These sets are
+  keyed by `RemediationPayload.fix_kind`, not evaluator/catalogue `kind`.
+  Therefore `operator-allow-list` contributes `forbidden-operators`, and
+  `module-scope-io` contributes `top-level-io`.
 
 `check_spec(kind)` is the single lookup API for callers that need complete
 metadata. Unknown kinds retain a clear lookup error; existing CLI and policy
@@ -111,19 +138,28 @@ The design uses this dependency direction:
    compatibility aliases while constructing the catalogue.
 3. `evaluator.py` exposes old registry names through a lazy module
    compatibility facade (`__getattr__`) backed by `TYPE_CHECKING` declarations.
-   A legacy import therefore resolves to the completed registry only when the
-   name is requested.
-4. `checks/__init__.py` re-exports the authoritative registry API for new
+   A legacy external import therefore resolves to the completed registry only
+   when the name is requested. This facade is compatibility-only; evaluator
+   function bodies must not rely on missing module globals being resolved by
+   `__getattr__`.
+4. Internal evaluator functions use a cycle-safe local import/helper (for
+   example `_check_registry()`) to obtain registry views explicitly. In
+   particular, `policy_configuration_issues()` and evaluator routing call that
+   helper rather than reading compatibility names from their own module.
+5. `checks/__init__.py` re-exports the authoritative registry API for new
    callers.
 
-Tests will explicitly exercise both sequences:
+Tests will explicitly exercise both sequences and execute a real catalogue-backed
+lookup/evaluation after each sequence:
 
 - `import conformdag.checks.registry` followed by importing compatibility
   names from `conformdag.evaluator`.
 - `import conformdag.evaluator` followed by importing the registry.
 
 Both sequences must expose the same object identities for derived evaluator
-and fixability views.
+and fixability views. The test must invoke `check_spec("effective-owner")`,
+resolve its evaluator through `CHECK_EVALUATORS`, and perform an evaluator
+call; import success alone is insufficient.
 
 ## Scaffolding and executable behavior
 
@@ -151,9 +187,13 @@ cycle and keeping codemod implementation ownership in the fixing package.
 
 Registry tests will prove:
 
-- the three fixability sets are pairwise disjoint and cover all 15 specs;
-- every `AUTOFIX` and `PROPOSED_ONLY` spec has the expected `fix_kind`;
-- every autofix/proposed kind has an entry in `FIXERS`;
+- the three fixability sets are pairwise disjoint and cover all 15
+  `spec.fix_kind` values;
+- every catalogue entry has the expected existing `fix_kind`, including
+  `module-scope-io -> top-level-io` and
+  `operator-allow-list -> forbidden-operators`;
+- every `AUTOFIX` and `PROPOSED_ONLY` spec has its `fix_kind` represented in
+  `FIXERS`;
 - manual kinds do not acquire a codemod accidentally.
 
 ## Verification strategy
@@ -170,9 +210,11 @@ Registry tests will prove:
 - legacy policy IDs are unique and map to check kinds, evaluator instances,
   and configuration kinds consistently;
 - scaffold factories return fresh, schema-valid payloads;
-- derived fixability views and `FIXERS` agree;
-- both registry/evaluator import orders succeed and preserve compatibility
-  object identity.
+- derived fixability views and `FIXERS` agree by `fix_kind`;
+- both registry/evaluator import orders succeed, preserve compatibility object
+  identity, and execute a real catalogue-backed lookup and evaluator call;
+- evaluator internals perform the same real lookup/evaluation through their
+  cycle-safe local registry helper rather than through module `__getattr__`.
 
 ### Existing parity suites
 
@@ -203,8 +245,10 @@ C03 is complete when:
    the catalogue or explicitly preserved as facades; no duplicate metadata
    table remains.
 4. `FIXERS` remains an explicit function map while fixability classification
-   comes from `CheckSpec`.
-5. Both import orders pass without circular-import errors.
+   comes from each `CheckSpec.fix_kind`, preserving the existing fixer
+   vocabulary.
+5. Both import orders pass without circular-import errors, and real
+   catalogue-backed lookup/evaluation works after either order.
 6. Existing evaluator behavior, policy IDs, scaffolds, findings, reports,
    fix behavior, and scan orchestration are unchanged.
 7. The required focused and repository verification gates pass.
