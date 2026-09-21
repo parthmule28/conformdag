@@ -3,9 +3,11 @@
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from shutil import copyfile
-from typing import Any, NoReturn
+from types import SimpleNamespace
+from typing import Any, NoReturn, cast
 from unittest.mock import patch
 
 import pytest
@@ -51,6 +53,29 @@ def test_policy_new_rejects_unknown_kind() -> None:
 
     assert result.exit_code != 0
     assert "unknown check kind" in result.stderr
+
+
+@pytest.mark.parametrize("kind", ["idempotence", "orchestration-boundary", "approved-abstractions"])
+def test_policy_new_rejects_non_executable_catalogue_kind(kind: str) -> None:
+    result = CliRunner().invoke(app, ["policy", "new", "AIR-TST-999", "--kind", kind])
+
+    assert result.exit_code != 0
+    assert "unknown check kind" in result.stderr
+
+
+def test_policy_configuration_delegates_to_catalogue(monkeypatch: pytest.MonkeyPatch) -> None:
+    import conformdag.cli as cli_module
+
+    expected = {"kind": "required-owner", "allowed_values": ["catalogue"]}
+
+    def fake_check_spec(kind: str) -> SimpleNamespace:
+        assert kind == "effective-owner"
+        return SimpleNamespace(evaluator=object(), scaffold_factory=lambda: expected.copy())
+
+    monkeypatch.setattr(cli_module, "check_spec", fake_check_spec)
+    policy_configuration = cast(Callable[[str], dict[str, object]], cli_module.__dict__["_policy_configuration"])
+
+    assert policy_configuration("effective-owner") == expected
 
 
 def test_policy_new_scaffolds_valid_policy_for_every_registered_kind(
