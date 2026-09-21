@@ -122,7 +122,7 @@ def test_ruff_air_evaluator_maps_violations_to_findings(tmp_path: Path, monkeypa
     def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> list[dict[str, Any]]:
         return payload
 
-    monkeypatch.setattr("conformdag.evaluator.run_ruff", fake_run_ruff)
+    monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", fake_run_ruff)
 
     findings = CHECK_EVALUATORS["ruff-air"].evaluate(context)
 
@@ -166,7 +166,7 @@ def test_ruff_air_evaluator_reports_symlinked_violation_under_scan_identity(
     def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> list[dict[str, Any]]:
         return payload
 
-    monkeypatch.setattr("conformdag.evaluator.run_ruff", fake_run_ruff)
+    monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", fake_run_ruff)
 
     findings = CHECK_EVALUATORS["ruff-air"].evaluate(context)
 
@@ -183,7 +183,7 @@ def test_ruff_air_evaluator_skips_when_binary_missing(tmp_path: Path, monkeypatc
     def fake_run_ruff(_root: Path, _rules: list[str], _files: list[Path]) -> None:
         return None
 
-    monkeypatch.setattr("conformdag.evaluator.run_ruff", fake_run_ruff)
+    monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", fake_run_ruff)
 
     assert CHECK_EVALUATORS["ruff-air"].evaluate(context) == []
 

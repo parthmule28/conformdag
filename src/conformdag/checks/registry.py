@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
-    from conformdag.evaluator import DeterministicEvaluator
+    from conformdag.checks.common import DeterministicEvaluator
 
 
 class Fixability(StrEnum):
@@ -122,19 +122,23 @@ def _ruff_air_scaffold() -> dict[str, object]:
 
 def _build_check_specs() -> dict[str, CheckSpec]:
     """Build the catalogue after evaluator definitions are available."""
-    from conformdag.evaluator import (
-        CatchupPolicyEvaluator,
+    from conformdag.checks.airflow.metadata import (
+        OwnerEvaluator,
+        TagEvaluator,
+    )
+    from conformdag.checks.airflow.safety import (
         DynamicDagFactoryEvaluator,
         ForbiddenOperatorEvaluator,
         ModuleScopeVariablesEvaluator,
-        OwnerEvaluator,
-        RetryEvaluator,
         RuffAirEvaluator,
         SensitiveLoggingEvaluator,
-        StartDateFreshnessEvaluator,
-        TagEvaluator,
-        TimeoutEvaluator,
         TopLevelIOEvaluator,
+    )
+    from conformdag.checks.airflow.scheduling import (
+        CatchupPolicyEvaluator,
+        RetryEvaluator,
+        StartDateFreshnessEvaluator,
+        TimeoutEvaluator,
     )
 
     return {
