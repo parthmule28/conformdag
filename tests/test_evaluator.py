@@ -214,7 +214,7 @@ def test_evaluate_deterministic_runs_one_ruff_union_and_filters_by_policy(
         calls.append((root, rules))
         return payload
 
-    monkeypatch.setattr("conformdag.evaluator.run_ruff", fake_run_ruff)
+    monkeypatch.setattr("conformdag.checks.airflow.safety.run_ruff", fake_run_ruff)
 
     findings, evaluated, skipped = evaluate_deterministic([first, second], [model], repository_root=tmp_path)
 
