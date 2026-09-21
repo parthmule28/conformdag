@@ -23,7 +23,7 @@ def test_direct_discovery_preserves_recursive_excludes(tmp_path: Path) -> None:
 
     files, issues = discover_python_files(tmp_path, ["**/*.py"])
 
-    assert [item.relative_path for item in files] == [*nearby, selected]
+    assert [item.relative_path for item in files] == sorted([*nearby, selected])
     assert issues == []
     assert matches_exclude("src/a/.venv/x.py", DEFAULT_EXCLUDES)
     assert not matches_exclude("src/a/.venv-copy/x.py", DEFAULT_EXCLUDES)

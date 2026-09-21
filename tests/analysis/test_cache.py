@@ -64,7 +64,7 @@ def test_new_entries_keep_historical_pickle_module_path(tmp_path: Path) -> None:
     cache.put("abc", _model())
 
     payload = (cache.directory / "abc.pkl").read_bytes()
-    strings = [argument for opcode, argument, _ in pickletools.genops(payload) if isinstance(argument, str)]
+    strings = [argument for _, argument, _ in pickletools.genops(payload) if isinstance(argument, str)]
 
     assert "conformdag.analysis" in strings
     assert "conformdag.analysis.models" not in strings
@@ -104,9 +104,7 @@ def test_legacy_analysis_pickle_entry_is_readable(tmp_path: Path) -> None:
     assert cached.source.content == "value = 2\n"
 
 
-def test_atomic_replace_failure_preserves_last_good_entry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_atomic_replace_failure_preserves_last_good_entry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cache = ParseCache(tmp_path / "cache")
     first = _model("value = 1\n")
     second = _model("value = 2\n")
@@ -130,9 +128,7 @@ def test_atomic_replace_failure_preserves_last_good_entry(
     assert not list(cache.directory.glob(".*.tmp"))
 
 
-def test_prune_ignores_entries_removed_by_a_racing_writer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_prune_ignores_entries_removed_by_a_racing_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cache = ParseCache(tmp_path / "cache")
     model = _model()
     for index in range(499):

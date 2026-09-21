@@ -34,6 +34,12 @@ def test_direct_airflow_analysis_never_executes_source() -> None:
     assert model.dags[0].owner == "platform"
 
 
+def test_direct_airflow_analysis_preserves_secret_assignment_detection() -> None:
+    model = _analyze("API_TOKEN = 'secret'\n")
+
+    assert [(item.line, item.name) for item in model.secret_assignments] == [(1, "API_TOKEN")]
+
+
 def test_direct_airflow_analysis_preserves_taskflow_dag_context_and_unresolved_values() -> None:
     model = _analyze(
         "from airflow.decorators import task\n"
@@ -63,11 +69,6 @@ def test_direct_datetime_parts_preserves_timezone_detection() -> None:
 
 
 def test_direct_module_scope_calls_filters_nested_calls() -> None:
-    model = _analyze(
-        "import requests\n"
-        "requests.get('module')\n"
-        "def nested():\n"
-        "    requests.post('nested')\n"
-    )
+    model = _analyze("import requests\nrequests.get('module')\ndef nested():\n    requests.post('nested')\n")
 
     assert [call.qualified_name for call in iter_module_scope_calls(model)] == ["requests.get"]
