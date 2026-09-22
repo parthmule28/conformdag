@@ -19,6 +19,7 @@ from conformdag.models import (
     ScanReport,
     Suppression,
 )
+from conformdag.reporting import apply_suppressions
 from conformdag.scan import SemanticProvider, load_pack_for_scan, scan_repository
 
 
@@ -170,4 +171,33 @@ def execute_scan(
                     ),
                 }
             )
+
+    if operational_suppressions:
+        had_unresolved_errors = any(
+            finding.status is FindingStatus.ERROR and not finding.suppressed for finding in report.findings
+        )
+        findings, suppression_issues = apply_suppressions(
+            report.findings,
+            list(operational_suppressions),
+            preserve_existing_provenance=True,
+        )
+        remaining_errors = [
+            finding for finding in findings if finding.status is FindingStatus.ERROR and not finding.suppressed
+        ]
+        issues = list(report.issues)
+        complete = report.complete
+        if had_unresolved_errors and not remaining_errors:
+            issues = [
+                issue
+                for issue in issues
+                if not (issue.code == "EVALUATION_ERROR" and issue.phase == "evaluation" and issue.fatal)
+            ]
+            complete = not any(issue.fatal for issue in issues)
+        report = report.model_copy(
+            update={
+                "findings": findings,
+                "issues": [*issues, *suppression_issues],
+                "complete": complete,
+            }
+        )
     return ScanExecutionResult(report=report, gate_result=None)

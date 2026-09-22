@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import FrozenInstanceError, fields
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,6 +19,7 @@ from conformdag.application import (
 from conformdag.models import (
     AirflowProfile,
     Confidence,
+    Finding,
     FindingStatus,
     ProjectRuntimeConfig,
     RunIssue,
@@ -27,6 +28,7 @@ from conformdag.models import (
     ScanReport,
     SemanticRequest,
     SemanticResponse,
+    Suppression,
 )
 from conformdag.scan import SemanticProvider, scan_repository
 from conformdag.semantic import SemanticProviderError
@@ -184,6 +186,30 @@ def _install_core_stub(
         return report
 
     monkeypatch.setattr("conformdag.application.scan.scan_repository", fake_scan)
+
+
+def _finding_from_repository(build_repository: Callable[[Path], Path], root: Path) -> Finding:
+    repository = build_repository(root)
+    report = scan_repository(repository)
+    return next(finding for finding in report.findings if finding.policy_id == "AIR-DET-001")
+
+
+def _suppression_for_finding(
+    finding: Finding,
+    current: datetime,
+    *,
+    reason: str,
+    days_until_expiry: int = 1,
+    fingerprint: str | None = None,
+) -> Suppression:
+    return Suppression(
+        fingerprint=fingerprint or finding.fingerprint,
+        policy_id=finding.policy_id,
+        reason=reason,
+        owner="platform",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        expires_at=current + timedelta(days=days_until_expiry),
+    )
 
 
 def test_scan_options_has_only_the_c06_fields() -> None:
@@ -592,3 +618,122 @@ def test_execute_scan_does_not_swallow_unrelated_runtime_executor_errors(
         )
 
     assert events == ["validate", "core", "execute"]
+
+
+def test_execute_scan_operational_suppression_preserves_local_provenance(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finding = _finding_from_repository(build_repository, tmp_path / "repo")
+    current = datetime.now(UTC)
+    local = _suppression_for_finding(finding, current, reason="repository-local waiver")
+    operational = _suppression_for_finding(finding, current, reason="platform waiver")
+    operational_only = _suppression_for_finding(
+        finding,
+        current,
+        reason="platform-only waiver",
+        fingerprint="operational-only-fingerprint",
+    )
+    locally_suppressed = finding.model_copy(update={"suppressed": True, "suppression": local})
+    operational_finding = finding.model_copy(
+        update={"fingerprint": "operational-only-fingerprint", "suppressed": False, "suppression": None}
+    )
+    core_report = _complete_report().model_copy(update={"findings": [locally_suppressed, operational_finding]})
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, core_report)
+
+    result = execute_scan(
+        ScanOptions(tmp_path / "repo"),
+        operational_suppressions=[operational, operational_only],
+    )
+
+    results_by_fingerprint = {item.fingerprint: item for item in result.report.findings}
+    assert events == ["core"]
+    assert results_by_fingerprint[finding.fingerprint].suppressed is True
+    assert results_by_fingerprint[finding.fingerprint].suppression is local
+    assert results_by_fingerprint["operational-only-fingerprint"].suppressed is True
+    assert results_by_fingerprint["operational-only-fingerprint"].suppression is operational_only
+    assert result.report.issues == []
+
+
+def test_execute_scan_operational_suppression_recovers_waived_evaluation_error(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finding = _finding_from_repository(build_repository, tmp_path / "repo")
+    unresolved = finding.model_copy(update={"status": FindingStatus.ERROR, "suppressed": False, "suppression": None})
+    evaluation_issue = RunIssue(
+        code="EVALUATION_ERROR",
+        message="finding could not be evaluated",
+        phase="evaluation",
+        fatal=True,
+    )
+    core_report = _complete_report().model_copy(
+        update={"complete": False, "findings": [unresolved], "issues": [evaluation_issue]}
+    )
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, core_report)
+    operational = _suppression_for_finding(finding, datetime.now(UTC), reason="approved operational waiver")
+
+    result = execute_scan(ScanOptions(tmp_path / "repo"), operational_suppressions=[operational])
+
+    assert events == ["core"]
+    assert result.report.findings[0].suppressed is True
+    assert result.report.findings[0].suppression is operational
+    assert result.report.complete is True
+    assert result.report.issues == []
+
+
+def test_execute_scan_operational_waiver_keeps_unrelated_fatal_issues(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finding = _finding_from_repository(build_repository, tmp_path / "repo")
+    unresolved = finding.model_copy(update={"status": FindingStatus.ERROR, "suppressed": False, "suppression": None})
+    evaluation_issue = RunIssue(
+        code="EVALUATION_ERROR",
+        message="finding could not be evaluated",
+        phase="evaluation",
+        fatal=True,
+    )
+    parse_issue = RunIssue(code="PARSE_ERROR", message="source did not parse", phase="analysis", fatal=True)
+    core_report = _complete_report().model_copy(
+        update={"complete": False, "findings": [unresolved], "issues": [evaluation_issue, parse_issue]}
+    )
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, core_report)
+    operational = _suppression_for_finding(finding, datetime.now(UTC), reason="approved operational waiver")
+
+    result = execute_scan(ScanOptions(tmp_path / "repo"), operational_suppressions=[operational])
+
+    assert events == ["core"]
+    assert result.report.findings[0].suppressed is True
+    assert result.report.complete is False
+    assert [(issue.code, issue.fatal) for issue in result.report.issues] == [("PARSE_ERROR", True)]
+
+
+def test_execute_scan_without_operational_suppressions_preserves_core_report_state(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finding = _finding_from_repository(build_repository, tmp_path / "repo")
+    local = _suppression_for_finding(finding, datetime.now(UTC), reason="repository-local waiver")
+    locally_suppressed = finding.model_copy(update={"suppressed": True, "suppression": local})
+    parse_issue = RunIssue(code="PARSE_ERROR", message="source did not parse", phase="analysis", fatal=True)
+    core_report = _complete_report().model_copy(
+        update={"complete": False, "findings": [locally_suppressed], "issues": [parse_issue]}
+    )
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, core_report)
+
+    result = execute_scan(ScanOptions(tmp_path / "repo"))
+
+    assert events == ["core"]
+    assert result.report.complete is False
+    assert result.report.findings[0].suppressed is True
+    assert result.report.findings[0].suppression is local
+    assert result.report.issues == [parse_issue]
