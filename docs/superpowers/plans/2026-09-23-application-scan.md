@@ -1,6 +1,6 @@
 # Application Scan Workflow Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for native, single-session implementation of this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add one reusable application scan workflow and make the CLI delegate complete scan orchestration to it without changing report or CLI behavior.
 
@@ -17,6 +17,7 @@
 - Do not add reusable semantic/runtime configuration precedence or conflict resolution to C06; temporary CLI composition exists only for current behavior and C07 centralizes it.
 - Run runtime only from a supplied enabled `ProjectRuntimeConfig` and an injected `RuntimeExecutor`; never construct Docker/runtime infrastructure in `application`.
 - Apply only supplied operational suppressions in `application`; preserve existing local suppression provenance and do not report cross-layer matches as duplicate input entries.
+- Keep `reporting.apply_suppressions()` default behavior unchanged for core repository-local suppressions; application operational suppressions opt into provenance preservation explicitly.
 - `execute_scan()` performs one final application-level `normalize_report()` after post-core mutations; retain the normalization already performed by `scan_repository()`.
 - Evaluate gates only for complete final reports; embed the same non-`None` `GateResult` in both `ScanReport.gate_result` and `ScanExecutionResult.gate_result`.
 - Keep `application` free of Typer, FastAPI, SQLAlchemy, MCP, Docker clients, transport binding, persistence, and exit-code behavior.
@@ -42,7 +43,7 @@
 | `src/conformdag/application/__init__.py` | Public application API re-exports; no composition or side effects. |
 | `src/conformdag/application/errors.py` | `ScanInputError` and `RuntimeExecutionError` application distinctions. |
 | `src/conformdag/application/scan.py` | Typed options/results, `RuntimeExecutor`, preflight, core call, runtime/suppression phases, final normalization and gates. |
-| `src/conformdag/reporting.py` | Narrowly preserve an already-suppressed finding's provenance when applying an operational suppression. |
+| `src/conformdag/reporting.py` | Preserve current default suppression behavior and provide an explicit provenance-preserving mode for operational suppressions. |
 | `src/conformdag/cli.py` | Temporary current-behavior composition, runtime adapter, service call, rendering and exit mapping. |
 | `tests/application/test_scan.py` | Service contracts, phase ordering, inputs, outputs, and failure-mode tests. |
 | `tests/test_reporting.py` | Direct suppression provenance and diagnostic regressions. |
@@ -194,7 +195,7 @@ git add src/conformdag/application tests/application
 git commit -m "feat: add application scan contracts"
 ```
 
-### Task 2: Preserve suppression provenance in the reporting helper
+### Task 2: Add operational provenance preservation without changing local behavior
 
 **Files:**
 - Modify: `src/conformdag/reporting.py:apply_suppressions`
@@ -202,9 +203,9 @@ git commit -m "feat: add application scan contracts"
 
 **Interfaces:**
 - Consumes: existing `Finding.suppressed`, `Finding.suppression`, and the supplied `Suppression` sequence.
-- Produces: an idempotent provenance rule: a matching active operational suppression does not replace the provenance of a finding already suppressed by core; diagnostics continue to describe duplicate/unmatched/expired entries in the supplied list.
+- Produces: `apply_suppressions(findings, suppressions, now=None, *, preserve_existing_provenance=False)`. The default retains existing core/local behavior; the opt-in mode preserves provenance for already-suppressed operational matches while still diagnosing duplicates, unmatched entries, and expirations in the supplied list.
 
-- [ ] **Step 1: Add the failing local-plus-operational provenance test.**
+- [ ] **Step 1: Characterize default local behavior and add operational provenance tests.**
 
 Use `_finding()` and `_suppression()` in `tests/test_reporting.py`. Create distinct active local and operational suppressions with the same policy/fingerprint, attach the local one to a copied finding, and assert:
 
@@ -216,33 +217,49 @@ local = _suppression(finding.fingerprint, current + timedelta(days=1)).model_cop
 )
 operational = _suppression(finding.fingerprint, current + timedelta(days=2))
 suppressed = finding.model_copy(update={"suppressed": True, "suppression": local})
-result, issues = apply_suppressions([suppressed], [operational], current)
+result, issues = apply_suppressions(
+    [suppressed], [operational], current, preserve_existing_provenance=True
+)
 
 assert result[0].suppressed is True
 assert result[0].suppression is local
 assert issues == []
 ```
 
-Add cases proving a duplicate within the supplied operational list still emits `SUPPRESSION_DUPLICATE`, while one local-plus-operational match does not, and an expired operational match leaves local provenance intact while its diagnostic does not claim the finding was reopened.
+Add a characterization test whose name includes `provenance` with two active, same-identity repository-local suppressions: the default call must retain today's last-entry provenance and emit `SUPPRESSION_DUPLICATE`. This pins unchanged core behavior. In preserve mode, prove a duplicate within the supplied operational list still emits `SUPPRESSION_DUPLICATE`, while one local-plus-operational match does not. Also prove an expired operational match leaves local provenance intact and its diagnostic says it matched an already-suppressed finding without claiming that it reopened.
 
 - [ ] **Step 2: Run the new reporting cases and confirm the provenance failure.**
 
 Run: `mise exec -- uv run pytest tests/test_reporting.py -k 'provenance or already_suppressed' -x --tb=short`
 
-Expected: the active operational match fails because the helper currently replaces `finding.suppression`.
+Expected: the new preserve-mode test fails because the helper does not yet accept `preserve_existing_provenance`; the default-mode characterization passes and establishes the behavior to retain.
 
-- [ ] **Step 3: Keep existing findings unchanged and skip replacement for already-suppressed matches.**
+- [ ] **Step 3: Add opt-in provenance preservation while keeping the default path unchanged.**
 
-In the helper's active-suppression branch, update only matching findings whose `suppressed` flag is false. Continue iterating every supplied entry so duplicate/unmatched/expired diagnostics are preserved. For an expired entry whose matching findings are all already suppressed, retain the `SUPPRESSION_EXPIRED` code but use accurate wording that does not say a finding was reopened; preserve the existing expired message for an unsuppressed match. Do not turn a cross-layer identity match into a duplicate input entry.
+Add keyword-only `preserve_existing_provenance: bool = False` after the existing optional `now` parameter. When false, preserve current behavior exactly: every active matching entry updates provenance, so later local entries still win and supplied-list duplicate diagnostics remain unchanged. When true, do not replace the suppression object on an already-suppressed matching finding. Continue iterating every supplied entry so duplicate/unmatched/expired diagnostics are preserved. In preserve mode, when an expired entry matches any already-suppressed finding, retain `SUPPRESSION_EXPIRED` but use accurate wording that does not say a finding was reopened; use the existing expired message only when no matching finding is already suppressed. Keep the existing default-mode expired message unchanged. Do not turn a cross-layer identity match into a duplicate input entry.
+
+The signature must remain backward-compatible for existing positional `now` calls:
+
+```python
+def apply_suppressions(
+    findings: list[Finding],
+    suppressions: list[Suppression],
+    now: datetime | None = None,
+    *,
+    preserve_existing_provenance: bool = False,
+) -> tuple[list[Finding], list[RunIssue]]: ...
+```
 
 The active branch should have this shape:
 
 ```python
 for position in candidate_indexes:
     finding = result[position]
-    if not finding.suppressed:
+    if not preserve_existing_provenance or not finding.suppressed:
         result[position] = finding.model_copy(update={"suppressed": True, "suppression": suppression})
 ```
+
+Leave `src/conformdag/scan.py` calling the default mode for repository-local suppressions. The application operational-suppression call in Task 4 must pass `preserve_existing_provenance=True`.
 
 - [ ] **Step 4: Run reporting and core scan regressions.**
 
@@ -336,7 +353,7 @@ Expected: the current service does not yet apply the explicit operational inputs
 
 - [ ] **Step 3: Apply supplied suppressions after runtime and preserve unrelated fatal issues.**
 
-When the operational sequence is non-empty, snapshot whether the core report has unsuppressed `ERROR` findings, call `apply_suppressions()` on its findings with the supplied items, and append the returned diagnostics. If all such errors are now suppressed, remove only fatal `EVALUATION_ERROR` issues generated for those unresolved findings and recompute `complete` from the remaining fatal issues. Never remove parse, provider, or runtime issues. If no operational inputs were supplied, do not call the helper or alter core suppression state.
+When the operational sequence is non-empty, snapshot whether the core report has unsuppressed `ERROR` findings, call `apply_suppressions()` on its findings with the supplied items and `preserve_existing_provenance=True`, and append the returned diagnostics. If all such errors are now suppressed, remove only fatal `EVALUATION_ERROR` issues generated for those unresolved findings and recompute `complete` from the remaining fatal issues. Never remove parse, provider, or runtime issues. If no operational inputs were supplied, do not call the helper or alter core suppression state.
 
 Use the before/after unresolved-error sets to keep recovery narrow:
 
@@ -345,7 +362,11 @@ had_unresolved_errors = any(
     finding.status is FindingStatus.ERROR and not finding.suppressed
     for finding in report.findings
 )
-findings, suppression_issues = apply_suppressions(report.findings, list(operational_suppressions))
+findings, suppression_issues = apply_suppressions(
+    report.findings,
+    list(operational_suppressions),
+    preserve_existing_provenance=True,
+)
 remaining_errors = [
     finding for finding in findings
     if finding.status is FindingStatus.ERROR and not finding.suppressed
@@ -470,9 +491,13 @@ Before changing orchestration, add the delegation test and retain the existing t
 
 Run: `mise exec -- uv run pytest tests/test_cli.py -x --tb=short`
 
-Expected: existing characterization tests pass and the new delegation assertion fails because the service stub receives zero calls.
+Expected: all existing CLI characterization cases pass; only the new delegation assertion fails because the service stub receives zero calls.
 
-- [ ] **Step 3: Add the CLI runtime adapter and map current inputs to application types.**
+- [ ] **Step 3: Capture pre-migration parity fixtures before editing `cli.scan`.**
+
+Before changing `cli.scan`, capture canonical JSON reports and CLI exit codes from the current implementation for deterministic, fake-semantic, fake-runtime, repository-suppression, baseline, and gated repositories under `/tmp/conformdag-c06-before/`. Use the existing `CliRunner` builders/seams from `tests/test_cli.py`; use temporary capture helpers outside the committed product diff. Retain the exact fixture inputs and patched provider/runtime results so the same cases can be replayed after delegation. Confirm the captured reports include stable finding identities, result fingerprints, runtime metadata, suppression provenance, and gate results.
+
+- [ ] **Step 4: Add the CLI runtime adapter and map current inputs to application types.**
 
 Implement a private CLI adapter satisfying `RuntimeExecutor`. Its `validate()` calls `build_runtime_manifest(root, config, [], include, exclude)` and translates `RuntimePhaseError` to `ScanInputError`; its `execute()` calls `execute_runtime(...)` and translates `RuntimePhaseError` to `RuntimeExecutionError`. Keep URL validation, API-key lookup, semantic provider/cache construction, and current CLI/project option composition in the CLI. Pass the constructed provider (or `None`) and its model/provider/structured-output metadata separately. Pass the constructed enabled runtime config with the adapter; set `ScanOptions.airflow_profile` to its profile only when runtime is enabled, matching the current `scan_repository()` call. Do not add `semantic_enabled` or reusable precedence logic.
 
@@ -506,29 +531,33 @@ class _CliRuntimeExecutor:
             raise RuntimeExecutionError(str(exc)) from exc
 ```
 
-- [ ] **Step 4: Parse baseline JSON before calling the service and delegate the full workflow.**
+- [ ] **Step 5: Parse baseline JSON before calling the service and delegate the full workflow.**
 
 Convert valid baseline JSON to `BaselineInput(report=...)` before `execute_scan()` so incomplete baselines fail before the core call. Replace inline `scan_repository`, `execute_runtime`, runtime report mutation, normalization, and `evaluate_pack_gates` calls with one `execute_scan()` invocation. Use `execution.report` and `execution.gate_result` for the existing renderer and exit mapper. Keep format/destination validation, preview, evidence-stripping on a report copy, terminal progress, rendering, and the exact fatal/gate/blocking/runtime exit precedence in `cli.scan`. Remove only imports made unused by the move.
 
-- [ ] **Step 5: Run CLI tests and focused scan/application integrations.**
+- [ ] **Step 6: Run CLI tests and focused scan/application integrations.**
 
 Run: `mise exec -- uv run pytest tests/test_cli.py tests/application/test_scan.py tests/test_scan.py tests/test_runtime.py tests/test_gates.py tests/test_reporting.py -x --tb=short`
 
 Expected: delegation, output formats, semantic/runtime errors, baseline/gate behavior, and legacy exits pass. The runtime CLI tests continue to patch the runtime adapter functions at their CLI-owned seam.
 
-- [ ] **Step 6: Verify C10 and package boundaries remain untouched.**
+- [ ] **Step 7: Capture post-migration reports and compare with the saved fixtures.**
+
+Replay the same inputs and fake provider/runtime outcomes into `/tmp/conformdag-c06-after/`, then call `execute_scan()` directly for the equivalent application inputs. Compare reports with the before captures after excluding only `run.timestamp` or other invocation metadata proven volatile; compare exit codes exactly. Confirm stable finding order/identity, report and finding fingerprints, runtime metadata, suppression provenance, and `gate_result`. Investigate differences rather than expanding exclusions, and keep all temporary helpers/captures out of the product diff.
+
+- [ ] **Step 8: Verify C10 and package boundaries remain untouched.**
 
 Run: `git diff -- src/conformdag/platform/runner.py` and inspect `src/conformdag/application/` imports.
 
 Expected: the runner has no diff; application imports no CLI, FastAPI, SQLAlchemy, MCP, Docker, or provider-construction adapter.
 
-- [ ] **Step 7: Commit CLI delegation.**
+- [ ] **Step 9: Commit the completed application scan workflow.**
 
 Run `mise run check` before committing.
 
 ```bash
 git add src/conformdag/cli.py tests/test_cli.py
-git commit -m "refactor: delegate CLI scans to application"
+git commit -m "feat: add application scan workflow"
 ```
 
 ### Task 7: Verify report parity, update the ledger, and prepare C06 review
@@ -538,12 +567,12 @@ git commit -m "refactor: delegate CLI scans to application"
 - Verify: application, CLI, core scan, runtime, gates, reporting, fixing, and package-boundary tests.
 
 **Interfaces:**
-- Consumes: completed `execute_scan()` and the existing CLI's canonical report and exit contract.
-- Produces: high-risk parity evidence, full quality-gate evidence, a pushed implementation branch/PR, and a factual C06 `review` ledger row; no merge.
+- Consumes: completed `execute_scan()`, the parity comparison recorded in Task 6, and the existing CLI's canonical report and exit contract.
+- Produces: independent high-risk review, full quality-gate evidence, a pushed implementation branch/PR, and a factual C06 `review` ledger row; no merge.
 
-- [ ] **Step 1: Compare pre-change CLI report behavior with application results.**
+- [ ] **Step 1: Summarize the parity evidence produced during Task 6.**
 
-Before the CLI migration, use `CliRunner().invoke(app, ["scan", ...])` and the builders in `tests/test_cli.py` to capture canonical JSON for deterministic, fake-semantic, fake-runtime, repository-suppression, baseline, and gated repositories under `/tmp/conformdag-c06-before/`. Patch the existing CLI provider/runtime seams for semantic/runtime cases. After migration, run the same harness into `/tmp/conformdag-c06-after/`, also call `execute_scan()` for the same inputs, and diff the JSON after excluding only `run.timestamp` or other invocation metadata proven volatile. Confirm stable finding order/identity, report and finding fingerprints, runtime metadata, suppression provenance, `gate_result`, and exit precedence. Record exact commands and results for the ledger; investigate any difference rather than broadening the exclusion set. Keep the temporary harness and captures out of the product diff.
+Record the exact before/after commands and outcomes from Task 6 for deterministic, semantic, runtime, repository-suppression, baseline, and gate cases. Summarize any intentionally excluded volatile fields and verify that finding order/identity, result fingerprints, runtime metadata, suppression provenance, gate results, and exit codes matched. Do not recapture the pre-migration report here; the CLI has already been changed.
 
 - [ ] **Step 2: Run focused suites, full checks, coverage, schema, and whitespace gates.**
 
@@ -563,10 +592,10 @@ Expected: focused and full tests pass, the 90% coverage threshold is met, strict
 
 Give the reviewer the approved spec, base/head SHAs, and report parity evidence. Ask them to trace single-core-call semantics, suppression provenance/completeness recovery, complete-only gates, CLI parity, forbidden application dependencies, and the unchanged C10 runner. Resolve verified Critical/Important findings and record any deferred Minor observations.
 
-- [ ] **Step 4: Commit and publish the implementation for review without merging.**
+- [ ] **Step 4: Publish the implementation PR without merging.**
 
-Run `mise run check` before committing. After all checks pass, stage only C06 source and tests; keep `.serena/` unstaged. Commit with `feat: add application scan workflow`, push the branch, verify the remote SHA and CI, and open the implementation PR targeting `main`. Do not merge it.
+Push the implementation branch, verify that the remote SHA matches the reviewed head, open the implementation PR targeting `main`, and run `gh pr checks <PR-number> --watch`. Do not create another implementation commit here: Task 6 already made `feat: add application scan workflow`. If independent review requires verified Critical/Important corrections, make each as a focused commit, run `mise run check` before each commit, rerun the relevant parity checks, and review the corrected final head before opening the PR.
 
 - [ ] **Step 5: Record the real PR and verification evidence in the ledger.**
 
-After the implementation PR exists, change C06 from `planned` to `review`; add the pushed branch, actual PR link, implementation commit SHA, focused/full/coverage/schema results, independent-review outcome, and compatibility notes. Run `mise run check` before committing, stage only `docs/consolidation/progress.md`, commit with `docs: record C06 application scan review evidence`, push, and verify the remote head. Do not mark C06 accepted before human merge authority and merge evidence.
+After the implementation PR exists, change C06 from `planned` to `review`; add the pushed branch, actual PR link, implementation commit SHA, focused/full/coverage/schema results, independent-review outcome, parity evidence, and compatibility notes. Run `mise run check` before committing, stage only `docs/consolidation/progress.md`, commit with `docs: record C06 application scan review evidence`, push, and verify the remote head matches the PR head. Since this ledger commit changes the PR head, rerun `gh pr checks <PR-number> --watch` and confirm all required CI checks pass on that final head before declaring the PR ready for review. Do not mark C06 accepted before human merge authority and merge evidence.
