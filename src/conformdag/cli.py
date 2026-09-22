@@ -15,6 +15,14 @@ from rich.table import Table
 from ruamel.yaml import YAML
 
 from conformdag import __version__
+from conformdag.application import (
+    BaselineInput,
+    RuntimeExecutionError,
+    RuntimeExecutor,
+    ScanInputError,
+    ScanOptions,
+    execute_scan,
+)
 from conformdag.benchmark import (
     BenchmarkValidationError,
     render_benchmark_report,
@@ -23,14 +31,14 @@ from conformdag.benchmark import (
 from conformdag.checks.registry import CHECK_EVALUATORS, check_spec
 from conformdag.config import load_project_config, semantic_api_key
 from conformdag.fixing import run_fix
-from conformdag.gates import evaluate_pack_gates
 from conformdag.models import (
     AirflowProfile,
     FindingStatus,
     Policy,
     PolicyPack,
     ProjectConfig,
-    RunIssue,
+    ProjectRuntimeConfig,
+    RuntimeObservation,
     ScanReport,
 )
 from conformdag.policy import (
@@ -47,9 +55,9 @@ from conformdag.reference import (
     RUNTIME_REFERENCE,
     ReferenceEntry,
 )
-from conformdag.reporting import has_blocking_failures, normalize_report, render_html, render_sarif
+from conformdag.reporting import has_blocking_failures, render_html, render_sarif
 from conformdag.runtime import RuntimePhaseError, build_runtime_manifest, execute_runtime
-from conformdag.scan import load_pack_for_scan, scan_repository
+from conformdag.scan import load_pack_for_scan
 from conformdag.scan import preview_model_context as build_model_context_preview
 from conformdag.semantic import CachedSemanticProvider, OpenAICompatibleProvider, SemanticCache
 
@@ -124,6 +132,35 @@ PACK_CACHE_ROOT_OPTION = typer.Option(None, "--cache-root", help="Cache root; de
 def _fail(error: Exception) -> NoReturn:
     typer.echo(f"error: {error}", err=True)
     raise typer.Exit(code=2)
+
+
+class _CliRuntimeExecutor:
+    """Adapt the CLI's existing runtime boundary to the application protocol."""
+
+    def validate(
+        self,
+        root: Path,
+        config: ProjectRuntimeConfig,
+        include: list[str],
+        exclude: list[str],
+    ) -> None:
+        try:
+            build_runtime_manifest(root, config, [], include, exclude)
+        except RuntimePhaseError as exc:
+            raise ScanInputError(str(exc)) from exc
+
+    def execute(
+        self,
+        root: Path,
+        config: ProjectRuntimeConfig,
+        policy_ids: list[str],
+        include: list[str],
+        exclude: list[str],
+    ) -> tuple[list[RuntimeObservation], str]:
+        try:
+            return execute_runtime(root, config, policy_ids, include, exclude)
+        except RuntimePhaseError as exc:
+            raise RuntimeExecutionError(str(exc)) from exc
 
 
 def _validate_semantic_base_url(value: str) -> str:
@@ -523,7 +560,7 @@ def scan(
         _fail(ValueError("--preview-model-context cannot be combined with runtime, semantic, or output"))
     root = path.resolve()
     try:
-        config, pack = load_pack_for_scan(root, policy_pack)
+        config, _ = load_pack_for_scan(root, policy_pack)
         if preview_model_context:
             preview = build_model_context_preview(root, policy_pack)
             typer.echo(
@@ -548,14 +585,6 @@ def scan(
                     "airflow_version": runtime,
                     "image": runtime_image,
                 }
-            )
-        if runtime_config.enabled:
-            build_runtime_manifest(
-                root,
-                runtime_config,
-                [],
-                config.scan.include,
-                config.scan.exclude,
             )
 
         semantic_enabled = config.semantic.enabled if semantic is None else semantic
@@ -598,91 +627,36 @@ def scan(
             )
             provider_name = urlsplit(selected_base_url).netloc or selected_base_url
 
-        report = scan_repository(
-            root,
-            policy_pack,
+        baseline_input = None
+        if baseline is not None:
+            try:
+                baseline_report = ScanReport.model_validate(json.loads(baseline.read_text(encoding="utf-8")))
+            except (OSError, ValueError) as exc:
+                _fail(ValueError(f"cannot load baseline report {baseline}: {exc}"))
+            if baseline_report.complete is not True:
+                _fail(ValueError(f"baseline report {baseline} is incomplete and cannot be used"))
+            baseline_input = BaselineInput(report=baseline_report)
+
+        runtime_executor: RuntimeExecutor | None = _CliRuntimeExecutor() if runtime_config.enabled else None
+        execution = execute_scan(
+            ScanOptions(
+                root,
+                policy_pack=policy_pack,
+                airflow_profile=runtime_config.airflow_version if runtime_config.enabled else None,
+            ),
             semantic_provider=provider,
-            semantic_provider_name=provider_name,
+            semantic_provider_name=provider_name if semantic_enabled else None,
             semantic_model=selected_semantic_model if semantic_enabled else None,
-            semantic_native_structured_output=(native_structured_output if semantic_enabled else None),
-            airflow_profile=runtime_config.airflow_version if runtime_config.enabled else None,
+            semantic_native_structured_output=native_structured_output if semantic_enabled else None,
+            runtime_config=runtime_config if runtime_config.enabled else None,
+            runtime_executor=runtime_executor,
+            baseline=baseline_input,
         )
+        report = execution.report
+        gate_result = execution.gate_result
     except (PolicyValidationError, RuntimePhaseError, ValueError) as exc:
         _fail(exc)
 
-    if runtime_config.enabled:
-        try:
-            observations, image_digest = execute_runtime(
-                root,
-                runtime_config,
-                sorted(set(report.policies_evaluated + report.policies_skipped)),
-                config.scan.include,
-                config.scan.exclude,
-            )
-            runtime_issues = [
-                RunIssue(
-                    code="RUNTIME_OBSERVATION_ERROR",
-                    message=observation.message or "runtime analysis returned ERROR",
-                    phase="runtime",
-                    fatal=True,
-                )
-                for observation in observations
-                if observation.status is FindingStatus.ERROR
-            ]
-            report = report.model_copy(
-                update={
-                    "complete": report.complete and not runtime_issues,
-                    "runtime_observations": observations,
-                    "issues": [*report.issues, *runtime_issues],
-                    "run": report.run.model_copy(
-                        update={
-                            "runtime_profile": runtime_config.airflow_version,
-                            "runtime_image_digest": image_digest,
-                            "resolved_configuration": {
-                                **report.run.resolved_configuration,
-                                "runtime": {
-                                    "enabled": True,
-                                    "airflow_profile": (
-                                        runtime_config.airflow_version.value
-                                        if runtime_config.airflow_version is not None
-                                        else None
-                                    ),
-                                    "supported_profile": (runtime_config.airflow_version is not None),
-                                    "network_enabled": runtime_config.network_enabled,
-                                    "timeout_seconds": runtime_config.timeout_seconds,
-                                },
-                            },
-                        }
-                    ),
-                }
-            )
-        except RuntimePhaseError as exc:
-            report = report.model_copy(
-                update={
-                    "complete": False,
-                    "issues": [
-                        *report.issues,
-                        RunIssue(
-                            code="RUNTIME_EXECUTION_ERROR",
-                            message=str(exc),
-                            phase="runtime",
-                            fatal=True,
-                        ),
-                    ],
-                }
-            )
-        report = normalize_report(report)
-    baseline_report: ScanReport | None = None
-    if baseline is not None:
-        try:
-            baseline_report = ScanReport.model_validate(json.loads(baseline.read_text(encoding="utf-8")))
-        except (OSError, ValueError) as exc:
-            _fail(ValueError(f"cannot load baseline report {baseline}: {exc}"))
-        if baseline_report.complete is not True:
-            _fail(ValueError(f"baseline report {baseline} is incomplete and cannot be used"))
-    gate_result = evaluate_pack_gates(pack, report, baseline_report) if report.complete else None
-    if gate_result is not None:
-        report = report.model_copy(update={"gate_result": gate_result})
     output_report = report
     if no_evidence:
         output_report = report.model_copy(

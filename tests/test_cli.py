@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from shutil import copyfile
 from types import SimpleNamespace
@@ -16,9 +17,23 @@ from typer.core import TyperGroup, TyperOption
 from typer.main import get_command
 from typer.testing import CliRunner
 
+from conformdag.application import BaselineInput, RuntimeExecutor, ScanExecutionResult, ScanOptions
 from conformdag.cli import app
-from conformdag.models import FindingStatus, RuntimeObservation
+from conformdag.models import (
+    AirflowProfile,
+    EnforcementType,
+    Finding,
+    FindingEvidence,
+    FindingLocation,
+    FindingStatus,
+    ProjectRuntimeConfig,
+    RunMetadata,
+    RuntimeObservation,
+    ScanReport,
+    Severity,
+)
 from conformdag.runtime import RuntimePhaseError
+from conformdag.scan import SemanticProvider
 
 
 def _missing_binary(_command: str) -> None:
@@ -891,3 +906,178 @@ def test_scan_incomplete_report_does_not_embed_gate_result(tmp_path: Path) -> No
     report = json.loads(result.stdout)
     assert report["complete"] is False
     assert report["gate_result"] is None
+
+
+def _application_report(*, include_finding: bool = False) -> ScanReport:
+    findings = (
+        [
+            Finding(
+                policy_id="AIR-TST-001",
+                policy_version="1.0.0",
+                status=FindingStatus.PASS,
+                severity=Severity.HIGH,
+                enforcement=EnforcementType.DETERMINISTIC,
+                location=FindingLocation(file=Path("dags/dag.py"), start_line=1),
+                evidence=FindingEvidence(text="DAG owner='sensitive-value'", start_line=1),
+                fingerprint="f" * 64,
+            )
+        ]
+        if include_finding
+        else []
+    )
+    return ScanReport(
+        complete=True,
+        result_fingerprint="application-service-fingerprint",
+        findings=findings,
+        issues=[],
+        run=RunMetadata(
+            tool_version="test",
+            policy_pack_id="test-pack",
+            policy_pack_version="1",
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+    )
+
+
+@pytest.mark.parametrize("runtime_enabled", [False, True])
+def test_scan_delegates_to_application_service_with_adapter_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_enabled: bool,
+) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
+    if runtime_enabled:
+        _write_yaml(
+            root / "conformdag.yaml",
+            {"config_version": "1", "runtime": {"enabled": True, "airflow_version": "3.3.0"}},
+        )
+    baseline_path = root / "baseline.json"
+    expected_baseline = _application_report()
+    baseline_path.write_text(expected_baseline.model_dump_json(), encoding="utf-8")
+    calls: list[
+        tuple[
+            ScanOptions,
+            SemanticProvider | None,
+            str | None,
+            str | None,
+            bool | None,
+            ProjectRuntimeConfig | None,
+            RuntimeExecutor | None,
+            BaselineInput | None,
+        ]
+    ] = []
+    service_report = _application_report()
+
+    def execute_service(
+        options: ScanOptions,
+        *,
+        semantic_provider: SemanticProvider | None = None,
+        semantic_provider_name: str | None = None,
+        semantic_model: str | None = None,
+        semantic_native_structured_output: bool | None = None,
+        runtime_config: ProjectRuntimeConfig | None = None,
+        runtime_executor: RuntimeExecutor | None = None,
+        baseline: BaselineInput | None = None,
+    ) -> ScanExecutionResult:
+        calls.append(
+            (
+                options,
+                semantic_provider,
+                semantic_provider_name,
+                semantic_model,
+                semantic_native_structured_output,
+                runtime_config,
+                runtime_executor,
+                baseline,
+            )
+        )
+        return ScanExecutionResult(report=service_report, gate_result=None)
+
+    monkeypatch.setattr("conformdag.cli.execute_scan", execute_service, raising=False)
+
+    def fake_runtime(
+        root: Path,
+        config: ProjectRuntimeConfig,
+        policy_ids: list[str],
+        include: list[str],
+        exclude: list[str],
+    ) -> tuple[list[RuntimeObservation], str]:
+        return [RuntimeObservation(status=FindingStatus.PASS, policy_id="AIR-TST-001")], "sha256:test"
+
+    if runtime_enabled:
+        monkeypatch.setattr("conformdag.cli.execute_runtime", fake_runtime)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--policy-pack",
+            str(root / "pack.yaml"),
+            "--baseline",
+            str(baseline_path),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert len(calls) == 1
+    options, semantic_provider, provider_name, model, structured_output, runtime_config, runtime_executor, baseline = (
+        calls[0]
+    )
+    assert options == ScanOptions(
+        root.resolve(),
+        policy_pack=root / "pack.yaml",
+        airflow_profile=AirflowProfile.AIRFLOW_3_3_0 if runtime_enabled else None,
+    )
+    assert (semantic_provider, provider_name, model, structured_output) == (None, None, None, None)
+    assert baseline == BaselineInput(report=expected_baseline)
+    if runtime_enabled:
+        assert runtime_config is not None and runtime_config.enabled is True
+        assert runtime_config.airflow_version is AirflowProfile.AIRFLOW_3_3_0
+        assert runtime_executor is not None
+    else:
+        assert runtime_config is None
+        assert runtime_executor is None
+
+
+def test_scan_no_evidence_does_not_mutate_application_report_or_fingerprint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
+    service_report = _application_report(include_finding=True)
+    original_fingerprint = service_report.result_fingerprint
+    original_evidence = service_report.findings[0].evidence
+    calls: list[ScanOptions] = []
+
+    def execute_service(
+        options: ScanOptions,
+        *,
+        semantic_provider: SemanticProvider | None = None,
+        semantic_provider_name: str | None = None,
+        semantic_model: str | None = None,
+        semantic_native_structured_output: bool | None = None,
+        runtime_config: ProjectRuntimeConfig | None = None,
+        runtime_executor: RuntimeExecutor | None = None,
+        baseline: BaselineInput | None = None,
+    ) -> ScanExecutionResult:
+        calls.append(options)
+        return ScanExecutionResult(report=service_report, gate_result=None)
+
+    monkeypatch.setattr("conformdag.cli.execute_scan", execute_service, raising=False)
+
+    result = CliRunner().invoke(
+        app,
+        ["scan", "--path", str(root), "--policy-pack", str(root / "pack.yaml"), "--no-evidence", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert len(calls) == 1
+    rendered = json.loads(result.stdout)
+    assert rendered["result_fingerprint"] == original_fingerprint
+    assert rendered["findings"][0]["evidence"] is None
+    assert service_report.result_fingerprint == original_fingerprint
+    assert service_report.findings[0].evidence is original_evidence
