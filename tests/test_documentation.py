@@ -66,7 +66,8 @@ def test_architecture_documents_check_kind_and_legacy_registries() -> None:
     normalized = " ".join(architecture.split())
 
     assert "`conformdag.checks.registry` owns the authoritative `CheckSpec` catalogue" in normalized
-    assert "Evaluator implementations remain in `evaluator.py` until C05" in normalized
+    assert "Deterministic contracts/helpers live in `checks/common.py`" in normalized
+    assert "`evaluator.py` is a compatibility facade" in normalized
     assert "registered by check kind in `CHECK_EVALUATORS`" in architecture
     assert "Legacy policy-ID aliases" in architecture
     assert "`LEGACY_POLICY_EVALUATORS`" in architecture

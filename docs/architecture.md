@@ -25,9 +25,11 @@ adapters isolate side effects at explicit boundaries.
 A policy contract contains a stable ID, version, lifecycle state, owner, provenance,
 scope, invariant, remediation, enforcement type, exception rules, and typed
 configuration. `conformdag.checks.registry` owns the authoritative `CheckSpec` catalogue
-and derives evaluator, fixability, scaffolding, and legacy-alias views from it. Evaluator
-implementations remain in `evaluator.py` until C05. Deterministic evaluator classes
-implement a common protocol and are registered by check kind in `CHECK_EVALUATORS`.
+and derives evaluator, fixability, scaffolding, and legacy-alias views from it. Deterministic
+contracts/helpers live in `checks/common.py`, Airflow evaluator families live in
+`checks/airflow/`, and routing lives in `checks/evaluate.py`. `evaluator.py` is a
+compatibility facade. Deterministic evaluator classes implement a common protocol and
+are registered by check kind in `CHECK_EVALUATORS`.
 Legacy policy-ID aliases are kept separately in `LEGACY_POLICY_EVALUATORS`; they do not
 define the primary registry key, and those names remain compatibility views.
 Semantic policy-specific instructions are centralized beside the semantic evaluator.
