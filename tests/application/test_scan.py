@@ -16,12 +16,17 @@ from conformdag.application import (
     ScanOptions,
     execute_scan,
 )
+from conformdag.gates import evaluate_pack_gates as _evaluate_pack_gates
 from conformdag.models import (
     AirflowProfile,
     Confidence,
     Finding,
     FindingStatus,
+    GateResult,
+    PolicyPack,
+    ProjectConfig,
     ProjectRuntimeConfig,
+    QualityGate,
     RunIssue,
     RunMetadata,
     RuntimeObservation,
@@ -30,7 +35,8 @@ from conformdag.models import (
     SemanticResponse,
     Suppression,
 )
-from conformdag.scan import SemanticProvider, scan_repository
+from conformdag.reporting import normalize_report as _normalize_report
+from conformdag.scan import SemanticProvider, load_pack_for_scan, scan_repository
 from conformdag.semantic import SemanticProviderError
 
 
@@ -186,6 +192,31 @@ def _install_core_stub(
         return report
 
     monkeypatch.setattr("conformdag.application.scan.scan_repository", fake_scan)
+
+
+def _install_application_pack(
+    monkeypatch: pytest.MonkeyPatch,
+    root: Path,
+    *,
+    with_gate: bool = True,
+) -> PolicyPack:
+    config, pack = load_pack_for_scan(root, None)
+    if with_gate:
+        pack = pack.model_copy(
+            update={
+                "quality_gates": [
+                    QualityGate.model_validate(
+                        {"id": "application-test", "rules": [{"type": "max-findings", "count": 10}]}
+                    )
+                ]
+            }
+        )
+
+    def fake_load_pack(repository_root: Path, policy_pack: Path | None) -> tuple[ProjectConfig, PolicyPack]:
+        return config, pack
+
+    monkeypatch.setattr("conformdag.application.scan.load_pack_for_scan", fake_load_pack)
+    return pack
 
 
 def _finding_from_repository(build_repository: Callable[[Path], Path], root: Path) -> Finding:
@@ -737,3 +768,199 @@ def test_execute_scan_without_operational_suppressions_preserves_core_report_sta
     assert result.report.findings[0].suppressed is True
     assert result.report.findings[0].suppression is local
     assert result.report.issues == [parse_issue]
+
+
+def test_execute_scan_normalizes_runtime_and_suppressions_before_baseline_report_gate(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = build_repository(tmp_path / "repo")
+    finding = _finding_from_repository(build_repository, tmp_path / "finding-repo")
+    _install_application_pack(monkeypatch, root)
+    current = datetime.now(UTC)
+    operational = _suppression_for_finding(finding, current, reason="application waiver")
+    core_report = _complete_report().model_copy(update={"findings": [finding]})
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, core_report)
+    observation = RuntimeObservation(policy_id="AIR-RUN-001", status=FindingStatus.PASS)
+    executor = _FakeRuntimeExecutor(events, observations=[observation])
+    baseline_report = _complete_report()
+    baseline = BaselineInput(report=baseline_report)
+    normalized_reports: list[ScanReport] = []
+    normalization_inputs: list[ScanReport] = []
+    gate_result = GateResult(gate_id="application-test", passed=True, rules=[])
+    gate_inputs: list[tuple[PolicyPack, ScanReport, ScanReport | None, set[str] | None]] = []
+
+    def normalize(report: ScanReport) -> ScanReport:
+        events.append("normalize")
+        normalization_inputs.append(report)
+        assert report.runtime_observations == [observation]
+        assert report.findings[0].suppressed is True
+        normalized = _normalize_report(report)
+        normalized_reports.append(normalized)
+        return normalized
+
+    def evaluate_gates(
+        pack: PolicyPack,
+        report: ScanReport,
+        baseline_arg: ScanReport | None,
+        *,
+        baseline_fingerprints: set[str] | None = None,
+    ) -> GateResult:
+        events.append("gates")
+        assert normalized_reports == [report]
+        gate_inputs.append((pack, report, baseline_arg, baseline_fingerprints))
+        return gate_result
+
+    monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
+    monkeypatch.setattr("conformdag.application.scan.evaluate_pack_gates", evaluate_gates, raising=False)
+
+    result = execute_scan(
+        ScanOptions(root),
+        runtime_config=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+        runtime_executor=executor,
+        baseline=baseline,
+        operational_suppressions=[operational],
+    )
+
+    assert events == ["validate", "core", "execute", "normalize", "gates"]
+    assert len(normalization_inputs) == 1
+    assert len(gate_inputs) == 1
+    assert gate_inputs[0][1] is normalized_reports[0]
+    assert gate_inputs[0][2] is baseline_report
+    assert gate_inputs[0][3] is None
+    assert result.report.result_fingerprint == normalized_reports[0].result_fingerprint
+    assert result.gate_result is gate_result
+    assert result.report.gate_result is gate_result
+
+
+def test_execute_scan_normalizes_once_and_passes_baseline_fingerprints_to_gates(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = build_repository(tmp_path / "repo")
+    pack = _install_application_pack(monkeypatch, root)
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, _complete_report())
+    baseline_fingerprints = frozenset({"known-a", "known-b"})
+    baseline = BaselineInput(fingerprints=baseline_fingerprints)
+    normalized_reports: list[ScanReport] = []
+    normalization_count = 0
+    gate_result = GateResult(gate_id="application-test", passed=True, rules=[])
+    gate_inputs: list[tuple[PolicyPack, ScanReport, ScanReport | None, set[str] | None]] = []
+
+    def normalize(report: ScanReport) -> ScanReport:
+        nonlocal normalization_count
+        events.append("normalize")
+        normalization_count += 1
+        normalized = _normalize_report(report)
+        normalized_reports.append(normalized)
+        return normalized
+
+    def evaluate_gates(
+        actual_pack: PolicyPack,
+        report: ScanReport,
+        baseline_report: ScanReport | None,
+        *,
+        baseline_fingerprints: set[str] | None = None,
+    ) -> GateResult:
+        events.append("gates")
+        gate_inputs.append((actual_pack, report, baseline_report, baseline_fingerprints))
+        return gate_result
+
+    monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
+    monkeypatch.setattr("conformdag.application.scan.evaluate_pack_gates", evaluate_gates, raising=False)
+
+    result = execute_scan(ScanOptions(root), baseline=baseline)
+
+    assert events == ["core", "normalize", "gates"]
+    assert normalization_count == 1
+    assert gate_inputs == [(pack, normalized_reports[0], None, {"known-a", "known-b"})]
+    assert result.report.gate_result is result.gate_result is gate_result
+
+
+def test_execute_scan_normalizes_incomplete_report_without_evaluating_or_retaining_gate(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = build_repository(tmp_path / "repo")
+    _install_application_pack(monkeypatch, root)
+    stale_gate = GateResult(gate_id="stale", passed=False, rules=[])
+    incomplete_report = _complete_report().model_copy(update={"complete": False, "gate_result": stale_gate})
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, incomplete_report)
+    normalization_count = 0
+    gate_calls: list[ScanReport] = []
+
+    def normalize(report: ScanReport) -> ScanReport:
+        nonlocal normalization_count
+        events.append("normalize")
+        normalization_count += 1
+        return _normalize_report(report)
+
+    def evaluate_gates(
+        pack: PolicyPack,
+        report: ScanReport,
+        baseline_report: ScanReport | None,
+        *,
+        baseline_fingerprints: set[str] | None = None,
+    ) -> GateResult | None:
+        gate_calls.append(report)
+        return None
+
+    monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
+    monkeypatch.setattr("conformdag.application.scan.evaluate_pack_gates", evaluate_gates, raising=False)
+
+    result = execute_scan(ScanOptions(root))
+
+    assert events == ["core", "normalize"]
+    assert normalization_count == 1
+    assert gate_calls == []
+    assert result.report.complete is False
+    assert result.report.gate_result is None
+    assert result.gate_result is None
+
+
+def test_execute_scan_without_pack_gates_returns_no_embedded_or_direct_gate_result(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = build_repository(tmp_path / "repo")
+    _install_application_pack(monkeypatch, root, with_gate=False)
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, _complete_report())
+    normalization_count = 0
+    gate_calls: list[tuple[PolicyPack, ScanReport]] = []
+
+    def normalize(report: ScanReport) -> ScanReport:
+        nonlocal normalization_count
+        events.append("normalize")
+        normalization_count += 1
+        return _normalize_report(report)
+
+    def evaluate_gates(
+        pack: PolicyPack,
+        report: ScanReport,
+        baseline_report: ScanReport | None,
+        *,
+        baseline_fingerprints: set[str] | None = None,
+    ) -> GateResult | None:
+        events.append("gates")
+        gate_calls.append((pack, report))
+        return _evaluate_pack_gates(pack, report, baseline_report, baseline_fingerprints=baseline_fingerprints)
+
+    monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
+    monkeypatch.setattr("conformdag.application.scan.evaluate_pack_gates", evaluate_gates, raising=False)
+
+    result = execute_scan(ScanOptions(root))
+
+    assert events == ["core", "normalize", "gates"]
+    assert normalization_count == 1
+    assert len(gate_calls) == 1
+    assert gate_calls[0][0].quality_gates == []
+    assert result.report.gate_result is None
+    assert result.gate_result is None

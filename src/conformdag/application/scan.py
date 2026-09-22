@@ -9,6 +9,7 @@ from typing import Protocol
 
 from conformdag.analysis import ParseCache
 from conformdag.application.errors import RuntimeExecutionError, ScanInputError
+from conformdag.gates import evaluate_pack_gates
 from conformdag.models import (
     AirflowProfile,
     FindingStatus,
@@ -19,7 +20,7 @@ from conformdag.models import (
     ScanReport,
     Suppression,
 )
-from conformdag.reporting import apply_suppressions
+from conformdag.reporting import apply_suppressions, normalize_report
 from conformdag.scan import SemanticProvider, load_pack_for_scan, scan_repository
 
 
@@ -76,7 +77,7 @@ def execute_scan(
 ) -> ScanExecutionResult:
     """Run one core scan with optional injected phase inputs."""
     root = options.repository_root.resolve()
-    config, _ = load_pack_for_scan(root, options.policy_pack)
+    config, pack = load_pack_for_scan(root, options.policy_pack)
 
     if baseline is not None:
         if baseline.report is not None and baseline.fingerprints is not None:
@@ -200,4 +201,18 @@ def execute_scan(
                 "complete": complete,
             }
         )
-    return ScanExecutionResult(report=report, gate_result=None)
+
+    final_report = normalize_report(report.model_copy(update={"gate_result": None}))
+    gate_result = None
+    if final_report.complete:
+        gate_result = evaluate_pack_gates(
+            pack,
+            final_report,
+            baseline.report if baseline is not None else None,
+            baseline_fingerprints=(
+                set(baseline.fingerprints) if baseline is not None and baseline.fingerprints is not None else None
+            ),
+        )
+    if gate_result is not None:
+        final_report = final_report.model_copy(update={"gate_result": gate_result})
+    return ScanExecutionResult(report=final_report, gate_result=gate_result)
