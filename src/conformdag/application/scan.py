@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Protocol
 
 from conformdag.analysis import ParseCache
-from conformdag.application.errors import ScanInputError
+from conformdag.application.errors import RuntimeExecutionError, ScanInputError
 from conformdag.models import (
     AirflowProfile,
+    FindingStatus,
     GateResult,
     ProjectRuntimeConfig,
+    RunIssue,
     RuntimeObservation,
     ScanReport,
     Suppression,
@@ -73,7 +75,7 @@ def execute_scan(
 ) -> ScanExecutionResult:
     """Run one core scan with optional injected phase inputs."""
     root = options.repository_root.resolve()
-    load_pack_for_scan(root, options.policy_pack)
+    config, _ = load_pack_for_scan(root, options.policy_pack)
 
     if baseline is not None:
         if baseline.report is not None and baseline.fingerprints is not None:
@@ -83,6 +85,11 @@ def execute_scan(
 
     if semantic_provider is not None and not semantic_model:
         raise ScanInputError("semantic provider requires a model")
+
+    if runtime_config is not None and runtime_config.enabled:
+        if runtime_executor is None:
+            raise ScanInputError("enabled runtime requires a RuntimeExecutor")
+        runtime_executor.validate(root, runtime_config, config.scan.include, config.scan.exclude)
 
     report = scan_repository(
         root,
@@ -94,4 +101,73 @@ def execute_scan(
         airflow_profile=options.airflow_profile,
         parse_cache=parse_cache,
     )
+
+    if runtime_config is not None and runtime_config.enabled:
+        if runtime_executor is None:
+            raise ScanInputError("enabled runtime requires a RuntimeExecutor")
+        try:
+            observations, image_digest = runtime_executor.execute(
+                root,
+                runtime_config,
+                sorted(set(report.policies_evaluated + report.policies_skipped)),
+                config.scan.include,
+                config.scan.exclude,
+            )
+        except RuntimeExecutionError as exc:
+            report = report.model_copy(
+                update={
+                    "complete": False,
+                    "issues": [
+                        *report.issues,
+                        RunIssue(
+                            code="RUNTIME_EXECUTION_ERROR",
+                            message=str(exc),
+                            phase="runtime",
+                            fatal=True,
+                        ),
+                    ],
+                }
+            )
+        else:
+            observations = sorted(
+                observations,
+                key=lambda item: (item.policy_id, item.status.value, item.message or ""),
+            )
+            runtime_issues = [
+                RunIssue(
+                    code="RUNTIME_OBSERVATION_ERROR",
+                    message=observation.message or "runtime analysis returned ERROR",
+                    phase="runtime",
+                    fatal=True,
+                )
+                for observation in observations
+                if observation.status is FindingStatus.ERROR
+            ]
+            report = report.model_copy(
+                update={
+                    "complete": report.complete and not runtime_issues,
+                    "runtime_observations": observations,
+                    "issues": [*report.issues, *runtime_issues],
+                    "run": report.run.model_copy(
+                        update={
+                            "runtime_profile": runtime_config.airflow_version,
+                            "runtime_image_digest": image_digest,
+                            "resolved_configuration": {
+                                **report.run.resolved_configuration,
+                                "runtime": {
+                                    "enabled": True,
+                                    "airflow_profile": (
+                                        runtime_config.airflow_version.value
+                                        if runtime_config.airflow_version is not None
+                                        else None
+                                    ),
+                                    "supported_profile": runtime_config.airflow_version is not None,
+                                    "network_enabled": runtime_config.network_enabled,
+                                    "timeout_seconds": runtime_config.timeout_seconds,
+                                },
+                            },
+                        }
+                    ),
+                }
+            )
     return ScanExecutionResult(report=report, gate_result=None)
