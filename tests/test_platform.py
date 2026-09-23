@@ -584,7 +584,8 @@ def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
     (tmp_path / "policies").mkdir()
     (tmp_path / "policies/pack.yaml").write_text("id: x\n", encoding="utf-8")
     (tmp_path / "conformdag-workspace.yaml").write_text(
-        "schema_version: '1'\nrepositories:\n  - name: core\n    path: dags\n    policy_pack: policies/pack.yaml\n",
+        "schema_version: '1'\nrepositories:\n  - name: core\n    path: dags\n    policy_pack: policies/pack.yaml\n"
+        "    airflow_profile: '3.3.0'\n",
         encoding="utf-8",
     )
 
@@ -593,6 +594,20 @@ def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
     assert resolved == (tmp_path / "conformdag-workspace.yaml").resolve()
     assert workspace.repositories[0].path == (tmp_path / "dags").resolve()
     assert workspace.repositories[0].policy_pack == (tmp_path / "policies/pack.yaml").resolve()
+    assert workspace.repositories[0].airflow_profile == "3.3.0"
+    assert isinstance(workspace.repositories[0].airflow_profile, str)
+
+
+def test_workspace_rejects_unsupported_airflow_profile(tmp_path: Path) -> None:
+    from conformdag.platform.workspace import WorkspaceError, load_workspace
+
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "conformdag-workspace.yaml").write_text(
+        'repositories:\n  - name: core\n    path: dags\n    airflow_profile: "4.0"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(WorkspaceError, match="unsupported Airflow profile.*4.0"):
+        load_workspace(tmp_path / "conformdag-workspace.yaml")
 
 
 def test_workspace_rejects_missing_paths_and_duplicates(tmp_path: Path) -> None:
@@ -2317,6 +2332,43 @@ def test_register_repository_rejects_overlong_airflow_profile(client: TestClient
     )
 
     assert response.status_code == 422
+
+
+def test_register_repository_rejects_unsupported_airflow_profile(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "repo").mkdir(exist_ok=True)
+    response = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": "profile-unsupported", "path": str(tmp_path / "repo"), "airflow_profile": "4.0"},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_register_repository_preserves_valid_airflow_profile_string(
+    client: TestClient, tmp_path: Path
+) -> None:
+    (tmp_path / "repo").mkdir(exist_ok=True)
+    response = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": "profile-valid", "path": str(tmp_path / "repo"), "airflow_profile": "3.3.0"},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200
+    repository_id = response.json()["id"]
+    factory, _ = _platform_state(client)
+    with factory() as session:
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        assert repository.airflow_profile == "3.3.0"
+
+    listed = _get(client, "/api/v1/repos")
+    assert listed.status_code == 200
+    listed_repository = next(row for row in listed.json() if row["id"] == repository_id)
+    assert listed_repository["airflow_profile"] == "3.3.0"
 
 
 def test_trigger_scan_unknown_repository_returns_404(client: TestClient) -> None:

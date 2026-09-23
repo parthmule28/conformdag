@@ -25,6 +25,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
 from starlette.types import Scope
 
+from conformdag.application import coerce_platform_airflow_profile
 from conformdag.models import ScanReport
 from conformdag.platform.aggregates import build_overview, build_repository_trends
 from conformdag.platform.contracts import (
@@ -132,6 +133,12 @@ class RepositoryCreate(BaseModel):
     path: str
     policy_pack: str | None = None
     airflow_profile: str | None = Field(default=None, max_length=32)
+
+    @field_validator("airflow_profile")
+    @classmethod
+    def validate_airflow_profile(cls, value: str | None) -> str | None:
+        coerce_platform_airflow_profile(value)
+        return value
 
 
 class WorkspaceLoadRequest(BaseModel):
