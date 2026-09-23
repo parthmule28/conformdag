@@ -15,10 +15,12 @@ explicit invocation → platform repository override → project file → model 
 
 C07 replaces the temporary CLI merge introduced in C06 and provides a typed
 platform seam. It preserves C06 scan behavior and report contracts, keeps
-credentials outside effective configuration, and carries the platform's
-Airflow profile as typed data without making that currently inert value affect
-scan behavior. C08 makes the profile effective; C10 moves the platform runner's
-remaining scan orchestration into the application workflow.
+credentials outside effective configuration, and carries the persisted
+platform Airflow profile as a typed resolver input without wiring that value
+into C07 platform scans. The project profile remains part of effective scan
+configuration regardless of runtime execution being enabled. C08 makes the
+persisted platform profile effective; C10 moves the platform runner's remaining
+scan orchestration into the application workflow.
 
 ## Current behavior and ownership
 
@@ -91,8 +93,9 @@ class ScanOverrides:
 boolean and overrides `True` below it. The current CLI treats empty semantic
 URL and model options as omitted through its existing truthy fallback; the
 adapter must preserve that mapping when constructing `ScanOverrides`.
-Clearing a configured optional URL, model, profile, or image is not a new C07
-operation.
+Clearing a configured optional URL, model, profile, or image is not a general
+C07 operation. The CLI runtime-selector mapping below is the specific
+exception: it clears the sibling runtime target for that invocation.
 
 The complete result is:
 
@@ -131,10 +134,16 @@ conflicting explicit runtime selectors rather than silently choosing one.
 
 The CLI's existing `--runtime` and `--runtime-image` flags are mutually
 exclusive selectors, not independent requests to preserve both project
-selector fields. When either is explicitly supplied, C07 preserves the C06
-behavior: runtime is enabled, the selected target is set, and the sibling
-target is cleared for that invocation. With neither selector, the resolved
-project `runtime.enabled`, image, and profile retain their current values.
+selector fields. When either is explicitly supplied, runtime is enabled and
+the selected target is set while the sibling target is cleared for that
+invocation. In particular, `--runtime-image` explicitly clears the effective
+Airflow profile from lower-precedence layers for that invocation, even if the
+project file has one; this is part of the selector mapping, not a general
+`None`-means-clear rule for `ScanOverrides`. With neither selector, the
+project's `runtime.enabled`, image, and profile values are retained. The
+effective profile is used for core static evaluation whether or not runtime
+execution is enabled; `runtime.enabled` controls only the optional Docker
+runtime phase.
 This special invocation rule does not apply to the platform repository's
 `airflow_profile`: that field supplies a profile value only; it does not enable
 runtime execution or clear a project runtime image.
@@ -218,20 +227,32 @@ inject an executor has not requested runtime execution. The CLI still supplies
 one whenever effective runtime is enabled, so its current validation and
 execution behavior remain unchanged.
 
-For C07, the core `airflow_profile` argument is derived inside
-`execute_scan()` as `configuration.runtime.airflow_version` only when
-`configuration.runtime.enabled` is true. This matches C06's CLI projection:
-an explicit `--runtime` selector enables runtime and carries its profile, while
-a profile stored in a disabled project runtime remains inert. C07 does not
-populate the platform override's profile field, so no persisted platform
-profile reaches this projection. C08 owns changing this projection so its
-validated platform profile can reach core evaluation without enabling runtime
-or changing runtime-image selection.
+For C07, `execute_scan()` always passes
+`configuration.runtime.airflow_version` to core, including an explicit `None`,
+without conditioning it on `configuration.runtime.enabled`. A project profile
+therefore continues to influence static/core evaluation when Docker runtime
+execution is disabled; `runtime.enabled` controls only whether the optional
+runtime phase executes. An explicit `--runtime-image` produces an effective
+profile of `None`, so a lower-precedence project profile cannot reappear during
+core evaluation. C07 does not populate the platform override's profile field,
+so no persisted platform profile reaches this projection. C08 owns making its
+validated platform profile effective without enabling runtime or changing
+runtime-image selection.
 
 `scan_repository()` remains the only core evaluation primitive and continues
 to load project scan controls needed for discovery and repository-local
-suppressions. It receives the already selected absolute pack path, so that
-read does not make a second precedence decision. Existing C06 inputs
+suppressions. Its profile argument must distinguish omission from an explicit
+value: legacy/direct callers that omit `airflow_profile` retain the current
+project-config fallback, while a C07 application call explicitly supplies the
+effective profile, including `None`, and must not fall back to project config.
+An internal sentinel/default semantic is one possible implementation; the
+precise mechanism is deferred to the implementation plan. The explicit
+effective profile prevents core from becoming a second configuration source.
+The C07 platform runner remains a legacy direct core caller until C10 and does
+not pass the persisted platform profile; its omitted profile argument
+therefore retains project-config fallback. The core receives the already
+selected absolute pack path, so that read does not make a second precedence
+decision. Existing C06 inputs
 `semantic_model`, `semantic_native_structured_output`, and `runtime_config`
 are removed from `execute_scan()`; their effective values come only from
 `configuration`. The C06 `ScanOptions.policy_pack` and
@@ -241,11 +262,14 @@ suppressions, and parse-cache injection remain phase adapters/metadata rather
 than competing configuration sources.
 
 For CLI parity, the adapter enables a runtime executor only under the same
-conditions as C06. `execute_scan()` passes the effective runtime profile to
-core evaluation only when runtime is enabled, preserving the current error
-mapping, offline default, report fields, fingerprints, renderers, and exit
-precedence. Preview mode continues to avoid provider/runtime construction and
-uses the resolved pack.
+conditions as C06. `execute_scan()` always passes the effective profile to
+core evaluation, including `None`; it creates/runs the runtime adapter only
+when runtime is enabled. This preserves profile selection from project config
+while disabled and ensures an explicit `--runtime-image` clears that profile
+for core evaluation. The current error mapping, offline default, report
+fields, fingerprints, renderers, and exit precedence remain unchanged. Preview
+mode continues to avoid provider/runtime construction and uses the resolved
+pack.
 Other CLI commands such as `fix` and `doctor` are outside C07; they are not
 complete application scan entry points.
 
@@ -268,11 +292,14 @@ and making that override effective. C07 adds no database migration and does
 not change the platform profile's observable scan behavior.
 
 The resolver may return project-level semantic and runtime settings for any
-adapter, but C07 does not activate those phases in platform scans; the current
-runner has no semantic-provider or runtime-executor composition. C10 must
-preserve that platform behavior while delegating orchestration unless a later
-approved slice explicitly changes platform opt-in semantics. Sharing a
-resolved configuration does not itself imply execution of an optional phase.
+adapter, but C07 does not activate semantic or Docker runtime phases in
+platform scans; the current runner has no semantic-provider or
+runtime-executor composition. The project Airflow profile may still affect
+core static evaluation through the current direct-call fallback; that does not
+execute the runtime phase. C10 must preserve platform phase behavior while
+delegating orchestration unless a later approved slice explicitly changes
+platform opt-in semantics. Sharing a resolved configuration does not itself
+imply execution of an optional phase.
 
 ## Behavior and error contract
 
@@ -310,7 +337,8 @@ compatibility evidence required before implementation is considered complete.
 
 - **Completeness:** The resolver owner, source order, path origins, partial
   override semantics, secrets boundary, exact post-C07 `execute_scan()`
-  contract, CLI migration, and C08/C10 cut lines are specified.
+  contract, omitted-versus-explicit core profile semantics, CLI migration, and
+  C08/C10 cut lines are specified.
 - **Consistency:** The profile override is typed in the resolver contract,
   while the persisted platform string is not wired until C08. Resolver output
   alone does not activate runtime or semantic phases in the platform runner;
@@ -320,7 +348,9 @@ compatibility evidence required before implementation is considered complete.
   platform scan workflow. Product code, tests, and implementation planning are
   deferred until the applicable review gates.
 - **Ambiguity:** The C06 runtime selector interaction is recorded as an
-  explicit CLI-only rule. `None` is consistently absence in override values;
-  this design does not introduce an optional-value clearing operation. C06's
+  explicit CLI-only rule, including the profile clear implied by
+  `--runtime-image`. `None` means absence in ordinary override values; the
+  selector mapping is the explicit exception. The core scan contract
+  distinguishes omitted profile from explicitly supplied `None`. C06's
   direct-call runtime-config/executor validation is explicitly replaced by
   adapter-requested runtime execution while CLI behavior remains the same.
