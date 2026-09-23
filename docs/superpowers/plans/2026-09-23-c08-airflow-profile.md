@@ -233,15 +233,15 @@ git commit -m "fix: apply platform airflow profile overrides"
 - The implementation PR remains open and unmerged at handoff.
 - The C08 progress row changes from `planned` to `review`, cites the real PR/base/head and required verification evidence, and does not claim acceptance before merge.
 
-- [ ] **Step 1: Push the implementation branch and open the PR without merging.**
+- [x] **Step 1: Push the implementation branch and open the PR without merging.**
 
 Push `docs/c08-airflow-profile`, then open a `main`-based PR titled `fix: apply platform airflow profile overrides`. Include API/workspace validation, typed application coercion, runner/core pass-through, invalid persisted-row handling, cancellation fencing, no schema migration, full-gate/coverage/schema evidence, and the intentional non-enabling of runtime execution. Wait for the implementation-head CI and a separate independent review; address findings before recording the review row. If any Critical or Important issue is reported, fix it, rerun focused and full verification, push the corrected head, and obtain a re-review of that corrected head before changing the C08 ledger row to `review`.
 
-- [ ] **Step 2: Record the C08 review row after the PR number and implementation commit are known.**
+- [x] **Step 2: Record the C08 review row after the PR number and implementation commit are known.**
 
 Change only the C08 row in `docs/consolidation/progress.md` to `review`. Record the implementation commit, PR base, focused test counts, `mise run check`, coverage, schema/whitespace results, and implementation-head CI evidence available at that point. State that the PR is open and unmerged; do not mark it accepted. Do not place a self-referential final PR head or a CI run that has not yet completed in this commit.
 
-- [ ] **Step 3: Commit and push the review-evidence row.**
+- [x] **Step 3: Commit and push the review-evidence row.**
 
 ```bash
 git add docs/consolidation/progress.md
@@ -249,6 +249,6 @@ git commit -m "docs: record C08 airflow profile review evidence"
 git push
 ```
 
-- [ ] **Step 4: Re-run the final-head checks and stop at review.**
+- [x] **Step 4: Re-run the final-head checks and stop at review.**
 
 Wait for the final PR head's required CI checks; verify the head SHA and check run IDs; report the PR URL, final head SHA, implementation commit, focused/full test counts, coverage, schema result, and any skipped opt-in jobs. Leave the PR unmerged. After a later authorized merge, record `accepted`, the final PR head, and the actual merge commit in a separate docs-only ledger follow-up.
