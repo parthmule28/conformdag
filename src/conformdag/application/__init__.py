@@ -3,6 +3,7 @@
 from conformdag.application.configuration import (
     EffectiveScanConfiguration,
     ScanOverrides,
+    coerce_platform_airflow_profile,
     resolve_effective_configuration,
 )
 from conformdag.application.errors import RuntimeExecutionError, ScanInputError
@@ -23,6 +24,7 @@ __all__ = [
     "ScanInputError",
     "ScanOptions",
     "ScanOverrides",
+    "coerce_platform_airflow_profile",
     "execute_scan",
     "resolve_effective_configuration",
 ]
