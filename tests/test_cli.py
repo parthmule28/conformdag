@@ -1324,6 +1324,35 @@ def test_scan_no_semantic_keeps_project_profile_inert_and_builds_no_phase_adapte
     assert configuration.runtime.airflow_version is AirflowProfile.AIRFLOW_3_3_0
 
 
+def test_disabled_semantic_structured_output_override_preserves_project_report_metadata(
+    tmp_path: Path,
+) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
+    _write_yaml(
+        root / "conformdag.yaml",
+        {"config_version": "1", "semantic": {"enabled": False, "native_structured_output": True}},
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--policy-pack",
+            str(root / "pack.yaml"),
+            "--no-semantic",
+            "--no-semantic-structured-output",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["run"]["resolved_configuration"]["semantic"]["native_structured_output"] is True
+
+
 def test_scan_no_evidence_does_not_mutate_application_report_or_fingerprint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

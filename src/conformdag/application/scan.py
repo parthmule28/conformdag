@@ -99,7 +99,9 @@ def execute_scan(
         semantic_provider=semantic_provider,
         semantic_provider_name=semantic_provider_name,
         semantic_model=configuration.semantic.model if semantic_provider is not None else None,
-        semantic_native_structured_output=configuration.semantic.native_structured_output,
+        semantic_native_structured_output=(
+            configuration.semantic.native_structured_output if semantic_provider is not None else None
+        ),
         airflow_profile=configuration.runtime.airflow_version,
         parse_cache=parse_cache,
     )
