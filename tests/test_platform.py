@@ -3398,6 +3398,170 @@ def test_runner_persistent_failure_after_cancel_keeps_cancelled_status(
     assert scan.status == "cancelled"
 
 
+def test_runner_uses_resolved_pack_without_wiring_stored_profile(
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.application import EffectiveScanConfiguration, ScanOverrides, resolve_effective_configuration
+    from conformdag.platform.runner import execute_scan
+    from conformdag.policy import select_policy_pack
+
+    repository_root = tmp_path / "repo"
+    platform_pack = repository_root / "registered-pack.yaml"
+    _write_yaml(platform_pack, {"schema_version": "1", "id": "platform", "version": "1", "policies": []})
+    (repository_root / "conformdag.yaml").write_text(
+        'config_version: "1"\nscan:\n  policy_pack: project-packs/not-selected.yaml\n'
+        'semantic:\n  enabled: true\n  base_url: "https://model.example/v1"\n  model: "project-model"\n'
+        'runtime:\n  enabled: true\n  airflow_version: "3.3.0"\n',
+        encoding="utf-8",
+    )
+    session_factory = initialize_session_factory(platform_env)
+    with session_factory() as session:
+        session.add(
+            RepositoryRow(
+                id="repo1",
+                name="r",
+                path=str(repository_root),
+                policy_pack=str(platform_pack),
+                airflow_profile="3.3.0",
+            )
+        )
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running", attempts=2))
+        session.commit()
+
+    actual_resolver = resolve_effective_configuration
+    resolver_inputs: list[tuple[Path, ScanOverrides]] = []
+
+    def resolver_spy(
+        root: Path,
+        *,
+        platform_overrides: ScanOverrides,
+    ) -> EffectiveScanConfiguration:
+        resolver_inputs.append((root, platform_overrides))
+        return actual_resolver(root, platform_overrides=platform_overrides)
+
+    core_calls: list[tuple[Path, tuple[object, ...], dict[str, Any]]] = []
+
+    def fake_scan_repository(root: Path, *args: object, **kwargs: Any) -> ScanReport:
+        core_calls.append((root, args, kwargs))
+        return ScanReport(
+            complete=True,
+            result_fingerprint="a" * 64,
+            run=RunMetadata(
+                tool_version="test",
+                policy_pack_id="runner-test",
+                policy_pack_version="1",
+                timestamp=datetime.now(UTC),
+            ),
+        )
+
+    actual_select = select_policy_pack
+    gate_pack_calls: list[tuple[Path | None, Path]] = []
+
+    def select_spy(path: Path | None, root: Path) -> PolicyPack:
+        gate_pack_calls.append((path, root))
+        return actual_select(path, root)
+
+    monkeypatch.setattr(runner_module, "resolve_effective_configuration", resolver_spy, raising=False)
+    monkeypatch.setattr(runner_module, "scan_repository", fake_scan_repository)
+    monkeypatch.setattr(runner_module, "select_policy_pack", select_spy)
+
+    assert execute_scan("scan1", platform_env, claim_attempt=2) == 0
+
+    assert resolver_inputs == [
+        (repository_root, ScanOverrides(policy_pack=platform_pack)),
+    ]
+    assert core_calls == [(repository_root, (platform_pack.resolve(),), {"parse_cache": None})]
+    assert gate_pack_calls == [(platform_pack.resolve(), repository_root)]
+    with session_factory() as session:
+        scan = session.get(ScanRow, "scan1")
+        assert scan is not None and scan.status == "succeeded"
+
+
+def test_runner_configuration_resolution_failure_marks_scan_failed(
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.application import EffectiveScanConfiguration, ScanOverrides
+    from conformdag.platform.runner import execute_scan
+
+    session_factory = initialize_session_factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running", attempts=2))
+        session.commit()
+
+    def fail_resolution(
+        root: Path,
+        *,
+        platform_overrides: ScanOverrides,
+    ) -> EffectiveScanConfiguration:
+        _ = root, platform_overrides
+        raise ValueError("configuration is invalid")
+
+    def unexpected_scan(*args: object, **kwargs: Any) -> ScanReport:
+        raise AssertionError("scan must not run after configuration resolution fails")
+
+    monkeypatch.setattr(runner_module, "resolve_effective_configuration", fail_resolution, raising=False)
+    monkeypatch.setattr(runner_module, "scan_repository", unexpected_scan)
+
+    assert execute_scan("scan1", platform_env, claim_attempt=2) == 1
+    with session_factory() as session:
+        scan = session.get(ScanRow, "scan1")
+        assert scan is not None and scan.status == "failed"
+        assert scan.error == "configuration is invalid"
+
+
+def test_runner_configuration_resolution_failure_after_cancel_keeps_cancelled_status(
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.application import EffectiveScanConfiguration, ScanOverrides
+    from conformdag.platform.runner import execute_scan
+
+    session_factory = initialize_session_factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running", attempts=2))
+        session.commit()
+
+    def cancel_then_fail_resolution(
+        root: Path,
+        *,
+        platform_overrides: ScanOverrides,
+    ) -> EffectiveScanConfiguration:
+        _ = root, platform_overrides
+        with session_factory() as session:
+            scan = session.get(ScanRow, "scan1")
+            assert scan is not None
+            scan.status = "cancelled"
+            scan.finished_at = utcnow()
+            session.commit()
+        raise OSError("configuration file disappeared after cancellation")
+
+    def unexpected_scan(*args: object, **kwargs: Any) -> ScanReport:
+        raise AssertionError("scan must not run after configuration resolution fails")
+
+    monkeypatch.setattr(
+        runner_module,
+        "resolve_effective_configuration",
+        cancel_then_fail_resolution,
+        raising=False,
+    )
+    monkeypatch.setattr(runner_module, "scan_repository", unexpected_scan)
+
+    assert execute_scan("scan1", platform_env, claim_attempt=2) == 0
+    with session_factory() as session:
+        scan = session.get(ScanRow, "scan1")
+        assert scan is not None and scan.status == "cancelled"
+
+
 def test_runner_completion_after_cancel_keeps_cancelled_status(
     platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
