@@ -1,7 +1,7 @@
 """End-to-end tests for the source-only scan path."""
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from shutil import copyfile, which
 from typing import Any
@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-from conformdag.models import Confidence, FindingStatus, Policy, SemanticRequest, SemanticResponse
+from conformdag.models import AirflowProfile, Confidence, FindingStatus, Policy, SemanticRequest, SemanticResponse
 from conformdag.scan import scan_repository
 
 
@@ -469,3 +469,27 @@ def test_real_ruff_air_finding_is_suppressible(tmp_path: Path) -> None:
     assert suppressed.suppressed is True
     assert suppressed.suppression is not None
     assert not any(issue.code == "SUPPRESSION_UNMATCHED" for issue in second.issues)
+
+
+def test_scan_repository_distinguishes_omitted_and_explicit_none_airflow_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pack_path = _ruff_repository(tmp_path, [("AIR-TST-001", ["AIR001"])])
+    _ruff_source(tmp_path)
+    (tmp_path / "conformdag.yaml").write_text(
+        'config_version: "1"\nruntime:\n  airflow_version: "3.3.0"\n',
+        encoding="utf-8",
+    )
+    selected_profiles: list[AirflowProfile | None] = []
+
+    def capture_profile(_policies: Iterable[Policy], airflow_profile: AirflowProfile | None) -> list[str]:
+        selected_profiles.append(airflow_profile)
+        return []
+
+    monkeypatch.setattr("conformdag.scan.ruff_rules_for_policies", capture_profile)
+
+    scan_repository(tmp_path, pack_path)
+    scan_repository(tmp_path, pack_path, airflow_profile=None)
+
+    assert selected_profiles == [AirflowProfile.AIRFLOW_3_3_0, None]

@@ -10,12 +10,14 @@ import pytest
 from conformdag.analysis import ParseCache
 from conformdag.application import (
     BaselineInput,
+    EffectiveScanConfiguration,
     RuntimeExecutionError,
     ScanExecutionResult,
     ScanInputError,
     ScanOptions,
     execute_scan,
 )
+from conformdag.config import load_project_config
 from conformdag.gates import evaluate_pack_gates as _evaluate_pack_gates
 from conformdag.models import (
     AirflowProfile,
@@ -24,8 +26,8 @@ from conformdag.models import (
     FindingStatus,
     GateResult,
     PolicyPack,
-    ProjectConfig,
     ProjectRuntimeConfig,
+    ProjectSemanticConfig,
     QualityGate,
     RunIssue,
     RunMetadata,
@@ -52,6 +54,21 @@ def _complete_report() -> ScanReport:
             policy_pack_version="1",
             timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         ),
+    )
+
+
+def _effective_configuration(
+    root: Path,
+    *,
+    runtime: ProjectRuntimeConfig | None = None,
+    semantic: ProjectSemanticConfig | None = None,
+) -> EffectiveScanConfiguration:
+    project = load_project_config(root / "conformdag.yaml")
+    return EffectiveScanConfiguration(
+        project=project,
+        resolved_policy_pack=(root / project.scan.policy_pack).resolve(),
+        runtime=project.runtime if runtime is None else runtime,
+        semantic=project.semantic if semantic is None else semantic,
     )
 
 
@@ -182,6 +199,7 @@ def _install_core_stub(
     monkeypatch: pytest.MonkeyPatch,
     events: list[str],
     report: ScanReport,
+    calls: list[dict[str, object]] | None = None,
 ) -> None:
     def fake_scan(
         repository_root: Path,
@@ -189,6 +207,8 @@ def _install_core_stub(
         **kwargs: object,
     ) -> ScanReport:
         events.append("core")
+        if calls is not None:
+            calls.append({"repository_root": repository_root, "policy_pack": policy_pack, **kwargs})
         return report
 
     monkeypatch.setattr("conformdag.application.scan.scan_repository", fake_scan)
@@ -200,7 +220,7 @@ def _install_application_pack(
     *,
     with_gate: bool = True,
 ) -> PolicyPack:
-    config, pack = load_pack_for_scan(root, None)
+    _config, pack = load_pack_for_scan(root, None)
     if with_gate:
         pack = pack.model_copy(
             update={
@@ -212,10 +232,11 @@ def _install_application_pack(
             }
         )
 
-    def fake_load_pack(repository_root: Path, policy_pack: Path | None) -> tuple[ProjectConfig, PolicyPack]:
-        return config, pack
+    def fake_select_policy_pack(policy_pack: Path, repository_root: Path) -> PolicyPack:
+        assert repository_root == root.resolve()
+        return pack
 
-    monkeypatch.setattr("conformdag.application.scan.load_pack_for_scan", fake_load_pack)
+    monkeypatch.setattr("conformdag.application.scan.select_policy_pack", fake_select_policy_pack, raising=False)
     return pack
 
 
@@ -243,18 +264,12 @@ def _suppression_for_finding(
     )
 
 
-def test_scan_options_has_only_the_c06_fields() -> None:
-    assert [item.name for item in fields(ScanOptions)] == [
-        "repository_root",
-        "policy_pack",
-        "airflow_profile",
-    ]
+def test_scan_options_has_only_repository_context() -> None:
+    assert [item.name for item in fields(ScanOptions)] == ["repository_root"]
     options = ScanOptions(Path("repo"))
-    assert options.policy_pack is None
-    assert options.airflow_profile is None
-    frozen_field = "policy_pack"
+    frozen_field = "repository_root"
     with pytest.raises(FrozenInstanceError):
-        setattr(options, frozen_field, Path("policies/pack.yaml"))
+        setattr(options, frozen_field, Path("another-repo"))
 
 
 def test_baseline_input_defaults_to_no_baseline() -> None:
@@ -313,17 +328,20 @@ def test_execute_scan_calls_core_once_and_passes_semantic_inputs(
     profile = AirflowProfile.AIRFLOW_3_3_0
 
     result = execute_scan(
-        ScanOptions(root, airflow_profile=profile),
+        ScanOptions(root),
+        _effective_configuration(
+            root,
+            runtime=ProjectRuntimeConfig(enabled=False, airflow_version=profile),
+            semantic=ProjectSemanticConfig(enabled=True, model="test-model", native_structured_output=True),
+        ),
         semantic_provider=provider,
         semantic_provider_name="test-provider",
-        semantic_model="test-model",
-        semantic_native_structured_output=True,
     )
 
     assert len(calls) == 1
     assert calls[0] == {
         "repository_root": root.resolve(),
-        "policy_pack": None,
+        "policy_pack": (root / "policies/pack.yaml").resolve(),
         "semantic_provider": provider,
         "semantic_provider_name": "test-provider",
         "semantic_model": "test-model",
@@ -332,6 +350,63 @@ def test_execute_scan_calls_core_once_and_passes_semantic_inputs(
         "parse_cache": None,
     }
     assert result.report.complete is True
+
+
+def test_execute_scan_passes_explicit_none_profile_and_resolved_pack_to_core(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = build_repository(tmp_path / "repo")
+    events: list[str] = []
+    core_calls: list[dict[str, object]] = []
+    _install_core_stub(monkeypatch, events, _complete_report(), core_calls)
+    configuration = _effective_configuration(root, runtime=ProjectRuntimeConfig(enabled=False))
+
+    execute_scan(ScanOptions(root), configuration)
+
+    assert events == ["core"]
+    assert len(core_calls) == 1
+    assert core_calls[0]["policy_pack"] == configuration.resolved_policy_pack
+    assert "airflow_profile" in core_calls[0]
+    assert core_calls[0]["airflow_profile"] is None
+
+
+def test_execute_scan_omits_enabled_semantic_phase_without_provider(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = build_repository(tmp_path / "repo")
+    events: list[str] = []
+    core_calls: list[dict[str, object]] = []
+    _install_core_stub(monkeypatch, events, _complete_report(), core_calls)
+    configuration = _effective_configuration(root, semantic=ProjectSemanticConfig(enabled=True, model="project-model"))
+
+    execute_scan(ScanOptions(root), configuration)
+
+    assert events == ["core"]
+    assert core_calls[0]["semantic_provider"] is None
+    assert core_calls[0]["semantic_model"] is None
+
+
+def test_execute_scan_rejects_provider_for_disabled_semantic_phase(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = build_repository(tmp_path / "repo")
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, _complete_report())
+
+    with pytest.raises(ScanInputError, match="semantic evaluation is disabled"):
+        execute_scan(
+            ScanOptions(root),
+            _effective_configuration(root, semantic=ProjectSemanticConfig(enabled=False, model="project-model")),
+            semantic_provider=_SemanticProvider(),
+        )
+
+    assert events == []
 
 
 def test_execute_scan_rejects_semantic_provider_without_model_before_core_call(
@@ -344,7 +419,11 @@ def test_execute_scan_rejects_semantic_provider_without_model_before_core_call(
     _count_core_calls(monkeypatch, calls)
 
     with pytest.raises(ScanInputError, match="model"):
-        execute_scan(ScanOptions(root), semantic_provider=_SemanticProvider())
+        execute_scan(
+            ScanOptions(root),
+            _effective_configuration(root, semantic=ProjectSemanticConfig(enabled=True)),
+            semantic_provider=_SemanticProvider(),
+        )
 
     assert calls == []
 
@@ -360,7 +439,11 @@ def test_execute_scan_rejects_incomplete_baseline_before_core_call(
     baseline_report = _complete_report().model_copy(update={"complete": False})
 
     with pytest.raises(ScanInputError, match="incomplete"):
-        execute_scan(ScanOptions(root), baseline=BaselineInput(report=baseline_report))
+        execute_scan(
+            ScanOptions(root),
+            _effective_configuration(root),
+            baseline=BaselineInput(report=baseline_report),
+        )
 
     assert calls == []
 
@@ -377,6 +460,7 @@ def test_execute_scan_rejects_two_baseline_forms_before_core_call(
     with pytest.raises(ScanInputError, match="both"):
         execute_scan(
             ScanOptions(root),
+            _effective_configuration(root),
             baseline=BaselineInput(report=_complete_report(), fingerprints=frozenset({"existing"})),
         )
 
@@ -394,9 +478,11 @@ def test_execute_scan_runs_semantic_success_inside_one_core_call(
 
     result = execute_scan(
         ScanOptions(root),
+        _effective_configuration(
+            root, semantic=ProjectSemanticConfig(enabled=True, model="test-model", native_structured_output=True)
+        ),
         semantic_provider=_SemanticProvider(),
         semantic_provider_name="test-provider",
-        semantic_model="test-model",
     )
 
     semantic_findings = [finding for finding in result.report.findings if finding.enforcement.value == "semantic"]
@@ -419,9 +505,9 @@ def test_execute_scan_reports_semantic_provider_failure_inside_one_core_call(
 
     result = execute_scan(
         ScanOptions(root),
+        _effective_configuration(root, semantic=ProjectSemanticConfig(enabled=True, model="test-model")),
         semantic_provider=_FailingSemanticProvider(),
         semantic_provider_name="test-provider",
-        semantic_model="test-model",
     )
 
     provider_issues = [issue for issue in result.report.issues if issue.code == "SEMANTIC_PROVIDER_ERROR"]
@@ -458,7 +544,7 @@ def test_execute_scan_validates_then_executes_runtime_and_records_sorted_results
 
     result = execute_scan(
         ScanOptions(root),
-        runtime_config=runtime_config,
+        _effective_configuration(root, runtime=runtime_config),
         runtime_executor=executor,
     )
 
@@ -490,7 +576,7 @@ def test_execute_scan_validates_then_executes_runtime_and_records_sorted_results
     }
 
 
-def test_execute_scan_skips_disabled_runtime(
+def test_execute_scan_rejects_executor_for_disabled_runtime_phase(
     build_repository: Callable[[Path], Path],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -500,20 +586,19 @@ def test_execute_scan_skips_disabled_runtime(
     _install_core_stub(monkeypatch, events, _complete_report())
     executor = _FakeRuntimeExecutor(events)
 
-    result = execute_scan(
-        ScanOptions(root),
-        runtime_config=ProjectRuntimeConfig(enabled=False),
-        runtime_executor=executor,
-    )
+    with pytest.raises(ScanInputError, match="runtime analysis is disabled"):
+        execute_scan(
+            ScanOptions(root),
+            _effective_configuration(root, runtime=ProjectRuntimeConfig(enabled=False)),
+            runtime_executor=executor,
+        )
 
-    assert events == ["core"]
+    assert events == []
     assert executor.validation_args is None
     assert executor.execution_args is None
-    assert result.report.runtime_observations == []
-    assert result.report.run.runtime_profile is None
 
 
-def test_execute_scan_requires_executor_before_core_for_enabled_runtime(
+def test_execute_scan_omits_enabled_runtime_without_executor(
     build_repository: Callable[[Path], Path],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -522,13 +607,15 @@ def test_execute_scan_requires_executor_before_core_for_enabled_runtime(
     events: list[str] = []
     _install_core_stub(monkeypatch, events, _complete_report())
 
-    with pytest.raises(ScanInputError, match="RuntimeExecutor"):
-        execute_scan(
-            ScanOptions(root),
-            runtime_config=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
-        )
+    result = execute_scan(
+        ScanOptions(root),
+        _effective_configuration(
+            root, runtime=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0)
+        ),
+    )
 
-    assert events == []
+    assert events == ["core"]
+    assert result.report.runtime_observations == []
 
 
 def test_execute_scan_runtime_validation_failure_prevents_core_call(
@@ -544,7 +631,9 @@ def test_execute_scan_runtime_validation_failure_prevents_core_call(
     with pytest.raises(ScanInputError, match="invalid runtime manifest"):
         execute_scan(
             ScanOptions(root),
-            runtime_config=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+            _effective_configuration(
+                root, runtime=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0)
+            ),
             runtime_executor=executor,
         )
 
@@ -569,7 +658,9 @@ def test_execute_scan_runs_runtime_even_if_core_report_is_incomplete(
 
     result = execute_scan(
         ScanOptions(root),
-        runtime_config=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+        _effective_configuration(
+            root, runtime=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0)
+        ),
         runtime_executor=executor,
     )
 
@@ -595,7 +686,9 @@ def test_execute_scan_marks_error_observation_fatal_and_incomplete(
 
     result = execute_scan(
         ScanOptions(root),
-        runtime_config=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+        _effective_configuration(
+            root, runtime=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0)
+        ),
         runtime_executor=executor,
     )
 
@@ -619,7 +712,9 @@ def test_execute_scan_converts_runtime_execution_error_to_fatal_issue(
 
     result = execute_scan(
         ScanOptions(root),
-        runtime_config=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+        _effective_configuration(
+            root, runtime=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0)
+        ),
         runtime_executor=executor,
     )
 
@@ -644,7 +739,9 @@ def test_execute_scan_does_not_swallow_unrelated_runtime_executor_errors(
     with pytest.raises(ValueError, match="adapter bug"):
         execute_scan(
             ScanOptions(root),
-            runtime_config=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+            _effective_configuration(
+                root, runtime=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0)
+            ),
             runtime_executor=executor,
         )
 
@@ -676,6 +773,7 @@ def test_execute_scan_operational_suppression_preserves_local_provenance(
 
     result = execute_scan(
         ScanOptions(tmp_path / "repo"),
+        _effective_configuration(tmp_path / "repo"),
         operational_suppressions=[operational, operational_only],
     )
 
@@ -708,7 +806,11 @@ def test_execute_scan_operational_suppression_recovers_waived_evaluation_error(
     _install_core_stub(monkeypatch, events, core_report)
     operational = _suppression_for_finding(finding, datetime.now(UTC), reason="approved operational waiver")
 
-    result = execute_scan(ScanOptions(tmp_path / "repo"), operational_suppressions=[operational])
+    result = execute_scan(
+        ScanOptions(tmp_path / "repo"),
+        _effective_configuration(tmp_path / "repo"),
+        operational_suppressions=[operational],
+    )
 
     assert events == ["core"]
     assert result.report.findings[0].suppressed is True
@@ -738,7 +840,11 @@ def test_execute_scan_operational_waiver_keeps_unrelated_fatal_issues(
     _install_core_stub(monkeypatch, events, core_report)
     operational = _suppression_for_finding(finding, datetime.now(UTC), reason="approved operational waiver")
 
-    result = execute_scan(ScanOptions(tmp_path / "repo"), operational_suppressions=[operational])
+    result = execute_scan(
+        ScanOptions(tmp_path / "repo"),
+        _effective_configuration(tmp_path / "repo"),
+        operational_suppressions=[operational],
+    )
 
     assert events == ["core"]
     assert result.report.findings[0].suppressed is True
@@ -761,7 +867,7 @@ def test_execute_scan_without_operational_suppressions_preserves_core_report_sta
     events: list[str] = []
     _install_core_stub(monkeypatch, events, core_report)
 
-    result = execute_scan(ScanOptions(tmp_path / "repo"))
+    result = execute_scan(ScanOptions(tmp_path / "repo"), _effective_configuration(tmp_path / "repo"))
 
     assert events == ["core"]
     assert result.report.complete is False
@@ -818,7 +924,9 @@ def test_execute_scan_normalizes_runtime_and_suppressions_before_baseline_report
 
     result = execute_scan(
         ScanOptions(root),
-        runtime_config=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0),
+        _effective_configuration(
+            root, runtime=ProjectRuntimeConfig(enabled=True, airflow_version=AirflowProfile.AIRFLOW_3_3_0)
+        ),
         runtime_executor=executor,
         baseline=baseline,
         operational_suppressions=[operational],
@@ -873,7 +981,7 @@ def test_execute_scan_normalizes_once_and_passes_baseline_fingerprints_to_gates(
     monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
     monkeypatch.setattr("conformdag.application.scan.evaluate_pack_gates", evaluate_gates, raising=False)
 
-    result = execute_scan(ScanOptions(root), baseline=baseline)
+    result = execute_scan(ScanOptions(root), _effective_configuration(root), baseline=baseline)
 
     assert events == ["core", "normalize", "gates"]
     assert normalization_count == 1
@@ -914,7 +1022,7 @@ def test_execute_scan_normalizes_incomplete_report_without_evaluating_or_retaini
     monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
     monkeypatch.setattr("conformdag.application.scan.evaluate_pack_gates", evaluate_gates, raising=False)
 
-    result = execute_scan(ScanOptions(root))
+    result = execute_scan(ScanOptions(root), _effective_configuration(root))
 
     assert events == ["core", "normalize"]
     assert normalization_count == 1
@@ -956,7 +1064,7 @@ def test_execute_scan_without_pack_gates_returns_no_embedded_or_direct_gate_resu
     monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
     monkeypatch.setattr("conformdag.application.scan.evaluate_pack_gates", evaluate_gates, raising=False)
 
-    result = execute_scan(ScanOptions(root))
+    result = execute_scan(ScanOptions(root), _effective_configuration(root))
 
     assert events == ["core", "normalize", "gates"]
     assert normalization_count == 1

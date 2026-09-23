@@ -21,7 +21,9 @@ from conformdag.application import (
     RuntimeExecutor,
     ScanInputError,
     ScanOptions,
+    ScanOverrides,
     execute_scan,
+    resolve_effective_configuration,
 )
 from conformdag.benchmark import (
     BenchmarkValidationError,
@@ -57,7 +59,6 @@ from conformdag.reference import (
 )
 from conformdag.reporting import has_blocking_failures, render_html, render_sarif
 from conformdag.runtime import RuntimePhaseError, build_runtime_manifest, execute_runtime
-from conformdag.scan import load_pack_for_scan
 from conformdag.scan import preview_model_context as build_model_context_preview
 from conformdag.semantic import CachedSemanticProvider, OpenAICompatibleProvider, SemanticCache
 
@@ -560,9 +561,21 @@ def scan(
         _fail(ValueError("--preview-model-context cannot be combined with runtime, semantic, or output"))
     root = path.resolve()
     try:
-        config, _ = load_pack_for_scan(root, policy_pack)
+        effective = resolve_effective_configuration(
+            root,
+            invocation_overrides=ScanOverrides(
+                policy_pack=policy_pack,
+                airflow_profile=runtime,
+                runtime_image=runtime_image,
+                semantic_enabled=semantic,
+                semantic_base_url=semantic_base_url or None,
+                semantic_model=semantic_model or None,
+                semantic_structured_output=semantic_structured_output,
+            ),
+            invocation_working_directory=Path.cwd(),
+        )
         if preview_model_context:
-            preview = build_model_context_preview(root, policy_pack)
+            preview = build_model_context_preview(root, effective.resolved_policy_pack)
             typer.echo(
                 json.dumps(
                     {
@@ -575,54 +588,38 @@ def scan(
                 )
             )
             return
-        if runtime is not None and runtime_image is not None:
-            raise RuntimePhaseError("--runtime and --runtime-image cannot be used together")
-        runtime_config = config.runtime
-        if runtime is not None or runtime_image is not None:
-            runtime_config = runtime_config.model_copy(
-                update={
-                    "enabled": True,
-                    "airflow_version": runtime,
-                    "image": runtime_image,
-                }
-            )
-
-        semantic_enabled = config.semantic.enabled if semantic is None else semantic
+        config = effective.project
+        semantic_config = effective.semantic
+        runtime_config = effective.runtime
         provider = None
         provider_name = None
-        selected_semantic_model = semantic_model or config.semantic.model
-        native_structured_output = (
-            config.semantic.native_structured_output
-            if semantic_structured_output is None
-            else semantic_structured_output
-        )
-        if semantic_enabled:
-            selected_base_url = semantic_base_url or config.semantic.base_url
+        if semantic_config.enabled:
+            selected_base_url = semantic_config.base_url
             if not selected_base_url:
                 raise ValueError("semantic evaluation requires semantic.base_url or --semantic-base-url")
             selected_base_url = _validate_semantic_base_url(selected_base_url)
-            if not selected_semantic_model:
+            if not semantic_config.model:
                 raise ValueError("semantic evaluation requires semantic.model or --semantic-model")
             api_key = semantic_api_key(config)
             if not api_key:
                 raise ValueError(f"semantic evaluation requires environment variable {config.semantic.api_key_env}")
             direct_provider = OpenAICompatibleProvider(
                 selected_base_url,
-                selected_semantic_model,
+                semantic_config.model,
                 api_key,
-                native_structured_output=native_structured_output,
+                native_structured_output=semantic_config.native_structured_output,
             )
-            cache_path = config.semantic.cache_path
+            cache_path = semantic_config.cache_path
             if not cache_path.is_absolute():
                 cache_path = root / cache_path
             provider = CachedSemanticProvider(
                 direct_provider,
                 SemanticCache(cache_path),
-                selected_semantic_model,
+                semantic_config.model,
                 {
-                    "temperature": config.semantic.temperature,
-                    "max_output_tokens": config.semantic.max_output_tokens,
-                    "native_structured_output": native_structured_output,
+                    "temperature": semantic_config.temperature,
+                    "max_output_tokens": semantic_config.max_output_tokens,
+                    "native_structured_output": semantic_config.native_structured_output,
                 },
             )
             provider_name = urlsplit(selected_base_url).netloc or selected_base_url
@@ -639,16 +636,10 @@ def scan(
 
         runtime_executor: RuntimeExecutor | None = _CliRuntimeExecutor() if runtime_config.enabled else None
         execution = execute_scan(
-            ScanOptions(
-                root,
-                policy_pack=policy_pack,
-                airflow_profile=runtime_config.airflow_version if runtime_config.enabled else None,
-            ),
+            ScanOptions(repository_root=root),
+            effective,
             semantic_provider=provider,
-            semantic_provider_name=provider_name if semantic_enabled else None,
-            semantic_model=selected_semantic_model if semantic_enabled else None,
-            semantic_native_structured_output=native_structured_output if semantic_enabled else None,
-            runtime_config=runtime_config if runtime_config.enabled else None,
+            semantic_provider_name=provider_name if semantic_config.enabled else None,
             runtime_executor=runtime_executor,
             baseline=baseline_input,
         )

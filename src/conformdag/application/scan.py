@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Protocol
 
 from conformdag.analysis import ParseCache
+from conformdag.application.configuration import EffectiveScanConfiguration
 from conformdag.application.errors import RuntimeExecutionError, ScanInputError
 from conformdag.gates import evaluate_pack_gates
 from conformdag.models import (
-    AirflowProfile,
     FindingStatus,
     GateResult,
     ProjectRuntimeConfig,
@@ -20,15 +20,14 @@ from conformdag.models import (
     ScanReport,
     Suppression,
 )
+from conformdag.policy import select_policy_pack
 from conformdag.reporting import apply_suppressions, normalize_report
-from conformdag.scan import SemanticProvider, load_pack_for_scan, scan_repository
+from conformdag.scan import SemanticProvider, scan_repository
 
 
 @dataclass(frozen=True)
 class ScanOptions:
     repository_root: Path
-    policy_pack: Path | None = None
-    airflow_profile: AirflowProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -64,20 +63,19 @@ class RuntimeExecutor(Protocol):
 
 def execute_scan(
     options: ScanOptions,
+    configuration: EffectiveScanConfiguration,
     *,
     semantic_provider: SemanticProvider | None = None,
     semantic_provider_name: str | None = None,
-    semantic_model: str | None = None,
-    semantic_native_structured_output: bool | None = None,
-    runtime_config: ProjectRuntimeConfig | None = None,
     runtime_executor: RuntimeExecutor | None = None,
     baseline: BaselineInput | None = None,
     operational_suppressions: Sequence[Suppression] = (),
     parse_cache: ParseCache | None = None,
 ) -> ScanExecutionResult:
-    """Run one core scan with optional injected phase inputs."""
+    """Run one core scan from resolved settings and explicitly supplied phase adapters."""
     root = options.repository_root.resolve()
-    config, pack = load_pack_for_scan(root, options.policy_pack)
+    config = configuration.project
+    pack = select_policy_pack(configuration.resolved_policy_pack, root)
 
     if baseline is not None:
         if baseline.report is not None and baseline.fingerprints is not None:
@@ -85,35 +83,35 @@ def execute_scan(
         if baseline.report is not None and not baseline.report.complete:
             raise ScanInputError("baseline report is incomplete and cannot be used")
 
-    if semantic_provider is not None and not semantic_model:
+    if semantic_provider is not None and not configuration.semantic.enabled:
+        raise ScanInputError("semantic provider supplied while semantic evaluation is disabled")
+    if semantic_provider is not None and not configuration.semantic.model:
         raise ScanInputError("semantic provider requires a model")
 
-    if runtime_config is not None and runtime_config.enabled:
-        if runtime_executor is None:
-            raise ScanInputError("enabled runtime requires a RuntimeExecutor")
-        runtime_executor.validate(root, runtime_config, config.scan.include, config.scan.exclude)
+    if runtime_executor is not None and not configuration.runtime.enabled:
+        raise ScanInputError("RuntimeExecutor supplied while runtime analysis is disabled")
+    if runtime_executor is not None:
+        runtime_executor.validate(root, configuration.runtime, config.scan.include, config.scan.exclude)
 
     report = scan_repository(
         root,
-        options.policy_pack,
+        configuration.resolved_policy_pack,
         semantic_provider=semantic_provider,
         semantic_provider_name=semantic_provider_name,
-        semantic_model=semantic_model,
-        semantic_native_structured_output=semantic_native_structured_output,
-        airflow_profile=options.airflow_profile,
+        semantic_model=configuration.semantic.model if semantic_provider is not None else None,
+        semantic_native_structured_output=configuration.semantic.native_structured_output,
+        airflow_profile=configuration.runtime.airflow_version,
         parse_cache=parse_cache,
     )
 
-    if runtime_config is not None and runtime_config.enabled:
-        if runtime_executor is None:
-            raise ScanInputError("enabled runtime requires a RuntimeExecutor")
+    if runtime_executor is not None:
         try:
             observations, image_digest = runtime_executor.execute(
                 root,
-                runtime_config,
+                configuration.runtime,
                 sorted(set(report.policies_evaluated + report.policies_skipped)),
-                config.scan.include,
-                config.scan.exclude,
+                configuration.project.scan.include,
+                configuration.project.scan.exclude,
             )
         except RuntimeExecutionError as exc:
             report = report.model_copy(
@@ -152,20 +150,20 @@ def execute_scan(
                     "issues": [*report.issues, *runtime_issues],
                     "run": report.run.model_copy(
                         update={
-                            "runtime_profile": runtime_config.airflow_version,
+                            "runtime_profile": configuration.runtime.airflow_version,
                             "runtime_image_digest": image_digest,
                             "resolved_configuration": {
                                 **report.run.resolved_configuration,
                                 "runtime": {
                                     "enabled": True,
                                     "airflow_profile": (
-                                        runtime_config.airflow_version.value
-                                        if runtime_config.airflow_version is not None
+                                        configuration.runtime.airflow_version.value
+                                        if configuration.runtime.airflow_version is not None
                                         else None
                                     ),
-                                    "supported_profile": runtime_config.airflow_version is not None,
-                                    "network_enabled": runtime_config.network_enabled,
-                                    "timeout_seconds": runtime_config.timeout_seconds,
+                                    "supported_profile": configuration.runtime.airflow_version is not None,
+                                    "network_enabled": configuration.runtime.network_enabled,
+                                    "timeout_seconds": configuration.runtime.timeout_seconds,
                                 },
                             },
                         }
