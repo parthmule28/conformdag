@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from conformdag.analysis import ParseCache
-from conformdag.application import ScanOverrides, resolve_effective_configuration
+from conformdag.application import ScanOverrides, coerce_platform_airflow_profile, resolve_effective_configuration
 from conformdag.gates import evaluate_pack_gates
 from conformdag.models import FindingStatus, GateResult, PolicyPack, ScanReport
 from conformdag.platform.db import (
@@ -136,15 +136,18 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
         repository_root = Path(repository.path)
         try:
             logger.info("scan_started", extra={"scan_id": scan_id})
+            airflow_profile = coerce_platform_airflow_profile(repository.airflow_profile)
             effective = resolve_effective_configuration(
                 repository_root,
                 platform_overrides=ScanOverrides(
                     policy_pack=Path(repository.policy_pack) if repository.policy_pack is not None else None,
+                    airflow_profile=airflow_profile,
                 ),
             )
             report = scan_repository(
                 repository_root,
                 effective.resolved_policy_pack,
+                airflow_profile=effective.runtime.airflow_version,
                 parse_cache=worker_parse_cache(),
             )
         except PERSISTENT_FAILURES as exc:

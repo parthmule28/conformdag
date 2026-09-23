@@ -584,7 +584,8 @@ def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
     (tmp_path / "policies").mkdir()
     (tmp_path / "policies/pack.yaml").write_text("id: x\n", encoding="utf-8")
     (tmp_path / "conformdag-workspace.yaml").write_text(
-        "schema_version: '1'\nrepositories:\n  - name: core\n    path: dags\n    policy_pack: policies/pack.yaml\n",
+        "schema_version: '1'\nrepositories:\n  - name: core\n    path: dags\n    policy_pack: policies/pack.yaml\n"
+        "    airflow_profile: '3.3.0'\n",
         encoding="utf-8",
     )
 
@@ -593,6 +594,20 @@ def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
     assert resolved == (tmp_path / "conformdag-workspace.yaml").resolve()
     assert workspace.repositories[0].path == (tmp_path / "dags").resolve()
     assert workspace.repositories[0].policy_pack == (tmp_path / "policies/pack.yaml").resolve()
+    assert workspace.repositories[0].airflow_profile == "3.3.0"
+    assert isinstance(workspace.repositories[0].airflow_profile, str)
+
+
+def test_workspace_rejects_unsupported_airflow_profile(tmp_path: Path) -> None:
+    from conformdag.platform.workspace import WorkspaceError, load_workspace
+
+    (tmp_path / "dags").mkdir()
+    (tmp_path / "conformdag-workspace.yaml").write_text(
+        'repositories:\n  - name: core\n    path: dags\n    airflow_profile: "4.0"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(WorkspaceError, match="unsupported Airflow profile.*4.0"):
+        load_workspace(tmp_path / "conformdag-workspace.yaml")
 
 
 def test_workspace_rejects_missing_paths_and_duplicates(tmp_path: Path) -> None:
@@ -2038,8 +2053,13 @@ def test_finding_payload_emits_positions_fix_and_baseline_status(
     repository_id = _register(client, tmp_path)
 
     def fake_scan_repository(
-        repository_root: Path, policy_pack: Path | None = None, *, parse_cache: ParseCache | None = None
+        repository_root: Path,
+        policy_pack: Path | None = None,
+        *,
+        airflow_profile: AirflowProfile | None = None,
+        parse_cache: ParseCache | None = None,
     ) -> ScanReport:
+        _ = repository_root, policy_pack, airflow_profile, parse_cache
         return ScanReport(
             complete=True,
             result_fingerprint="a" * 64,
@@ -2317,6 +2337,41 @@ def test_register_repository_rejects_overlong_airflow_profile(client: TestClient
     )
 
     assert response.status_code == 422
+
+
+def test_register_repository_rejects_unsupported_airflow_profile(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "repo").mkdir(exist_ok=True)
+    response = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": "profile-unsupported", "path": str(tmp_path / "repo"), "airflow_profile": "4.0"},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_register_repository_preserves_valid_airflow_profile_string(client: TestClient, tmp_path: Path) -> None:
+    (tmp_path / "repo").mkdir(exist_ok=True)
+    response = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": "profile-valid", "path": str(tmp_path / "repo"), "airflow_profile": "3.3.0"},
+        headers={"Authorization": "Bearer secret-token"},
+    )
+
+    assert response.status_code == 200
+    repository_id = response.json()["id"]
+    factory, _ = _platform_state(client)
+    with factory() as session:
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        assert repository.airflow_profile == "3.3.0"
+
+    listed = _get(client, "/api/v1/repos")
+    assert listed.status_code == 200
+    listed_repository = next(row for row in listed.json() if row["id"] == repository_id)
+    assert listed_repository["airflow_profile"] == "3.3.0"
 
 
 def test_trigger_scan_unknown_repository_returns_404(client: TestClient) -> None:
@@ -3398,7 +3453,20 @@ def test_runner_persistent_failure_after_cancel_keeps_cancelled_status(
     assert scan.status == "cancelled"
 
 
-def test_runner_uses_resolved_pack_without_wiring_stored_profile(
+def _complete_runner_report() -> ScanReport:
+    return ScanReport(
+        complete=True,
+        result_fingerprint="a" * 64,
+        run=RunMetadata(
+            tool_version="test",
+            policy_pack_id="runner-test",
+            policy_pack_version="1",
+            timestamp=datetime.now(UTC),
+        ),
+    )
+
+
+def test_runner_uses_resolved_pack_and_passes_stored_profile(
     platform_env: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3409,12 +3477,13 @@ def test_runner_uses_resolved_pack_without_wiring_stored_profile(
     from conformdag.policy import select_policy_pack
 
     repository_root = tmp_path / "repo"
+    project_image = "ghcr.io/example/project@sha256:" + "1" * 64
     platform_pack = repository_root / "registered-pack.yaml"
     _write_yaml(platform_pack, {"schema_version": "1", "id": "platform", "version": "1", "policies": []})
     (repository_root / "conformdag.yaml").write_text(
         'config_version: "1"\nscan:\n  policy_pack: project-packs/not-selected.yaml\n'
         'semantic:\n  enabled: true\n  base_url: "https://model.example/v1"\n  model: "project-model"\n'
-        'runtime:\n  enabled: true\n  airflow_version: "3.3.0"\n',
+        f'runtime:\n  enabled: false\n  image: "{project_image}"\n',
         encoding="utf-8",
     )
     session_factory = initialize_session_factory(platform_env)
@@ -3433,6 +3502,7 @@ def test_runner_uses_resolved_pack_without_wiring_stored_profile(
 
     actual_resolver = resolve_effective_configuration
     resolver_inputs: list[tuple[Path, ScanOverrides]] = []
+    effective_runtime: list[tuple[bool, AirflowProfile | None, str | None]] = []
 
     def resolver_spy(
         root: Path,
@@ -3440,22 +3510,17 @@ def test_runner_uses_resolved_pack_without_wiring_stored_profile(
         platform_overrides: ScanOverrides,
     ) -> EffectiveScanConfiguration:
         resolver_inputs.append((root, platform_overrides))
-        return actual_resolver(root, platform_overrides=platform_overrides)
+        effective = actual_resolver(root, platform_overrides=platform_overrides)
+        effective_runtime.append(
+            (effective.runtime.enabled, effective.runtime.airflow_version, effective.runtime.image)
+        )
+        return effective
 
     core_calls: list[tuple[Path, tuple[object, ...], dict[str, Any]]] = []
 
     def fake_scan_repository(root: Path, *args: object, **kwargs: Any) -> ScanReport:
         core_calls.append((root, args, kwargs))
-        return ScanReport(
-            complete=True,
-            result_fingerprint="a" * 64,
-            run=RunMetadata(
-                tool_version="test",
-                policy_pack_id="runner-test",
-                policy_pack_version="1",
-                timestamp=datetime.now(UTC),
-            ),
-        )
+        return _complete_runner_report()
 
     actual_select = select_policy_pack
     gate_pack_calls: list[tuple[Path | None, Path]] = []
@@ -3471,13 +3536,147 @@ def test_runner_uses_resolved_pack_without_wiring_stored_profile(
     assert execute_scan("scan1", platform_env, claim_attempt=2) == 0
 
     assert resolver_inputs == [
-        (repository_root, ScanOverrides(policy_pack=platform_pack)),
+        (
+            repository_root,
+            ScanOverrides(policy_pack=platform_pack, airflow_profile=AirflowProfile.AIRFLOW_3_3_0),
+        ),
     ]
-    assert core_calls == [(repository_root, (platform_pack.resolve(),), {"parse_cache": None})]
+    assert effective_runtime == [(False, AirflowProfile.AIRFLOW_3_3_0, project_image)]
+    assert core_calls == [
+        (
+            repository_root,
+            (platform_pack.resolve(),),
+            {"airflow_profile": AirflowProfile.AIRFLOW_3_3_0, "parse_cache": None},
+        )
+    ]
     assert gate_pack_calls == [(platform_pack.resolve(), repository_root)]
     with session_factory() as session:
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "succeeded"
+
+
+def test_runner_uses_project_airflow_profile_when_platform_profile_is_omitted(
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.platform.runner import execute_scan
+
+    repository_root = tmp_path / "repo"
+    (repository_root / "conformdag.yaml").write_text(
+        'config_version: "1"\nruntime:\n  airflow_version: "3.3.0"\n', encoding="utf-8"
+    )
+    session_factory = initialize_session_factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(repository_root)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    core_calls: list[dict[str, Any]] = []
+
+    def fake_scan_repository(root: Path, *args: object, **kwargs: Any) -> ScanReport:
+        _ = root, args
+        core_calls.append(kwargs)
+        return _complete_runner_report()
+
+    monkeypatch.setattr(runner_module, "scan_repository", fake_scan_repository)
+
+    assert execute_scan("scan1", platform_env) == 0
+
+    assert core_calls == [{"airflow_profile": AirflowProfile.AIRFLOW_3_3_0, "parse_cache": None}]
+
+
+def test_runner_passes_none_airflow_profile_when_project_and_platform_omit_it(
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.platform.runner import execute_scan
+
+    session_factory = initialize_session_factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    core_calls: list[dict[str, Any]] = []
+
+    def fake_scan_repository(root: Path, *args: object, **kwargs: Any) -> ScanReport:
+        _ = root, args
+        core_calls.append(kwargs)
+        return _complete_runner_report()
+
+    monkeypatch.setattr(runner_module, "scan_repository", fake_scan_repository)
+
+    assert execute_scan("scan1", platform_env) == 0
+
+    assert core_calls == [{"airflow_profile": None, "parse_cache": None}]
+
+
+def test_runner_invalid_persisted_airflow_profile_fails_before_core_scan(
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.platform.runner import execute_scan
+
+    session_factory = initialize_session_factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), airflow_profile="4.0"))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    def unexpected_scan(*args: object, **kwargs: Any) -> ScanReport:
+        _ = args, kwargs
+        raise AssertionError("core scan must not run with an invalid persisted Airflow profile")
+
+    monkeypatch.setattr(runner_module, "scan_repository", unexpected_scan)
+
+    assert execute_scan("scan1", platform_env) == 1
+    with session_factory() as session:
+        scan = session.get(ScanRow, "scan1")
+        assert scan is not None and scan.status == "failed"
+        assert scan.error is not None and "unsupported Airflow profile '4.0'" in scan.error
+
+
+def test_runner_invalid_profile_after_cancel_keeps_cancelled_status(
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.application import coerce_platform_airflow_profile
+    from conformdag.platform.runner import execute_scan
+
+    session_factory = initialize_session_factory(platform_env)
+    with session_factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), airflow_profile="4.0"))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    def cancel_then_coerce(value: str | None) -> AirflowProfile | None:
+        with session_factory() as session:
+            scan = session.get(ScanRow, "scan1")
+            assert scan is not None
+            scan.status = "cancelled"
+            scan.finished_at = utcnow()
+            session.commit()
+        return coerce_platform_airflow_profile(value)
+
+    def unexpected_scan(*args: object, **kwargs: Any) -> ScanReport:
+        _ = args, kwargs
+        raise AssertionError("core scan must not run after invalid profile validation")
+
+    monkeypatch.setattr(runner_module, "coerce_platform_airflow_profile", cancel_then_coerce, raising=False)
+    monkeypatch.setattr(runner_module, "scan_repository", unexpected_scan)
+
+    assert execute_scan("scan1", platform_env) == 0
+    with session_factory() as session:
+        scan = session.get(ScanRow, "scan1")
+        assert scan is not None and scan.status == "cancelled"
 
 
 def test_runner_configuration_resolution_failure_marks_scan_failed(

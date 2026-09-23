@@ -26,6 +26,17 @@ class ScanOverrides:
 _EMPTY_SCAN_OVERRIDES = ScanOverrides()
 
 
+def coerce_platform_airflow_profile(value: str | None) -> AirflowProfile | None:
+    """Validate a persisted platform profile string as a supported enum value."""
+    if value is None:
+        return None
+    try:
+        return AirflowProfile(value)
+    except ValueError as exc:
+        supported = ", ".join(profile.value for profile in AirflowProfile)
+        raise ValueError(f"unsupported Airflow profile {value!r}; supported values: {supported}") from exc
+
+
 @dataclass(frozen=True)
 class EffectiveScanConfiguration:
     """Complete project, phase, and policy-pack configuration for one scan."""

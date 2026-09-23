@@ -13,6 +13,7 @@ from ruamel.yaml import YAML
 from conformdag.application.configuration import (
     EffectiveScanConfiguration,
     ScanOverrides,
+    coerce_platform_airflow_profile,
     resolve_effective_configuration,
 )
 from conformdag.bundled import resolve_bundled_pack_path
@@ -318,3 +319,19 @@ def test_effective_configuration_does_not_retain_secret_values_or_secret_fields(
     assert secret not in serialized
     assert not any(secret_field in name for name in field_names for secret_field in ("api_key", "token", "dsn"))
     assert "C07-API-KEY-MUST-NOT-ENTER-CONFIG" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, None),
+        ("3.3.0", AirflowProfile.AIRFLOW_3_3_0),
+    ],
+)
+def test_coerce_platform_airflow_profile(raw: str | None, expected: AirflowProfile | None) -> None:
+    assert coerce_platform_airflow_profile(raw) is expected
+
+
+def test_coerce_platform_airflow_profile_rejects_unsupported_value() -> None:
+    with pytest.raises(ValueError, match="unsupported Airflow profile.*4.0"):
+        coerce_platform_airflow_profile("4.0")
