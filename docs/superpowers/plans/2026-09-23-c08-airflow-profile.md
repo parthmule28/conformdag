@@ -1,6 +1,6 @@
 # C08 — Apply Platform Airflow Profile Overrides Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execution method: Native, single-session. REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make a registered platform repository's `airflow_profile` a validated override for core scan evaluation while preserving its string-valued API/workspace/storage surfaces and keeping runtime execution disabled unless project configuration independently enables it.
 
@@ -21,6 +21,7 @@
 - Keep configuration resolution inside C07's application configuration path; C08 does not add a scan pipeline, worker-specific profile logic, or C10 runner delegation.
 - Invalid legacy values raise a clear `ValueError` inside the runner's existing `PERSISTENT_FAILURES` path; preserve cancellation fencing so a cancellation remains the terminal state.
 - Keep the supported profile set unchanged (`AirflowProfile.AIRFLOW_3_3_0`, value `"3.3.0"`).
+- Run a separate independent reviewer after implementation. If the reviewer finds a Critical or Important issue, fix it, rerun focused and full verification, push the corrected head, and obtain a re-review of that corrected head before changing the C08 ledger row to `review`.
 - Implementation commit: `fix: apply platform airflow profile overrides`; open the implementation PR without merging.
 
 ## Review Focus
@@ -79,7 +80,8 @@ def coerce_platform_airflow_profile(value: str | None) -> AirflowProfile | None:
     try:
         return AirflowProfile(value)
     except ValueError as exc:
-        raise ValueError(f"unsupported Airflow profile {value!r}; supported values: 3.3.0") from exc
+        supported = ", ".join(profile.value for profile in AirflowProfile)
+        raise ValueError(f"unsupported Airflow profile {value!r}; supported values: {supported}") from exc
 ```
 
 Import the helper from `application.configuration` in `application/__init__.py` and add it to `__all__`. Do not change the resolver's precedence rules or mutate any runtime fields in this task.
@@ -121,7 +123,7 @@ Expected: the unsupported-value test fails because `max_length=32` alone accepts
 
 - [ ] **Step 3: Add a failing workspace test.**
 
-Load a workspace with an existing repository directory and `airflow_profile: 4.0`; assert `load_workspace()` raises `WorkspaceError`. Extend the supported-value workspace case to assert the loaded field remains the string `"3.3.0"`.
+Load a workspace with an existing repository directory and `airflow_profile: "4.0"`; assert `load_workspace()` raises `WorkspaceError` after C08 validation. The quoted value is required: unquoted YAML `4.0` is a number and may already fail the current `str | None` field validation. Extend the supported-value workspace case to assert the loaded field remains the string `"3.3.0"`.
 
 - [ ] **Step 4: Run the workspace tests and confirm the invalid value is currently accepted.**
 
@@ -233,7 +235,7 @@ git commit -m "fix: apply platform airflow profile overrides"
 
 - [ ] **Step 1: Push the implementation branch and open the PR without merging.**
 
-Push `docs/c08-airflow-profile`, then open a `main`-based PR titled `fix: apply platform airflow profile overrides`. Include API/workspace validation, typed application coercion, runner/core pass-through, invalid persisted-row handling, cancellation fencing, no schema migration, full-gate/coverage/schema evidence, and the intentional non-enabling of runtime execution. Wait for the implementation-head CI and independent review; address any findings before recording the review row.
+Push `docs/c08-airflow-profile`, then open a `main`-based PR titled `fix: apply platform airflow profile overrides`. Include API/workspace validation, typed application coercion, runner/core pass-through, invalid persisted-row handling, cancellation fencing, no schema migration, full-gate/coverage/schema evidence, and the intentional non-enabling of runtime execution. Wait for the implementation-head CI and a separate independent review; address findings before recording the review row. If any Critical or Important issue is reported, fix it, rerun focused and full verification, push the corrected head, and obtain a re-review of that corrected head before changing the C08 ledger row to `review`.
 
 - [ ] **Step 2: Record the C08 review row after the PR number and implementation commit are known.**
 
