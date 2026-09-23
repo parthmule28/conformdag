@@ -46,7 +46,7 @@
 - `None` stays `None`; the supported string becomes `AirflowProfile.AIRFLOW_3_3_0`; unsupported values raise `ValueError` with the bad value in a clear diagnostic.
 - Keep `ScanOverrides.airflow_profile` typed as `AirflowProfile | None`; only a coerced value enters the override object.
 
-- [ ] **Step 1: Add coercion contract tests.**
+- [x] **Step 1: Add coercion contract tests.**
 
 ```python
 @pytest.mark.parametrize(
@@ -65,13 +65,13 @@ def test_coerce_platform_airflow_profile_rejects_unsupported_value() -> None:
         coerce_platform_airflow_profile("4.0")
 ```
 
-- [ ] **Step 2: Run the new tests and confirm they fail because the helper is not yet defined.**
+- [x] **Step 2: Run the new tests and confirm they fail because the helper is not yet defined.**
 
 Run: `mise exec -- uv run pytest tests/application/test_configuration.py -k coerce_platform_airflow_profile -x --tb=short`
 
 Expected: collection or test failure identifying the missing `coerce_platform_airflow_profile` symbol.
 
-- [ ] **Step 3: Implement the helper in the application configuration module.**
+- [x] **Step 3: Implement the helper in the application configuration module.**
 
 ```python
 def coerce_platform_airflow_profile(value: str | None) -> AirflowProfile | None:
@@ -86,13 +86,13 @@ def coerce_platform_airflow_profile(value: str | None) -> AirflowProfile | None:
 
 Import the helper from `application.configuration` in `application/__init__.py` and add it to `__all__`. Do not change the resolver's precedence rules or mutate any runtime fields in this task.
 
-- [ ] **Step 4: Run the focused configuration tests.**
+- [x] **Step 4: Run the focused configuration tests.**
 
 Run: `mise exec -- uv run pytest tests/application/test_configuration.py -x --tb=short`
 
 Expected: all configuration resolver and coercion tests pass, including the existing platform-profile test that verifies `runtime.enabled` and `runtime.image` are preserved.
 
-- [ ] **Step 5: Commit the tested application boundary.**
+- [x] **Step 5: Commit the tested application boundary.**
 
 ```bash
 git add src/conformdag/application/configuration.py src/conformdag/application/__init__.py tests/application/test_configuration.py
@@ -111,27 +111,27 @@ git commit -m "feat: validate platform airflow profile values"
 - Each field validator calls `coerce_platform_airflow_profile(value)` for validation and returns the original string unchanged.
 - API clients continue to send a string; the database continues to persist a string.
 
-- [ ] **Step 1: Add failing HTTP API tests for invalid and valid values.**
+- [x] **Step 1: Add failing HTTP API tests for invalid and valid values.**
 
 Add a registration test that posts `airflow_profile: "4.0"` (within the length bound) and asserts HTTP 422. Add a valid `"3.3.0"` case that verifies the `RepositoryRow` stores exactly the string and `GET /api/v1/repos` returns the same string.
 
-- [ ] **Step 2: Run the API tests and confirm unsupported values are currently accepted.**
+- [x] **Step 2: Run the API tests and confirm unsupported values are currently accepted.**
 
 Run: `mise exec -- uv run pytest tests/test_platform.py -k 'airflow_profile' -x --tb=short`
 
 Expected: the unsupported-value test fails because `max_length=32` alone accepts `"4.0"`.
 
-- [ ] **Step 3: Add a failing workspace test.**
+- [x] **Step 3: Add a failing workspace test.**
 
 Load a workspace with an existing repository directory and `airflow_profile: "4.0"`; assert `load_workspace()` raises `WorkspaceError` after C08 validation. The quoted value is required: unquoted YAML `4.0` is a number and may already fail the current `str | None` field validation. Extend the supported-value workspace case to assert the loaded field remains the string `"3.3.0"`.
 
-- [ ] **Step 4: Run the workspace tests and confirm the invalid value is currently accepted.**
+- [x] **Step 4: Run the workspace tests and confirm the invalid value is currently accepted.**
 
 Run: `mise exec -- uv run pytest tests/test_platform.py -k 'workspace_loader_resolves_relative_paths or workspace_rejects_unsupported_airflow_profile' -x --tb=short`
 
 Expected: the unsupported-profile test fails before validator implementation.
 
-- [ ] **Step 5: Add field validators that preserve the supplied string.**
+- [x] **Step 5: Add field validators that preserve the supplied string.**
 
 Use this pattern in both `RepositoryCreate` and `WorkspaceRepository`:
 
@@ -145,13 +145,13 @@ def validate_airflow_profile(cls, value: str | None) -> str | None:
 
 Import `coerce_platform_airflow_profile` from `conformdag.application`. Leave the field annotation, `max_length`, API property type, database model, and migration history unchanged.
 
-- [ ] **Step 6: Run the focused API and workspace tests.**
+- [x] **Step 6: Run the focused API and workspace tests.**
 
 Run: `mise exec -- uv run pytest tests/test_platform.py -k 'airflow_profile or workspace_loader_resolves_relative_paths or workspace_rejects_unsupported_airflow_profile' -x --tb=short`
 
 Expected: invalid API/workspace strings are rejected; supported values remain strings through model, route, and storage boundaries.
 
-- [ ] **Step 7: Commit the input-boundary validation.**
+- [x] **Step 7: Commit the input-boundary validation.**
 
 ```bash
 git add src/conformdag/platform/app.py src/conformdag/platform/workspace.py tests/test_platform.py
@@ -171,29 +171,29 @@ git commit -m "fix: validate platform airflow profile inputs"
 - It calls the existing core path with `scan_repository(repository_root, effective.resolved_policy_pack, airflow_profile=effective.runtime.airflow_version, parse_cache=...)`.
 - It does not invoke `execute_scan()`, enable runtime execution, alter the project image, or move runner responsibilities owned by C10.
 
-- [ ] **Step 1: Update the valid-profile runner test to assert core receives the enum.**
+- [x] **Step 1: Update the valid-profile runner test to assert core receives the enum.**
 
 Change `test_runner_uses_resolved_pack_without_wiring_stored_profile` to assert that its fake `scan_repository` receives `airflow_profile=AirflowProfile.AIRFLOW_3_3_0` when the registered repository carries `"3.3.0"`. Set the project runtime to `enabled: false` with a pinned image and no profile; keep the project pack resolution, gate pack, successful status, and assert that no runtime adapter is invoked. The existing application configuration test continues to pin that a platform profile preserves `runtime.enabled` and `runtime.image`.
 
-- [ ] **Step 2: Add runner fallback and legacy-invalid tests before changing the runner.**
+- [x] **Step 2: Add runner fallback and legacy-invalid tests before changing the runner.**
 
 Add one case with no repository override and project `runtime.airflow_version: "3.3.0"`; assert core receives that profile. Add one case with neither value; assert the runner explicitly passes `airflow_profile=None`. For a persisted `"4.0"` row, assert `execute_scan()` returns failure, the scan becomes `failed` with an unsupported-profile diagnostic, and the fake core scanner is never called.
 
-- [ ] **Step 3: Run the focused runner tests and confirm the missing behavior.**
+- [x] **Step 3: Run the focused runner tests and confirm the missing behavior.**
 
 Run: `mise exec -- uv run pytest tests/test_platform.py -k 'runner_uses_resolved_pack or runner_uses_project_airflow_profile or runner_invalid_persisted_airflow_profile' -x --tb=short`
 
 Expected: the platform profile is not present in the core call, and the historical invalid profile is not rejected before scanning.
 
-- [ ] **Step 4: Add the invalid-profile cancellation-race regression.**
+- [x] **Step 4: Add the invalid-profile cancellation-race regression.**
 
 Make the coercion test seam cancel the running scan immediately before invoking the real coercion on `"4.0"`. Assert the runner returns the cancellation outcome and the stored scan remains `cancelled`; the error must not overwrite cancellation.
 
-- [ ] **Step 5: Wire coercion and the effective profile through the existing runner path.**
+- [x] **Step 5: Wire coercion and the effective profile through the existing runner path.**
 
 Within the current `try` block, coerce `repository.airflow_profile`, include it in `ScanOverrides`, resolve the effective configuration, then pass `effective.runtime.airflow_version` to `scan_repository`. Leave the `PERSISTENT_FAILURES` catch, failure transition, `_was_cancelled` behavior, baseline/gate logic, and ingestion path intact.
 
-- [ ] **Step 6: Run focused configuration and runner tests.**
+- [x] **Step 6: Run focused configuration and runner tests.**
 
 Run:
 
@@ -204,7 +204,7 @@ mise exec -- uv run pytest tests/test_platform.py -k 'airflow_profile or runner_
 
 Expected: platform profile reaches core as an enum; project fallback remains effective; unsupported historical data fails before core scanning; cancellation remains terminal; no test observes Docker runtime being enabled by the profile.
 
-- [ ] **Step 7: Run the complete required verification before committing.**
+- [x] **Step 7: Run the complete required verification before committing.**
 
 Run, in order:
 
@@ -217,7 +217,7 @@ git diff --check
 
 Expected: the full gate and coverage gate pass; schema exports remain synchronized; whitespace check is clean. Manually confirm the staged diff has no database model or Alembic migration change and that `runtime.image` and `runtime.enabled` are not modified by the platform override.
 
-- [ ] **Step 8: Commit the implementation with the required message.**
+- [x] **Step 8: Commit the implementation with the required message.**
 
 ```bash
 git add src/conformdag/application/configuration.py src/conformdag/application/__init__.py src/conformdag/platform/app.py src/conformdag/platform/workspace.py src/conformdag/platform/runner.py tests/application/test_configuration.py tests/test_platform.py
