@@ -17,7 +17,15 @@ from typer.core import TyperGroup, TyperOption
 from typer.main import get_command
 from typer.testing import CliRunner
 
-from conformdag.application import BaselineInput, RuntimeExecutor, ScanExecutionResult, ScanOptions
+from conformdag.application import (
+    BaselineInput,
+    EffectiveScanConfiguration,
+    RuntimeExecutor,
+    ScanExecutionResult,
+    ScanOptions,
+    ScanOverrides,
+    resolve_effective_configuration,
+)
 from conformdag.cli import app
 from conformdag.models import (
     AirflowProfile,
@@ -957,11 +965,9 @@ def test_scan_delegates_to_application_service_with_adapter_inputs(
     calls: list[
         tuple[
             ScanOptions,
+            EffectiveScanConfiguration,
             SemanticProvider | None,
             str | None,
-            str | None,
-            bool | None,
-            ProjectRuntimeConfig | None,
             RuntimeExecutor | None,
             BaselineInput | None,
         ]
@@ -970,23 +976,19 @@ def test_scan_delegates_to_application_service_with_adapter_inputs(
 
     def execute_service(
         options: ScanOptions,
+        configuration: EffectiveScanConfiguration,
         *,
         semantic_provider: SemanticProvider | None = None,
         semantic_provider_name: str | None = None,
-        semantic_model: str | None = None,
-        semantic_native_structured_output: bool | None = None,
-        runtime_config: ProjectRuntimeConfig | None = None,
         runtime_executor: RuntimeExecutor | None = None,
         baseline: BaselineInput | None = None,
     ) -> ScanExecutionResult:
         calls.append(
             (
                 options,
+                configuration,
                 semantic_provider,
                 semantic_provider_name,
-                semantic_model,
-                semantic_native_structured_output,
-                runtime_config,
                 runtime_executor,
                 baseline,
             )
@@ -1024,23 +1026,331 @@ def test_scan_delegates_to_application_service_with_adapter_inputs(
 
     assert result.exit_code == 0, result.stderr
     assert len(calls) == 1
-    options, semantic_provider, provider_name, model, structured_output, runtime_config, runtime_executor, baseline = (
-        calls[0]
-    )
-    assert options == ScanOptions(
-        root.resolve(),
-        policy_pack=root / "pack.yaml",
-        airflow_profile=AirflowProfile.AIRFLOW_3_3_0 if runtime_enabled else None,
-    )
-    assert (semantic_provider, provider_name, model, structured_output) == (None, None, None, None)
+    options, configuration, semantic_provider, provider_name, runtime_executor, baseline = calls[0]
+    assert options == ScanOptions(root.resolve())
+    assert configuration.resolved_policy_pack == (root / "pack.yaml").resolve()
+    assert configuration.runtime.enabled is runtime_enabled
+    assert configuration.runtime.airflow_version is (AirflowProfile.AIRFLOW_3_3_0 if runtime_enabled else None)
+    assert (semantic_provider, provider_name) == (None, None)
     assert baseline == BaselineInput(report=expected_baseline)
     if runtime_enabled:
-        assert runtime_config is not None and runtime_config.enabled is True
-        assert runtime_config.airflow_version is AirflowProfile.AIRFLOW_3_3_0
+        assert configuration.runtime.enabled is True
+        assert configuration.runtime.airflow_version is AirflowProfile.AIRFLOW_3_3_0
         assert runtime_executor is not None
     else:
-        assert runtime_config is None
+        assert configuration.runtime.enabled is False
         assert runtime_executor is None
+
+
+def test_runtime_image_clears_project_profile_for_core_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """C07 intentionally corrects C06: an invocation image clears the project profile."""
+    import conformdag.application.scan as application_scan
+    import conformdag.cli as cli_module
+
+    root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
+    _write_yaml(
+        root / "conformdag.yaml",
+        {"config_version": "1", "runtime": {"airflow_version": "3.3.0"}},
+    )
+    image = "ghcr.io/example/conformdag@sha256:" + "a" * 64
+    core_profiles: list[object] = []
+
+    def scan_core(*args: object, **kwargs: object) -> ScanReport:
+        core_profiles.append(kwargs["airflow_profile"])
+        return _application_report()
+
+    def fake_runtime(
+        root: Path,
+        config: ProjectRuntimeConfig,
+        policy_ids: list[str],
+        include: list[str],
+        exclude: list[str],
+    ) -> tuple[list[RuntimeObservation], str]:
+        assert config.image == image
+        assert config.airflow_version is None
+        return [RuntimeObservation(status=FindingStatus.PASS, policy_id="AIR-TST-001")], image
+
+    monkeypatch.setattr(application_scan, "scan_repository", scan_core)
+    monkeypatch.setattr(cli_module, "execute_runtime", fake_runtime)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--policy-pack",
+            str(root / "pack.yaml"),
+            "--runtime-image",
+            image,
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert core_profiles == [None]
+
+
+def test_scan_resolves_once_with_invocation_relative_pack_and_selector_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.cli as cli_module
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    root = _write_gate_repo(repository, with_gate=False, owner="platform")
+    _write_yaml(
+        root / "conformdag.yaml",
+        {
+            "config_version": "1",
+            "semantic": {"base_url": "https://project.example/v1", "model": "project-model"},
+        },
+    )
+    caller = tmp_path / "caller"
+    (caller / "local").mkdir(parents=True)
+    copyfile(root / "pack.yaml", caller / "local" / "pack.yaml")
+    monkeypatch.chdir(caller)
+    actual_resolver = resolve_effective_configuration
+    resolver_calls: list[tuple[Path, ScanOverrides, Path | None]] = []
+
+    def resolver_spy(
+        repository_root: Path,
+        *,
+        invocation_overrides: ScanOverrides,
+        invocation_working_directory: Path | None,
+    ) -> EffectiveScanConfiguration:
+        resolver_calls.append((repository_root, invocation_overrides, invocation_working_directory))
+        return actual_resolver(
+            repository_root,
+            invocation_overrides=invocation_overrides,
+            invocation_working_directory=invocation_working_directory,
+        )
+
+    execution_configurations: list[EffectiveScanConfiguration] = []
+
+    def execute_service(
+        options: ScanOptions,
+        configuration: EffectiveScanConfiguration,
+        **_kwargs: object,
+    ) -> ScanExecutionResult:
+        assert options == ScanOptions(root.resolve())
+        execution_configurations.append(configuration)
+        return ScanExecutionResult(report=_application_report(), gate_result=None)
+
+    monkeypatch.setattr(cli_module, "resolve_effective_configuration", resolver_spy, raising=False)
+    monkeypatch.setattr(cli_module, "execute_scan", execute_service)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--policy-pack",
+            "local/pack.yaml",
+            "--runtime",
+            "3.3.0",
+            "--semantic-base-url",
+            "",
+            "--semantic-model",
+            "",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert len(resolver_calls) == 1
+    resolved_root, overrides, working_directory = resolver_calls[0]
+    assert resolved_root == root.resolve()
+    assert overrides.policy_pack == Path("local/pack.yaml")
+    assert overrides.airflow_profile is AirflowProfile.AIRFLOW_3_3_0
+    assert overrides.runtime_image is None
+    assert overrides.semantic_base_url is None
+    assert overrides.semantic_model is None
+    assert working_directory == caller.resolve()
+    assert len(execution_configurations) == 1
+    configuration = execution_configurations[0]
+    assert configuration.resolved_policy_pack == (caller / "local" / "pack.yaml").resolve()
+    assert configuration.runtime.enabled is True
+    assert configuration.runtime.airflow_version is AirflowProfile.AIRFLOW_3_3_0
+    assert configuration.semantic.base_url == "https://project.example/v1"
+    assert configuration.semantic.model == "project-model"
+
+
+def test_scan_semantic_adapter_uses_effective_values_and_api_key_at_adapter_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.cli as cli_module
+
+    root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
+    _write_yaml(
+        root / "conformdag.yaml",
+        {
+            "config_version": "1",
+            "semantic": {
+                "enabled": False,
+                "base_url": "https://project.example/v1",
+                "model": "project-model",
+                "native_structured_output": True,
+                "api_key_env": "C07_TEST_MODEL_KEY",
+            },
+        },
+    )
+    monkeypatch.setenv("C07_TEST_MODEL_KEY", "secret-c07-key")
+    provider_inputs: list[tuple[str, str, str, bool]] = []
+    configurations: list[EffectiveScanConfiguration] = []
+
+    class DirectProvider:
+        def __init__(
+            self,
+            base_url: str,
+            model: str,
+            api_key: str,
+            *,
+            native_structured_output: bool,
+        ) -> None:
+            provider_inputs.append((base_url, model, api_key, native_structured_output))
+
+    class CachedProvider:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    def fake_cache(_path: Path) -> object:
+        return object()
+
+    def execute_service(
+        options: ScanOptions,
+        configuration: EffectiveScanConfiguration,
+        *,
+        semantic_provider: SemanticProvider | None = None,
+        semantic_provider_name: str | None = None,
+        **_kwargs: object,
+    ) -> ScanExecutionResult:
+        assert options == ScanOptions(root.resolve())
+        configurations.append(configuration)
+        assert semantic_provider is not None
+        assert semantic_provider_name == "invoke.example"
+        return ScanExecutionResult(report=_application_report(), gate_result=None)
+
+    monkeypatch.setattr(cli_module, "OpenAICompatibleProvider", DirectProvider)
+    monkeypatch.setattr(cli_module, "CachedSemanticProvider", CachedProvider)
+    monkeypatch.setattr(cli_module, "SemanticCache", fake_cache)
+    monkeypatch.setattr(cli_module, "execute_scan", execute_service)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--semantic",
+            "--semantic-base-url",
+            "https://invoke.example/v1",
+            "--semantic-model",
+            "invoke-model",
+            "--no-semantic-structured-output",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert provider_inputs == [("https://invoke.example/v1", "invoke-model", "secret-c07-key", False)]
+    assert len(configurations) == 1
+    configuration = configurations[0]
+    assert configuration.semantic.enabled is True
+    assert configuration.semantic.base_url == "https://invoke.example/v1"
+    assert configuration.semantic.model == "invoke-model"
+    assert configuration.semantic.native_structured_output is False
+    assert "secret-c07-key" not in repr(configuration)
+
+
+def test_scan_no_semantic_keeps_project_profile_inert_and_builds_no_phase_adapters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.cli as cli_module
+
+    root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
+    _write_yaml(
+        root / "conformdag.yaml",
+        {
+            "config_version": "1",
+            "semantic": {"enabled": True, "base_url": "https://project.example/v1", "model": "project-model"},
+            "runtime": {"enabled": False, "airflow_version": "3.3.0"},
+        },
+    )
+    configurations: list[EffectiveScanConfiguration] = []
+
+    def unexpected_adapter(*_args: object, **_kwargs: object) -> NoReturn:
+        raise AssertionError("disabled phase adapter must not be constructed")
+
+    def execute_service(
+        options: ScanOptions,
+        configuration: EffectiveScanConfiguration,
+        *,
+        semantic_provider: SemanticProvider | None = None,
+        runtime_executor: RuntimeExecutor | None = None,
+        **_kwargs: object,
+    ) -> ScanExecutionResult:
+        assert options == ScanOptions(root.resolve())
+        configurations.append(configuration)
+        assert semantic_provider is None
+        assert runtime_executor is None
+        return ScanExecutionResult(report=_application_report(), gate_result=None)
+
+    monkeypatch.setattr(cli_module, "OpenAICompatibleProvider", unexpected_adapter)
+    monkeypatch.setattr(cli_module, "CachedSemanticProvider", unexpected_adapter)
+    monkeypatch.setattr(cli_module, "_CliRuntimeExecutor", unexpected_adapter)
+    monkeypatch.setattr(cli_module, "execute_scan", execute_service)
+
+    result = CliRunner().invoke(
+        app,
+        ["scan", "--path", str(root), "--no-semantic", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert len(configurations) == 1
+    configuration = configurations[0]
+    assert configuration.semantic.enabled is False
+    assert configuration.runtime.enabled is False
+    assert configuration.runtime.airflow_version is AirflowProfile.AIRFLOW_3_3_0
+
+
+def test_disabled_semantic_structured_output_override_preserves_project_report_metadata(
+    tmp_path: Path,
+) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
+    _write_yaml(
+        root / "conformdag.yaml",
+        {"config_version": "1", "semantic": {"enabled": False, "native_structured_output": True}},
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "--path",
+            str(root),
+            "--policy-pack",
+            str(root / "pack.yaml"),
+            "--no-semantic",
+            "--no-semantic-structured-output",
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["run"]["resolved_configuration"]["semantic"]["native_structured_output"] is True
 
 
 def test_scan_no_evidence_does_not_mutate_application_report_or_fingerprint(
@@ -1055,12 +1365,10 @@ def test_scan_no_evidence_does_not_mutate_application_report_or_fingerprint(
 
     def execute_service(
         options: ScanOptions,
+        configuration: EffectiveScanConfiguration,
         *,
         semantic_provider: SemanticProvider | None = None,
         semantic_provider_name: str | None = None,
-        semantic_model: str | None = None,
-        semantic_native_structured_output: bool | None = None,
-        runtime_config: ProjectRuntimeConfig | None = None,
         runtime_executor: RuntimeExecutor | None = None,
         baseline: BaselineInput | None = None,
     ) -> ScanExecutionResult:

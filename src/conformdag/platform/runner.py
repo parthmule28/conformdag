@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from conformdag.analysis import ParseCache
-from conformdag.config import load_project_config
+from conformdag.application import ScanOverrides, resolve_effective_configuration
 from conformdag.gates import evaluate_pack_gates
 from conformdag.models import FindingStatus, GateResult, PolicyPack, ScanReport
 from conformdag.platform.db import (
@@ -26,7 +26,7 @@ from conformdag.platform.db import (
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
-from conformdag.policy import resolve_configured_policy_pack, select_policy_pack
+from conformdag.policy import select_policy_pack
 from conformdag.reporting import normalize_report
 from conformdag.scan import scan_repository
 
@@ -133,11 +133,19 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
                 expected_attempt=claim_attempt,
             )
             return 2
-        pack = repository.policy_pack
+        repository_root = Path(repository.path)
         try:
             logger.info("scan_started", extra={"scan_id": scan_id})
+            effective = resolve_effective_configuration(
+                repository_root,
+                platform_overrides=ScanOverrides(
+                    policy_pack=Path(repository.policy_pack) if repository.policy_pack is not None else None,
+                ),
+            )
             report = scan_repository(
-                Path(repository.path), Path(pack) if pack else None, parse_cache=worker_parse_cache()
+                repository_root,
+                effective.resolved_policy_pack,
+                parse_cache=worker_parse_cache(),
             )
         except PERSISTENT_FAILURES as exc:
             logger.info("scan_completed", extra={"scan_id": scan_id, "error": str(exc)})
@@ -166,18 +174,7 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
         gate_result: GateResult | None = None
         loaded_pack: PolicyPack | None = None
         try:
-            repository_root = Path(repository.path)
-            configured_pack = (
-                Path(pack)
-                if pack is not None
-                else load_project_config(repository_root / "conformdag.yaml").scan.policy_pack
-            )
-            resolved_pack = resolve_configured_policy_pack(
-                configured_pack,
-                scan_root=repository_root,
-                from_cli=pack is not None,
-            )
-            loaded_pack = select_policy_pack(resolved_pack, repository_root)
+            loaded_pack = select_policy_pack(effective.resolved_policy_pack, repository_root)
         except (ValueError, OSError):
             loaded_pack = None
         if loaded_pack is not None:

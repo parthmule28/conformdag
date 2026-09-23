@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -62,6 +63,13 @@ def load_pack_for_scan(
     return config, pack
 
 
+class _AirflowProfileUnset(Enum):
+    TOKEN = 0
+
+
+_AIRFLOW_PROFILE_UNSET = _AirflowProfileUnset.TOKEN
+
+
 def scan_repository(
     repository_root: Path,
     policy_pack: Path | None = None,
@@ -70,7 +78,7 @@ def scan_repository(
     semantic_provider_name: str | None = None,
     semantic_model: str | None = None,
     semantic_native_structured_output: bool | None = None,
-    airflow_profile: AirflowProfile | None = None,
+    airflow_profile: AirflowProfile | None | _AirflowProfileUnset = _AIRFLOW_PROFILE_UNSET,
     parse_cache: ParseCache | None = None,
 ) -> ScanReport:
     """Run source analysis and any explicitly supplied semantic provider."""
@@ -109,7 +117,9 @@ def scan_repository(
         elif model:
             models.append(model)
 
-    selected_airflow_profile = airflow_profile or config.runtime.airflow_version
+    selected_airflow_profile = (
+        config.runtime.airflow_version if isinstance(airflow_profile, _AirflowProfileUnset) else airflow_profile
+    )
     ruff_rules = ruff_rules_for_policies(pack.policies, selected_airflow_profile)
     ruff_violations: list[dict[str, Any]] | None = None
     if ruff_rules:
