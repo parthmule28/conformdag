@@ -173,20 +173,79 @@ existing options, calls the application resolver once, and uses the result to:
 - pass project scan controls to application execution without repeating a
   source merge.
 
-The application scan workflow consumes `EffectiveScanConfiguration` instead
-of accepting separately merged phase configuration. It uses the resolved pack
-path for core evaluation and gate loading, `project.scan` for project scan
-controls, and `runtime` for the runtime phase. `scan_repository()` remains the
-only core evaluation primitive and continues to load project scan controls
-needed for discovery and repository-local suppressions. Because the application
-passes it the already selected absolute pack path, this core read does not
-make a second precedence decision.
+The post-C07 `application.scan.execute_scan()` contract is:
+
+```python
+@dataclass(frozen=True)
+class ScanOptions:
+    repository_root: Path
+
+
+def execute_scan(
+    options: ScanOptions,
+    configuration: EffectiveScanConfiguration,
+    *,
+    semantic_provider: SemanticProvider | None = None,
+    semantic_provider_name: str | None = None,
+    runtime_executor: RuntimeExecutor | None = None,
+    baseline: BaselineInput | None = None,
+    operational_suppressions: Sequence[Suppression] = (),
+    parse_cache: ParseCache | None = None,
+) -> ScanExecutionResult: ...
+```
+
+`configuration` is required and is the only source of resolved scan settings.
+`ScanOptions` remains only as repository context: `policy_pack` and
+`airflow_profile` are removed from it. `execute_scan()` does not call the
+resolver or merge configuration values. It takes the selected pack from
+`configuration.resolved_policy_pack`, scan controls and globs from
+`configuration.project.scan`, and runtime settings from
+`configuration.runtime`.
+
+The semantic model and native structured-output setting come from
+`configuration.semantic` when an adapter supplies `semantic_provider`.
+`semantic_provider_name` remains an optional adapter metadata value passed
+through to report metadata; it is not a configuration override. The
+application does not construct provider or runtime adapters. An injected
+provider/executor requests that optional phase; without one, that phase is
+omitted even if the project file enables it. This preserves the platform's
+current behavior when C10 later delegates to the application. The CLI
+continues to inject each adapter when its resolved configuration enables that
+phase, preserving its C06 behavior. Supplying an adapter for a disabled phase
+is an input error. This replaces C06's direct-call error for an enabled
+`runtime_config` without a `RuntimeExecutor`: after C07, a caller that does not
+inject an executor has not requested runtime execution. The CLI still supplies
+one whenever effective runtime is enabled, so its current validation and
+execution behavior remain unchanged.
+
+For C07, the core `airflow_profile` argument is derived inside
+`execute_scan()` as `configuration.runtime.airflow_version` only when
+`configuration.runtime.enabled` is true. This matches C06's CLI projection:
+an explicit `--runtime` selector enables runtime and carries its profile, while
+a profile stored in a disabled project runtime remains inert. C07 does not
+populate the platform override's profile field, so no persisted platform
+profile reaches this projection. C08 owns changing this projection so its
+validated platform profile can reach core evaluation without enabling runtime
+or changing runtime-image selection.
+
+`scan_repository()` remains the only core evaluation primitive and continues
+to load project scan controls needed for discovery and repository-local
+suppressions. It receives the already selected absolute pack path, so that
+read does not make a second precedence decision. Existing C06 inputs
+`semantic_model`, `semantic_native_structured_output`, and `runtime_config`
+are removed from `execute_scan()`; their effective values come only from
+`configuration`. The C06 `ScanOptions.policy_pack` and
+`ScanOptions.airflow_profile` fields are also removed. `semantic_provider`,
+`semantic_provider_name`, `runtime_executor`, baseline, operational
+suppressions, and parse-cache injection remain phase adapters/metadata rather
+than competing configuration sources.
 
 For CLI parity, the adapter enables a runtime executor only under the same
-conditions as C06, passes the runtime profile to core evaluation only when
-runtime is enabled, and preserves the current error mapping, offline default,
-report fields, fingerprints, renderers, and exit precedence. Preview mode
-continues to avoid provider/runtime construction and uses the resolved pack.
+conditions as C06. `execute_scan()` passes the effective runtime profile to
+core evaluation only when runtime is enabled, preserving the current error
+mapping, offline default, report fields, fingerprints, renderers, and exit
+precedence. Preview mode continues to avoid provider/runtime construction and
+uses the resolved pack.
 Other CLI commands such as `fix` and `doctor` are outside C07; they are not
 complete application scan entry points.
 
@@ -194,19 +253,19 @@ complete application scan entry points.
 
 The platform runner passes the repository's policy-pack value through
 `platform_overrides` and uses `resolved_policy_pack` both for its current core
-scan call and its separate gate-pack load. This removes its independent choice
+scan call and its separate gate-pack load. It does not read, parse, or pass
+`RepositoryRow.airflow_profile` in C07. This removes its independent choice
 between repository and project policy-pack values without moving scan,
 suppression, normalization, baseline, gate, persistence, or fencing logic.
 Those remaining runner responsibilities stay in C10.
 
 `ScanOverrides.airflow_profile` is typed as `AirflowProfile | None`, so the
-application boundary never accepts arbitrary profile strings. The platform
-adapter may convert a stored value to this enum before constructing the typed
-override, but C07 does not pass that profile into core scan behavior or enable
-runtime from it. C08 owns API/workspace validation, clear errors for invalid
-persisted values, and passing the validated profile through the existing
-application/core option. C07 adds no database migration and does not change
-the platform profile's observable scan behavior.
+canonical resolver can accept a typed profile from callers such as the CLI.
+The existing platform string is deliberately not converted into this type in
+C07. C08 owns validating repository/API/workspace values, handling invalid
+historical persisted values, populating `platform_overrides.airflow_profile`,
+and making that override effective. C07 adds no database migration and does
+not change the platform profile's observable scan behavior.
 
 The resolver may return project-level semantic and runtime settings for any
 adapter, but C07 does not activate those phases in platform scans; the current
@@ -218,6 +277,9 @@ resolved configuration does not itself imply execution of an optional phase.
 ## Behavior and error contract
 
 - Project defaults remain unchanged when no overrides are present.
+- The resolver's output is the only resolved configuration passed to
+  `execute_scan()`; the removed C06 keyword values cannot override or disagree
+  with it.
 - Invalid project configuration and invalid override combinations fail before
   scanning with a configuration/input error mapped by the calling adapter.
 - Invalid semantic URL/model settings fail only when semantic is enabled, as
@@ -233,7 +295,7 @@ resolved configuration does not itself imply execution of an optional phase.
 
 The implementation plan should require a precedence matrix across all four
 layers for every override field, including explicit `False`, no-override
-defaults, project-file defaults, and platform-over-invocation behavior. It
+defaults, project-file defaults, and invocation-over-platform behavior. It
 should cover conflicting runtime selectors, configured runtime state with
 explicit CLI selectors, path-origin behavior, semantic enablement and lazy
 secret lookup, and the absence of keys/tokens/DSNs from both value objects.
@@ -247,15 +309,18 @@ compatibility evidence required before implementation is considered complete.
 ## Self-review
 
 - **Completeness:** The resolver owner, source order, path origins, partial
-  override semantics, secrets boundary, CLI migration, and C08/C10 cut lines
-  are specified.
-- **Consistency:** Platform profile values are typed in the resolver contract
-  but inert until C08; resolver output alone does not activate runtime or
-  semantic phases in the platform runner.
+  override semantics, secrets boundary, exact post-C07 `execute_scan()`
+  contract, CLI migration, and C08/C10 cut lines are specified.
+- **Consistency:** The profile override is typed in the resolver contract,
+  while the persisted platform string is not wired until C08. Resolver output
+  alone does not activate runtime or semantic phases in the platform runner;
+  phase adapters are separate from effective configuration values.
 - **Scope:** C07 centralizes configuration resolution and composes existing
   adapters; C08 makes the platform profile effective; C10 migrates the
   platform scan workflow. Product code, tests, and implementation planning are
   deferred until the applicable review gates.
 - **Ambiguity:** The C06 runtime selector interaction is recorded as an
   explicit CLI-only rule. `None` is consistently absence in override values;
-  this design does not introduce an optional-value clearing operation.
+  this design does not introduce an optional-value clearing operation. C06's
+  direct-call runtime-config/executor validation is explicitly replaced by
+  adapter-requested runtime execution while CLI behavior remains the same.
