@@ -1,6 +1,6 @@
 # C07 Effective Scan Configuration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` for Native, single-session implementation only. Keep implementation tasks sequential; reserve independent review for a separate reviewer after implementation. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Resolve scan settings once into `EffectiveScanConfiguration`, then make the CLI and platform pack seam consume that result without allowing the core scanner to replace an explicitly resolved Airflow profile.
 
@@ -287,7 +287,7 @@ Replay the same fixed scenarios used in Step 1 after the migration. Compare comp
 
 - [ ] **Step 7: Run `mise run check` and commit the CLI/application/core migration.**
 
-Run the full repository gate, then commit only the CLI, application/core files, and their tests with `refactor: resolve scan configuration before execution`. Do not stage `.serena/`.
+Run the full repository gate, then commit only the CLI, application/core files, and their tests with the required C07 message `refactor: centralize scan configuration`. Do not create an empty commit to repeat this message. Do not stage `.serena/`.
 
 ## Task 4: Route the platform pack seam through the resolver
 
@@ -301,17 +301,21 @@ Run the full repository gate, then commit only the CLI, application/core files, 
 - Consumes: `resolve_effective_configuration()`, `ScanOverrides`, and the Task 1 absolute `resolved_policy_pack`.
 - Produces: the existing subprocess runner using one application-owned policy-pack choice for core scan and gate loading while leaving all other platform orchestration in place.
 
-- [ ] **Step 1: Add a runner regression for pack reuse and platform profile isolation.**
+- [ ] **Step 1: Add runner regressions for pack reuse, profile isolation, and failure fencing.**
 
 Create a running scan whose repository has a configured `policy_pack` and a non-empty stored `airflow_profile`. Spy on the resolver input, `scan_repository()`, and `select_policy_pack()` used for gate loading. Assert the override carries the repository pack and leaves `airflow_profile=None`; the exact resolver-produced absolute pack reaches both core scan and gate loading; the core call omits `airflow_profile`; and no runtime executor or semantic provider is constructed. Use the existing SQLite `platform_env` fixture and fake complete report to keep the test independent of Docker.
 
+Add `test_runner_configuration_resolution_failure_marks_scan_failed`: make the resolver raise `ValueError`, assert `scan_repository()` is not called, `execute_scan()` returns failure, and the claimed row transitions to `failed` with the configuration error. Add `test_runner_configuration_resolution_failure_after_cancel_keeps_cancelled_status`: have the resolver mark the scan cancelled and then raise `OSError`; assert the runner returns the cancellation outcome and the row remains `cancelled`.
+
 - [ ] **Step 2: Run the platform regression before changing the runner.**
 
-Run: `mise exec -- uv run pytest tests/test_platform.py::test_runner_uses_resolved_pack_without_wiring_stored_profile -x --tb=short`
+Run: `mise exec -- uv run pytest tests/test_platform.py -k 'runner_uses_resolved_pack_without_wiring_stored_profile or runner_configuration_resolution_failure' -x --tb=short`
 
-Expected: the test fails because the current runner performs separate pack resolution for scan and gate.
+Expected: the pack-reuse test fails because the current runner performs separate pack resolution for scan and gate; the resolver-failure cases fail because no resolver seam is called yet.
 
 - [ ] **Step 3: Resolve one platform configuration and reuse its pack path.**
+
+Place resolver invocation inside the runner's existing `try` that catches `PERSISTENT_FAILURES`, before the call to `scan_repository()`. This keeps `ValueError`, `OSError`, and `RuntimeError` configuration/path failures inside the current claimed-scan transition and `expected_attempt` fencing path. If `transition_running_scan()` reports cancellation won, preserve the existing cancellation return path.
 
 Replace the runner's independent project/repository pack selection with:
 
@@ -330,7 +334,7 @@ Pass `effective.resolved_policy_pack` to the existing `scan_repository()` call a
 
 Run: `mise exec -- uv run pytest tests/test_platform.py -k 'runner or workspace' -x --tb=short`
 
-Expected: the pack selected from the workspace/repository is used for both scan and gates; persisted profiles remain unused; runner lifecycle behavior remains intact.
+Expected: the pack selected from the workspace/repository is used for both scan and gates; persisted profiles remain unused; configuration resolution failures use the existing failure transition; and cancellation still wins if it arrives before the failure transition.
 
 - [ ] **Step 5: Run the full repository gate and commit the platform seam.**
 
@@ -342,26 +346,83 @@ Expected: complete success across every repository gate. Commit only the runner 
 
 **Files:**
 
+- Modify: `docs/consolidation/progress.md` (the C07 row only, after a real PR exists).
 - Verify: all Task 1–4 source and test files.
 
 **Interfaces:**
 
 - Consumes: all completed Task 1–4 behavior and the approved C07 design.
-- Produces: complete repository gate output and C06/C07 compatibility evidence for implementation review.
+- Produces: full check, coverage, schema, and whitespace evidence; independent review of all previous resolution callers; a C07 PR against `main` without merging; and a factual C07 `review` ledger row.
 
-- [ ] **Step 1: Run the complete gate after all implementation commits.**
+- [ ] **Step 1: Run the focused suite and all required completion gates.**
 
-Run: `mise run check`
+Run:
 
-Expected: format-check, lint, typecheck, full non-runtime suite, policy-pack validation, and dependency inventory all complete successfully. If any task hangs or fails, investigate and resolve it before recording implementation evidence.
+```bash
+mise exec -- uv run pytest tests/application/test_configuration.py tests/application/test_scan.py tests/test_cli.py tests/test_scan.py tests/test_platform.py -x --tb=short
+mise run check
+mise run test:coverage
+mise run schema --check
+git diff --check
+```
 
-- [ ] **Step 2: Review the final diff against the C07 design.**
+Expected: focused suites pass; `mise run check` completes; coverage meets the configured 90% gate; `mise run schema --check` confirms that no schema artifact changed; and `git diff --check` reports no whitespace errors. Resolve every failure before opening the PR or recording evidence.
 
-Verify every design section maps to code and tests: four-layer precedence; CLI selector mapping; explicit-`False`; path origins; secrets boundary; exact post-C07 `execute_scan()` signature; effective profile regardless of runtime enablement; omitted-versus-explicit core profile semantics; `--runtime-image` precedence correction; no C07 platform profile wiring; platform phase behavior; and C08/C10 boundaries. Verify no schema, fingerprint, output, exit, or unrelated platform orchestration changes entered the diff.
+- [ ] **Step 2: Obtain an independent review of every previous configuration-resolution caller.**
 
-- [ ] **Step 3: Publish only complete implementation evidence after approval of this plan and execution method.**
+Give a fresh independent reviewer the approved C07 spec, prompt, base/head SHAs, full gate and coverage results, and the C06/C07 parity evidence. Have them enumerate and inspect every result from:
 
-Record the full `mise run check` result, the compared CLI outputs/exit codes, and the dedicated runtime-image correction case. Do not describe any incomplete or stalled check as passing. Do not start this task until the implementation plan has been approved.
+```bash
+git grep -n -E 'load_project_config|load_pack_for_scan|scan_repository|airflow_profile|semantic|runtime' -- src/conformdag tests
+```
+
+Assign this review to an independent reviewer in a separate task/context; the implementation session's self-review is not a substitute. The reviewer must explicitly trace `cli.scan`, `application.scan.execute_scan`, `scan_repository`/`load_pack_for_scan`, `platform.runner`, and direct callers such as `fixing.engine` and `roundtrip.py`, plus any additional caller found by the search. Require a ruling for each caller: centralized in C07, intentionally retained as a legacy path, or deferred to C08/C10. The reviewer must verify precedence, secrets boundaries, optional-phase behavior, all CLI compatibility cases, the intentional profile correction, and runner failure/cancellation fencing. Resolve every verified Critical and Important finding; then have the reviewer re-check the corrected final head. Record any deferred Minor observations with their rationale. Do not publish implementation evidence while a Critical or Important finding remains unresolved.
+
+- [ ] **Step 3: Push and verify the reviewed implementation head.**
+
+After the independent review is clear, push the implementation branch and verify the reviewed SHA against its remote ref:
+
+```bash
+c07_branch="$(git branch --show-current)"
+local_head="$(git rev-parse HEAD)"
+remote_head="$(git ls-remote --heads origin "refs/heads/$c07_branch" | cut -f1)"
+test "$local_head" = "$remote_head"
+```
+
+Record both matching SHAs before creating the PR.
+
+- [ ] **Step 4: Open the C07 PR against `main` and verify CI on that head.**
+
+Create `/tmp/c07-effective-configuration-pr.md` with the actual scope, test/coverage/schema results, independent-review outcome, CLI parity evidence, and the intentional `--runtime-image` precedence correction. Create the PR against `main` with title `refactor: centralize scan configuration`, without merging:
+
+```bash
+pr_url="$(gh pr create --base main --title "refactor: centralize scan configuration" --body-file /tmp/c07-effective-configuration-pr.md)"
+pr_number="$(gh pr view "$pr_url" --json number --jq .number)"
+```
+
+Record the initial PR head SHA, run `gh pr checks "$pr_number" --watch`, and require every required check to pass on that head.
+
+- [ ] **Step 5: Update only the C07 ledger row with real evidence.**
+
+In `docs/consolidation/progress.md`, change only the C07 row from `planned` to `review`. Record the actual branch, PR URL, implementation and base SHAs, focused/full/coverage/schema/whitespace results, final-head CI result, independent-review outcome, preserved parity cases, and the explicit profile-correction case. Do not change any other ledger row. Run `mise run check` and `git diff --check`, stage only `docs/consolidation/progress.md`, commit with `docs: record C07 effective configuration review evidence`, and push.
+
+- [ ] **Step 6: Re-check CI after the ledger commit changes the PR head.**
+
+Verify the PR head SHA now matches the ledger commit and the remote branch:
+
+```bash
+ledger_head="$(git rev-parse HEAD)"
+remote_head="$(git ls-remote --heads origin "refs/heads/$c07_branch" | cut -f1)"
+pr_head="$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid)"
+test "$ledger_head" = "$remote_head"
+test "$ledger_head" = "$pr_head"
+```
+
+Run `gh pr checks "$pr_number" --watch` again; require all required checks to pass on this new final head. Leave the PR open and unmerged for review.
+
+- [ ] **Step 7: Stop at the implementation review gate.**
+
+Report the plan-approved implementation SHA, PR URL, final head SHA, gate/coverage/schema results, and independent-review outcome. Do not merge and do not mark C07 accepted.
 
 ## Plan Self-Review
 
@@ -370,4 +431,7 @@ Record the full `mise run check` result, the compared CLI outputs/exit codes, an
 - **Type consistency:** The resolver types are consumed by both CLI and platform. `execute_scan(options, configuration, ...)` consumes `ScanOptions(repository_root)` and no longer receives the removed C06 configuration keywords. The sentinel type remains private to `scan.py`; callers pass only `AirflowProfile | None` explicitly.
 - **Review Focus coverage:** Invocation precedence and selector clearing are pinned in Task 1 and Task 3; core omission semantics in Task 2; path origins in Tasks 1 and 4; secrets/adapters in Tasks 1 and 3; platform isolation in Task 4.
 - **Intentional non-parity:** Task 3 names the exact project-profile plus `--runtime-image` case, asserts the C07 effective/core value is `None`, and explicitly excludes only that case from exact C06 output/exit parity.
+- **Execution method:** The plan selects Native, single-session `superpowers:executing-plans` only; independent review remains a separate post-implementation step.
+- **Runner failure handling:** Task 4 places resolver invocation inside the existing `PERSISTENT_FAILURES`/claim-attempt fencing path and tests both configuration failure and cancellation-wins behavior.
+- **Completion gates/publication:** Task 5 requires coverage, schema, and whitespace checks; independent review of every prior resolution caller; the required implementation commit message; PR creation and CI verification; a C07-only ledger update; and a second CI check after the ledger commit changes PR head.
 - **Gate status:** The earlier sandboxed pytest run stopped at the loopback-socket permission test and is not counted as passing. A subsequent full `mise run check` with local socket access passed: 607 passed, 2 skipped, 19 deselected; formatting, lint, Pyright, inventory, and both policy packs passed. Task 1 still reruns the complete gate immediately before the first product-code edit; every implementation commit and final implementation evidence requires a complete gate.
