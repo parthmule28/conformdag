@@ -16,8 +16,10 @@ def apply_suppressions(
     findings: list[Finding],
     suppressions: list[Suppression],
     now: datetime | None = None,
+    *,
+    preserve_existing_provenance: bool = False,
 ) -> tuple[list[Finding], list[RunIssue]]:
-    """Apply non-expired matching suppressions and report stale/expired metadata."""
+    """Apply suppressions and report metadata, optionally retaining prior provenance."""
     current = now or datetime.now(UTC)
     issues: list[RunIssue] = []
     seen: set[tuple[str, str]] = set()
@@ -50,18 +52,27 @@ def apply_suppressions(
             )
             continue
         if suppression.expires_at <= current:
+            already_suppressed = preserve_existing_provenance and any(
+                result[position].suppressed for position in candidate_indexes
+            )
+            message = (
+                f"expired suppression matched an already-suppressed finding and left it suppressed: "
+                f"{suppression.policy_id}:{suppression.fingerprint}"
+                if already_suppressed
+                else f"expired suppression reopened finding: {suppression.policy_id}:{suppression.fingerprint}"
+            )
             issues.append(
                 RunIssue(
                     code="SUPPRESSION_EXPIRED",
-                    message=(
-                        f"expired suppression reopened finding: {suppression.policy_id}:{suppression.fingerprint}"
-                    ),
+                    message=message,
                     phase="suppression",
                 )
             )
             continue
         for position in candidate_indexes:
-            result[position] = result[position].model_copy(update={"suppressed": True, "suppression": suppression})
+            finding = result[position]
+            if not preserve_existing_provenance or not finding.suppressed:
+                result[position] = finding.model_copy(update={"suppressed": True, "suppression": suppression})
     return result, issues
 
 

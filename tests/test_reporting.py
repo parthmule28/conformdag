@@ -78,6 +78,69 @@ def test_expired_and_unmatched_suppressions_are_diagnostic() -> None:
     assert {issue.code for issue in issues} == {"SUPPRESSION_EXPIRED", "SUPPRESSION_UNMATCHED"}
 
 
+def test_local_duplicate_suppressions_keep_last_provenance_by_default() -> None:
+    finding = _finding()
+    current = datetime(2026, 7, 30, tzinfo=UTC)
+    first = _suppression(finding.fingerprint, current + timedelta(days=1))
+    second = _suppression(finding.fingerprint, current + timedelta(days=2)).model_copy(
+        update={"reason": "later local suppression"}
+    )
+
+    findings, issues = apply_suppressions([finding], [first, second], current)
+
+    assert findings[0].suppressed is True
+    assert findings[0].suppression is second
+    assert [issue.code for issue in issues] == ["SUPPRESSION_DUPLICATE"]
+
+
+def test_operational_suppression_preserves_existing_provenance() -> None:
+    finding = _finding()
+    current = datetime(2026, 7, 30, tzinfo=UTC)
+    local = _suppression(finding.fingerprint, current + timedelta(days=1)).model_copy(
+        update={"reason": "repository-local waiver"}
+    )
+    operational = _suppression(finding.fingerprint, current + timedelta(days=2))
+    locally_suppressed = finding.model_copy(update={"suppressed": True, "suppression": local})
+
+    findings, issues = apply_suppressions(
+        [locally_suppressed], [operational], current, preserve_existing_provenance=True
+    )
+
+    assert findings[0].suppressed is True
+    assert findings[0].suppression is local
+    assert issues == []
+
+
+def test_duplicate_operational_suppressions_remain_diagnostic_in_preserve_mode() -> None:
+    finding = _finding()
+    current = datetime(2026, 7, 30, tzinfo=UTC)
+    first = _suppression(finding.fingerprint, current + timedelta(days=1))
+    second = _suppression(finding.fingerprint, current + timedelta(days=2))
+
+    findings, issues = apply_suppressions([finding], [first, second], current, preserve_existing_provenance=True)
+
+    assert findings[0].suppressed is True
+    assert [issue.code for issue in issues] == ["SUPPRESSION_DUPLICATE"]
+
+
+def test_expired_operational_match_does_not_claim_local_suppression_reopened() -> None:
+    finding = _finding()
+    current = datetime(2026, 7, 30, tzinfo=UTC)
+    local = _suppression(finding.fingerprint, current + timedelta(days=1))
+    expired_operational = _suppression(finding.fingerprint, current - timedelta(days=1))
+    locally_suppressed = finding.model_copy(update={"suppressed": True, "suppression": local})
+
+    findings, issues = apply_suppressions(
+        [locally_suppressed], [expired_operational], current, preserve_existing_provenance=True
+    )
+
+    assert findings[0].suppressed is True
+    assert findings[0].suppression is local
+    assert [issue.code for issue in issues] == ["SUPPRESSION_EXPIRED"]
+    assert "already-suppressed" in issues[0].message
+    assert "reopened" not in issues[0].message
+
+
 def test_sarif_and_html_render_from_the_same_canonical_finding() -> None:
     finding = _finding()
     current = datetime(2026, 7, 30, tzinfo=UTC)
