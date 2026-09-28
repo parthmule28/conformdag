@@ -6,15 +6,22 @@ import argparse
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from conformdag.analysis import ParseCache
-from conformdag.application import ScanOverrides, coerce_platform_airflow_profile, resolve_effective_configuration
-from conformdag.gates import evaluate_pack_gates
-from conformdag.models import FindingStatus, GateResult, PolicyPack, ScanReport
+from conformdag.application import (
+    BaselineInput,
+    ScanOptions,
+    ScanOverrides,
+    coerce_platform_airflow_profile,
+    resolve_effective_configuration,
+)
+from conformdag.application import execute_scan as execute_application_scan
+from conformdag.models import ScanReport, Suppression
 from conformdag.platform.db import (
     FindingRow,
     RepositoryRow,
@@ -27,9 +34,6 @@ from conformdag.platform.db import (
 )
 from conformdag.platform.domain import ScanStatus
 from conformdag.platform.logging import install_json_logging
-from conformdag.policy import select_policy_pack
-from conformdag.reporting import normalize_report
-from conformdag.scan import scan_repository
 
 PERSISTENT_FAILURES = (ValueError, OSError, RuntimeError)
 
@@ -73,32 +77,44 @@ def _ingest(session: Session, scan: ScanRow, report: ScanReport) -> None:
         )
 
 
-def _apply_platform_suppressions(session: Session, report: ScanReport) -> ScanReport:
-    """Mark canonical findings matching an active platform suppression as suppressed.
+def _as_utc(value: datetime) -> datetime:
+    """Interpret SQLite's naive UTC timestamps and normalize all DB times to UTC."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
-    Only active rows are applied. When the suppression waives every remaining
-    ``ERROR`` finding, the fatal ``EVALUATION_ERROR`` the scan attached solely
-    to those findings is removed and ``complete`` is recomputed from the
-    remaining fatal issues; unrelated parse and provider failures are preserved.
-    """
-    active = session.scalars(select(SuppressionRow).where(SuppressionRow.expires_at > utcnow())).all()
-    if not active:
-        return report
-    suppressed_identities = {(row.policy_id, row.fingerprint) for row in active}
-    findings = [
-        finding
-        if finding.suppressed or (finding.policy_id, finding.fingerprint) not in suppressed_identities
-        else finding.model_copy(update={"suppressed": True})
-        for finding in report.findings
-    ]
-    unresolved = [finding for finding in findings if finding.status is FindingStatus.ERROR and not finding.suppressed]
-    fatal_evaluation_errors = [issue for issue in report.issues if issue.code == "EVALUATION_ERROR" and issue.fatal]
-    if unresolved or not fatal_evaluation_errors:
-        return report.model_copy(update={"findings": findings})
-    issues = [issue for issue in report.issues if issue not in fatal_evaluation_errors]
-    return report.model_copy(
-        update={"findings": findings, "issues": issues, "complete": not any(issue.fatal for issue in issues)}
+
+def _baseline_input(
+    session: Session,
+    repository_id: str,
+    baseline_scan_id: str | None,
+) -> BaselineInput | None:
+    """Convert an eligible platform baseline into the application's canonical input."""
+    if baseline_scan_id is None:
+        return None
+    baseline_scan = eligible_baseline(session, repository_id, baseline_scan_id)
+    if baseline_scan is None:
+        return None
+    if baseline_scan.report_json is not None:
+        return BaselineInput(report=ScanReport.model_validate(baseline_scan.report_json))
+    fingerprints = frozenset(
+        session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline_scan.id)).all()
     )
+    return BaselineInput(fingerprints=fingerprints)
+
+
+def _operational_suppressions(session: Session) -> list[Suppression]:
+    """Convert only active platform suppression rows into canonical application values."""
+    active = session.scalars(select(SuppressionRow).where(SuppressionRow.expires_at > utcnow())).all()
+    return [
+        Suppression(
+            fingerprint=row.fingerprint,
+            policy_id=row.policy_id,
+            reason=row.reason,
+            owner=row.owner,
+            created_at=_as_utc(row.created_at),
+            expires_at=_as_utc(row.expires_at),
+        )
+        for row in active
+    ]
 
 
 def _incomplete_error(report: ScanReport) -> str:
@@ -150,10 +166,13 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
                     airflow_profile=airflow_profile,
                 ),
             )
-            report = scan_repository(
-                repository_root,
-                effective.resolved_policy_pack,
-                airflow_profile=effective.runtime.airflow_version,
+            baseline = _baseline_input(session, scan.repository_id, repository.baseline_scan_id)
+            operational_suppressions = _operational_suppressions(session)
+            result = execute_application_scan(
+                ScanOptions(repository_root),
+                effective,
+                baseline=baseline,
+                operational_suppressions=operational_suppressions,
                 parse_cache=worker_parse_cache(),
             )
         except PERSISTENT_FAILURES as exc:
@@ -165,58 +184,26 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
                 return 0
             return 1
         logger.info("scan_completed", extra={"scan_id": scan_id})
-        report = _apply_platform_suppressions(session, report)
-        normalized = normalize_report(report)
-        if not normalized.complete:
+        report = result.report
+        if not report.complete:
             if _was_cancelled(session, scan_id):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
-            _ingest(session, scan, normalized)
+            _ingest(session, scan, report)
             if not transition_running_scan(
                 session,
                 scan_id,
                 ScanStatus.FAILED,
-                _incomplete_error(normalized),
+                _incomplete_error(report),
                 expected_attempt=claim_attempt,
             ):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             return 1
-        gate_result: GateResult | None = None
-        loaded_pack: PolicyPack | None = None
-        try:
-            loaded_pack = select_policy_pack(effective.resolved_policy_pack, repository_root)
-        except (ValueError, OSError):
-            loaded_pack = None
-        if loaded_pack is not None:
-            baseline_report: ScanReport | None = None
-            baseline_fingerprints: set[str] | None = None
-            baseline_scan = (
-                eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
-                if repository.baseline_scan_id is not None
-                else None
-            )
-            if baseline_scan is not None:
-                if baseline_scan.report_json is not None:
-                    baseline_report = ScanReport.model_validate(baseline_scan.report_json)
-                else:
-                    baseline_fingerprints = set(
-                        session.scalars(
-                            select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline_scan.id)
-                        ).all()
-                    )
-            gate_result = evaluate_pack_gates(
-                loaded_pack,
-                normalized,
-                baseline_report,
-                baseline_fingerprints=baseline_fingerprints,
-            )
-        if gate_result is not None:
-            normalized = normalized.model_copy(update={"gate_result": gate_result})
         if _was_cancelled(session, scan_id):
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0
-        _ingest(session, scan, normalized)
+        _ingest(session, scan, report)
         if not transition_running_scan(session, scan_id, ScanStatus.SUCCEEDED, expected_attempt=claim_attempt):
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0

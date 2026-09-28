@@ -29,7 +29,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 import conformdag.platform.packs as packs_module
-from conformdag.analysis import ParseCache
 from conformdag.application import (
     BaselineInput,
     ScanOptions,
@@ -2248,15 +2247,18 @@ def test_finding_payload_emits_positions_fix_and_baseline_status(
     from conformdag.platform.runner import execute_scan
 
     repository_id = _register(client, tmp_path)
+    with _platform_state(client)[0]() as session:
+        repository = session.get(RepositoryRow, repository_id)
+        assert repository is not None
+        repository.policy_pack = str(tmp_path / "pack.yaml")
+        session.commit()
 
     def fake_scan_repository(
         repository_root: Path,
         policy_pack: Path | None = None,
-        *,
-        airflow_profile: AirflowProfile | None = None,
-        parse_cache: ParseCache | None = None,
+        **kwargs: Any,
     ) -> ScanReport:
-        _ = repository_root, policy_pack, airflow_profile, parse_cache
+        _ = repository_root, policy_pack, kwargs
         return ScanReport(
             complete=True,
             result_fingerprint="a" * 64,
@@ -2288,7 +2290,7 @@ def test_finding_payload_emits_positions_fix_and_baseline_status(
             ],
         )
 
-    monkeypatch.setattr("conformdag.platform.runner.scan_repository", fake_scan_repository)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", fake_scan_repository)
     with _platform_state(client)[0]() as session:
         session.add(ScanRow(id="scan-positions", repository_id=repository_id, status="running"))
         session.add(
@@ -2886,7 +2888,7 @@ def test_runner_application_report_parity_with_baseline(
     assert cast("dict[str, object]", persisted.report_json["gate_result"])["passed"] is True
 
 
-def test_runner_application_report_parity_records_operational_suppression_provenance(
+def test_runner_application_report_parity_uses_canonical_operational_suppression_provenance(
     platform_env: str,
     tmp_path: Path,
     build_repository: Callable[[Path], Path],
@@ -2948,22 +2950,17 @@ def test_runner_application_report_parity_records_operational_suppression_proven
 
     platform_canonical = _canonical_report_without_run_timestamp(persisted.report_json)
     application_canonical = _canonical_report_without_run_timestamp(application_report)
+    assert platform_canonical == application_canonical
     platform_finding = _report_finding(platform_canonical, target_fingerprint)
     application_finding = _report_finding(application_canonical, target_fingerprint)
     assert platform_finding["fingerprint"] == application_finding["fingerprint"] == target_fingerprint
     assert platform_finding["suppressed"] is application_finding["suppressed"] is True
-    assert platform_finding["suppression"] is None
     provenance = cast("dict[str, object]", application_finding["suppression"])
     assert provenance["policy_id"] == target_policy_id
     assert provenance["fingerprint"] == target_fingerprint
     assert provenance["reason"] == "remediation scheduled"
     assert provenance["owner"] == "platform"
-    assert platform_canonical["result_fingerprint"] != application_canonical["result_fingerprint"]
-    platform_canonical.pop("result_fingerprint")
-    application_canonical.pop("result_fingerprint")
-    platform_finding.pop("suppression")
-    application_finding.pop("suppression")
-    assert platform_canonical == application_canonical
+    assert platform_canonical["result_fingerprint"] != initial_report["result_fingerprint"]
 
     persisted_gate = cast("dict[str, object]", persisted.report_json["gate_result"])
     assert persisted_gate["passed"] is True
@@ -3128,6 +3125,126 @@ def test_runner_application_report_parity_for_incomplete_report(platform_env: st
     )
     assert application_report.complete is False
     assert application_report.gate_result is None
+
+
+@pytest.mark.parametrize("baseline_mode", ["report", "fingerprints", "ineligible", "missing"])
+def test_runner_passes_application_inputs(
+    platform_env: str,
+    tmp_path: Path,
+    build_repository: Callable[[Path], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    baseline_mode: str,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.application import EffectiveScanConfiguration
+    from conformdag.platform.runner import execute_scan as execute_platform_scan
+
+    repository_root = build_repository(tmp_path / "repository")
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="application-inputs", path=str(repository_root)))
+        session.add(ScanRow(id="baseline", repository_id="repo1", status="running"))
+        session.commit()
+
+    assert execute_platform_scan("baseline", platform_env) == 0
+    baseline_scan = load_scan(platform_env, "baseline")
+    assert baseline_scan.report_json is not None
+    baseline_report = ScanReport.model_validate(baseline_scan.report_json)
+    with factory(platform_env)() as session:
+        baseline_findings = session.scalars(
+            select(FindingRow).where(FindingRow.scan_id == "baseline").order_by(FindingRow.fingerprint)
+        ).all()
+        assert baseline_findings
+        active_finding = baseline_findings[0]
+        active_fingerprint = active_finding.fingerprint
+        active_policy_id = active_finding.policy_id
+        session.add(
+            SuppressionRow(
+                id="active-1",
+                policy_id=active_finding.policy_id,
+                fingerprint=active_finding.fingerprint,
+                reason="active adapter input",
+                owner="platform",
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                expires_at=datetime(2030, 1, 1, tzinfo=UTC),
+            )
+        )
+        session.add(
+            SuppressionRow(
+                id="expired-1",
+                policy_id="EXPIRED-UNMATCHED",
+                fingerprint="f" * 64,
+                reason="expired adapter input",
+                owner="platform",
+                created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                expires_at=datetime(2021, 1, 1, tzinfo=UTC),
+            )
+        )
+        repository = session.get(RepositoryRow, "repo1")
+        assert repository is not None
+        if baseline_mode in {"report", "fingerprints", "ineligible"}:
+            repository.baseline_scan_id = "baseline"
+        elif baseline_mode == "missing":
+            repository.baseline_scan_id = "missing-baseline"
+        else:
+            pytest.fail(f"unexpected baseline mode: {baseline_mode}")
+        if baseline_mode == "fingerprints":
+            prune_scan_artifact(session, "baseline")
+        elif baseline_mode == "ineligible":
+            baseline_row = session.get(ScanRow, "baseline")
+            assert baseline_row is not None
+            baseline_row.status = ScanStatus.FAILED.value
+        session.add(ScanRow(id="current", repository_id="repo1", status="running"))
+        session.commit()
+
+    if baseline_mode == "report":
+        expected_baseline = BaselineInput(report=baseline_report)
+    elif baseline_mode == "fingerprints":
+        with factory(platform_env)() as session:
+            fingerprints = frozenset(
+                session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == "baseline")).all()
+            )
+        expected_baseline = BaselineInput(fingerprints=fingerprints)
+        assert fingerprints
+    else:
+        expected_baseline = None
+
+    created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    expires_at = datetime(2030, 1, 1, tzinfo=UTC)
+    expected_suppression = Suppression(
+        fingerprint=active_fingerprint,
+        policy_id=active_policy_id,
+        reason="active adapter input",
+        owner="platform",
+        created_at=created_at,
+        expires_at=expires_at,
+    )
+    captured: list[tuple[ScanOptions, EffectiveScanConfiguration, BaselineInput | None, tuple[Suppression, ...]]] = []
+
+    def spy_application_execution(
+        options: ScanOptions,
+        configuration: EffectiveScanConfiguration,
+        **kwargs: Any,
+    ) -> Any:
+        captured.append(
+            (
+                options,
+                configuration,
+                kwargs.get("baseline"),
+                tuple(kwargs.get("operational_suppressions", ())),
+            )
+        )
+        return execute_application_scan(options, configuration, **kwargs)
+
+    monkeypatch.setattr(runner_module, "execute_application_scan", spy_application_execution, raising=False)
+    assert execute_platform_scan("current", platform_env) == 0
+
+    assert len(captured) == 1
+    options, configuration, actual_baseline, actual_suppressions = captured[0]
+    assert isinstance(options, ScanOptions)
+    assert options.repository_root == repository_root
+    assert configuration.resolved_policy_pack == (repository_root / "policies/pack.yaml").resolve()
+    assert actual_baseline == expected_baseline
+    assert actual_suppressions == (expected_suppression,)
 
 
 def test_runner_marks_incomplete_report_failed(platform_env: str, tmp_path: Path) -> None:
@@ -3952,12 +4069,11 @@ def test_retention_target_scan_ids_protect_newest_with_zero_keep(platform_env: s
 def test_runner_persistent_failure_after_cancel_keeps_cancelled_status(
     platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import conformdag.platform.runner as runner_module
     from conformdag.platform.runner import execute_scan
 
     session_factory = factory(platform_env)
     with session_factory() as session:
-        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
         session.commit()
 
@@ -3970,7 +4086,7 @@ def test_runner_persistent_failure_after_cancel_keeps_cancelled_status(
             session.commit()
         raise OSError("cannot read repository after cancellation")
 
-    monkeypatch.setattr(runner_module, "scan_repository", cancel_then_fail)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", cancel_then_fail)
 
     assert execute_scan("scan1", platform_env) == 0
 
@@ -3999,7 +4115,6 @@ def test_runner_uses_resolved_pack_and_passes_stored_profile(
     import conformdag.platform.runner as runner_module
     from conformdag.application import EffectiveScanConfiguration, ScanOverrides, resolve_effective_configuration
     from conformdag.platform.runner import execute_scan
-    from conformdag.policy import select_policy_pack
 
     repository_root = tmp_path / "repo"
     project_image = "ghcr.io/example/project@sha256:" + "1" * 64
@@ -4047,16 +4162,8 @@ def test_runner_uses_resolved_pack_and_passes_stored_profile(
         core_calls.append((root, args, kwargs))
         return _complete_runner_report()
 
-    actual_select = select_policy_pack
-    gate_pack_calls: list[tuple[Path | None, Path]] = []
-
-    def select_spy(path: Path | None, root: Path) -> PolicyPack:
-        gate_pack_calls.append((path, root))
-        return actual_select(path, root)
-
     monkeypatch.setattr(runner_module, "resolve_effective_configuration", resolver_spy, raising=False)
-    monkeypatch.setattr(runner_module, "scan_repository", fake_scan_repository)
-    monkeypatch.setattr(runner_module, "select_policy_pack", select_spy)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", fake_scan_repository)
 
     assert execute_scan("scan1", platform_env, claim_attempt=2) == 0
 
@@ -4071,10 +4178,16 @@ def test_runner_uses_resolved_pack_and_passes_stored_profile(
         (
             repository_root,
             (platform_pack.resolve(),),
-            {"airflow_profile": AirflowProfile.AIRFLOW_3_3_0, "parse_cache": None},
+            {
+                "semantic_provider": None,
+                "semantic_provider_name": None,
+                "semantic_model": None,
+                "semantic_native_structured_output": None,
+                "airflow_profile": AirflowProfile.AIRFLOW_3_3_0,
+                "parse_cache": None,
+            },
         )
     ]
-    assert gate_pack_calls == [(platform_pack.resolve(), repository_root)]
     with session_factory() as session:
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "succeeded"
@@ -4085,7 +4198,6 @@ def test_runner_uses_project_airflow_profile_when_platform_profile_is_omitted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import conformdag.platform.runner as runner_module
     from conformdag.platform.runner import execute_scan
 
     repository_root = tmp_path / "repo"
@@ -4094,7 +4206,9 @@ def test_runner_uses_project_airflow_profile_when_platform_profile_is_omitted(
     )
     session_factory = initialize_session_factory(platform_env)
     with session_factory() as session:
-        session.add(RepositoryRow(id="repo1", name="r", path=str(repository_root)))
+        session.add(
+            RepositoryRow(id="repo1", name="r", path=str(repository_root), policy_pack=str(tmp_path / "pack.yaml"))
+        )
         session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
         session.commit()
 
@@ -4105,11 +4219,20 @@ def test_runner_uses_project_airflow_profile_when_platform_profile_is_omitted(
         core_calls.append(kwargs)
         return _complete_runner_report()
 
-    monkeypatch.setattr(runner_module, "scan_repository", fake_scan_repository)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", fake_scan_repository)
 
     assert execute_scan("scan1", platform_env) == 0
 
-    assert core_calls == [{"airflow_profile": AirflowProfile.AIRFLOW_3_3_0, "parse_cache": None}]
+    assert core_calls == [
+        {
+            "semantic_provider": None,
+            "semantic_provider_name": None,
+            "semantic_model": None,
+            "semantic_native_structured_output": None,
+            "airflow_profile": AirflowProfile.AIRFLOW_3_3_0,
+            "parse_cache": None,
+        }
+    ]
 
 
 def test_runner_passes_none_airflow_profile_when_project_and_platform_omit_it(
@@ -4117,12 +4240,11 @@ def test_runner_passes_none_airflow_profile_when_project_and_platform_omit_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import conformdag.platform.runner as runner_module
     from conformdag.platform.runner import execute_scan
 
     session_factory = initialize_session_factory(platform_env)
     with session_factory() as session:
-        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path), policy_pack=str(tmp_path / "pack.yaml")))
         session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
         session.commit()
 
@@ -4133,11 +4255,20 @@ def test_runner_passes_none_airflow_profile_when_project_and_platform_omit_it(
         core_calls.append(kwargs)
         return _complete_runner_report()
 
-    monkeypatch.setattr(runner_module, "scan_repository", fake_scan_repository)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", fake_scan_repository)
 
     assert execute_scan("scan1", platform_env) == 0
 
-    assert core_calls == [{"airflow_profile": None, "parse_cache": None}]
+    assert core_calls == [
+        {
+            "semantic_provider": None,
+            "semantic_provider_name": None,
+            "semantic_model": None,
+            "semantic_native_structured_output": None,
+            "airflow_profile": None,
+            "parse_cache": None,
+        }
+    ]
 
 
 def test_runner_invalid_persisted_airflow_profile_fails_before_core_scan(
@@ -4145,7 +4276,6 @@ def test_runner_invalid_persisted_airflow_profile_fails_before_core_scan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import conformdag.platform.runner as runner_module
     from conformdag.platform.runner import execute_scan
 
     session_factory = initialize_session_factory(platform_env)
@@ -4158,7 +4288,7 @@ def test_runner_invalid_persisted_airflow_profile_fails_before_core_scan(
         _ = args, kwargs
         raise AssertionError("core scan must not run with an invalid persisted Airflow profile")
 
-    monkeypatch.setattr(runner_module, "scan_repository", unexpected_scan)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", unexpected_scan)
 
     assert execute_scan("scan1", platform_env) == 1
     with session_factory() as session:
@@ -4196,7 +4326,7 @@ def test_runner_invalid_profile_after_cancel_keeps_cancelled_status(
         raise AssertionError("core scan must not run after invalid profile validation")
 
     monkeypatch.setattr(runner_module, "coerce_platform_airflow_profile", cancel_then_coerce, raising=False)
-    monkeypatch.setattr(runner_module, "scan_repository", unexpected_scan)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", unexpected_scan)
 
     assert execute_scan("scan1", platform_env) == 0
     with session_factory() as session:
@@ -4231,7 +4361,7 @@ def test_runner_configuration_resolution_failure_marks_scan_failed(
         raise AssertionError("scan must not run after configuration resolution fails")
 
     monkeypatch.setattr(runner_module, "resolve_effective_configuration", fail_resolution, raising=False)
-    monkeypatch.setattr(runner_module, "scan_repository", unexpected_scan)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", unexpected_scan)
 
     assert execute_scan("scan1", platform_env, claim_attempt=2) == 1
     with session_factory() as session:
@@ -4278,7 +4408,7 @@ def test_runner_configuration_resolution_failure_after_cancel_keeps_cancelled_st
         cancel_then_fail_resolution,
         raising=False,
     )
-    monkeypatch.setattr(runner_module, "scan_repository", unexpected_scan)
+    monkeypatch.setattr("conformdag.application.scan.scan_repository", unexpected_scan)
 
     assert execute_scan("scan1", platform_env, claim_attempt=2) == 0
     with session_factory() as session:
