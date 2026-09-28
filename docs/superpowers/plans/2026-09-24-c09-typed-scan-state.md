@@ -1,6 +1,7 @@
 # C09 Typed Scan State and Trigger Domain Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task.
+> **Execution approach:** Native / single-session. Execute Tasks 1 → 4 sequentially. Do not use subagent-driven implementation; request a separate independent review after implementation.
 
 **Goal:** Give platform scan lifecycle and trigger values one typed domain while preserving string storage and wire compatibility and enforcing exact-attempt heartbeat fencing.
 
@@ -31,7 +32,7 @@
 - Modify `src/conformdag/platform/contracts.py` so scan-summary response statuses are `ScanStatus`; leave `FindingResponse.status` as a finding string.
 - Modify `src/conformdag/platform/aggregates.py` and `demo.py` to consume the central status groups and trigger enum.
 - Create `tests/test_platform_domain.py` for enum values/groups; extend `tests/test_platform.py` for persistence transitions, worker fencing, API serialization, aggregates, and demo persistence.
-- Update `docs/consolidation/progress.md` to `review` only after implementation evidence and final PR CI are available.
+- Update `docs/consolidation/progress.md` to `review` only after the implementation head is CI-green and independently reviewed. The ledger cites that reviewed implementation SHA and CI; verify final ledger-head CI afterward.
 
 ## Review Focus
 
@@ -121,7 +122,7 @@ git commit -m "refactor: add typed platform scan domain"
 
 - [ ] **Step 1: Add table-driven valid and invalid transition tests**
 
-Parameterize valid target/requeue pairs as `(ScanStatus.QUEUED, True)`, `(ScanStatus.SUCCEEDED, False)`, and `(ScanStatus.FAILED, False)`. Each valid case must return `True`, store the target's `.value`, and leave `finished_at` unset only for requeue. Parameterize invalid pairs as `(ScanStatus.QUEUED, False)`, `(ScanStatus.SUCCEEDED, True)`, `(ScanStatus.FAILED, True)`, `(ScanStatus.RUNNING, False)`, `(ScanStatus.CANCELLED, False)`, and `(ScanStatus.CANCELLED, True)`. Each invalid case must raise `ValueError` and leave the row `running`.
+There are 10 target/requeue combinations: 3 valid and 7 invalid. Parameterize valid pairs as `(ScanStatus.QUEUED, True)`, `(ScanStatus.SUCCEEDED, False)`, and `(ScanStatus.FAILED, False)`. Each valid case must return `True`, store the target's `.value`, and leave `finished_at` unset only for requeue. Parameterize all seven invalid pairs as `(ScanStatus.QUEUED, False)`, `(ScanStatus.SUCCEEDED, True)`, `(ScanStatus.FAILED, True)`, `(ScanStatus.RUNNING, False)`, `(ScanStatus.RUNNING, True)`, `(ScanStatus.CANCELLED, False)`, and `(ScanStatus.CANCELLED, True)`. Every invalid case must raise `ValueError` before SQL is issued and leave the row `running`.
 
 Use this test body for the valid cases:
 
@@ -159,6 +160,7 @@ def test_running_scan_accepts_valid_transition_targets(
         (ScanStatus.SUCCEEDED, True),
         (ScanStatus.FAILED, True),
         (ScanStatus.RUNNING, False),
+        (ScanStatus.RUNNING, True),
         (ScanStatus.CANCELLED, False),
         (ScanStatus.CANCELLED, True),
     ],
@@ -311,7 +313,11 @@ Expected: persisted trigger and existing response assertions pass; enum identity
 
 - [ ] **Step 3: Convert route and response-contract state values**
 
-Use `ScanStatus` and `ScanTrigger` in `app.py`; persist `.value` and return status `.value` where route dictionaries are built. Type only `ScanSummaryResponse.status` and `OverviewScan.status` as `ScanStatus`. At route/model construction, explicitly coerce persisted statuses with `ScanStatus(row.status)`. In `aggregates.py`, use `ScanStatus.SUCCEEDED.value` for successful-scan SQL filters and the central active/terminal groups for status sets; coerce statuses when building `OverviewScan`. In `demo.py`, make `_scan_state(session_factory: sessionmaker[Session], scan_id: str) -> tuple[ScanStatus, bool | None, str | None] | None` coerce persisted status, change `_complete_scan(session_factory: sessionmaker[Session], dsn: str, scan_id: str, *, expected_status: ScanStatus, expected_complete: bool) -> None` to accept the enum, update all four expected outcomes to `ScanStatus.SUCCEEDED` / `ScanStatus.FAILED`, use central status groups for terminal checks, and persist enum `.value` for scan status and trigger. Do not change `FindingResponse.status`.
+Use `ScanStatus` and `ScanTrigger` in `app.py`; persist `.value` and return status `.value` where route dictionaries are built. Type only `ScanSummaryResponse.status` and `OverviewScan.status` as `ScanStatus`. At route/model construction, explicitly coerce persisted statuses with `ScanStatus(row.status)`.
+
+In `aggregates.py`, use `ScanStatus.SUCCEEDED.value` for successful-scan SQL filters and the central active/terminal groups for status sets. When a central enum group feeds a SQL `.in_(...)` predicate, pass its members' `.value` strings (for example, `tuple(status.value for status in ACTIVE_SCAN_STATUSES)`); do not rely on `StrEnum` being a `str` subclass. Coerce statuses when building `OverviewScan`.
+
+In `demo.py`, make `_scan_state(session_factory: sessionmaker[Session], scan_id: str) -> tuple[ScanStatus, bool | None, str | None] | None` coerce persisted status. Type `_complete_scan(session_factory: sessionmaker[Session], dsn: str, scan_id: str, *, expected_status: ScanStatus, expected_complete: bool) -> None`, change all four expected outcomes to `ScanStatus.SUCCEEDED` / `ScanStatus.FAILED`, use central status groups for terminal checks, and persist enum `.value` for scan status and trigger. Do not change `FindingResponse.status`.
 
 - [ ] **Step 4: Run route, aggregate, and demo tests**
 
@@ -333,7 +339,7 @@ git commit -m "refactor: type platform scan state"
 ### Task 4: Focused verification, audit, coverage, and review handoff
 
 **Files:**
-- Update: `docs/consolidation/progress.md` in a docs-only follow-up after implementation and final-head CI evidence exist
+- Update: `docs/consolidation/progress.md` in a docs-only follow-up after the implementation head is CI-green and independently reviewed
 
 **Interfaces:**
 - Consumes all C09 implementation tasks.
@@ -372,6 +378,14 @@ git diff --check
 
 Expected: default gate passes; coverage meets the repository's 90% threshold; schema check reports no drift; whitespace check exits zero.
 
-- [ ] **Step 5: Request implementation review and record final evidence after PR CI**
+- [ ] **Step 5: Push the implementation head and wait for its CI**
 
-Before push, confirm migrations and ORM types/defaults are unchanged; `FindingResponse.status` is unchanged; HTTP status values remain lowercase strings; transition target validation runs before SQL; and stale-attempt tests cover heartbeat and completion. Push the C09 implementation branch and open its PR without merging. Request independent review focused on transition legality, cancellation one-winner behavior, heartbeat exact-attempt fencing, late-result fencing, and absence of unrelated raw scan-state literals. After final-head CI passes, update only the C09 ledger row to `review` with the implementation/final head, local gate, coverage, schema, whitespace, and CI run evidence; push that ledger change as a separate docs-only follow-up. The human retains merge authority.
+Before pushing, confirm migrations and ORM types/defaults are unchanged; `FindingResponse.status` is unchanged; HTTP status values remain lowercase strings; transition target validation runs before SQL; and stale-attempt tests cover heartbeat and completion. Push the implementation branch and open its PR against `main` without merging. Record the implementation head SHA and its CI run. Wait for all required CI jobs for that exact SHA to pass before requesting independent review.
+
+- [ ] **Step 6: Complete independent review and re-verify any corrected head**
+
+Request an independent review of the CI-green implementation head, focused on transition legality, cancellation one-winner behavior, heartbeat exact-attempt fencing, late-result fencing, and the raw-literal audit. Fix Critical or Important findings. For every correction, rerun the focused state/API tests and `mise run check`, `mise run test:coverage`, `mise run schema --check`, and `git diff --check`; commit and push the corrected implementation head. Wait for CI on that corrected SHA, then have the independent reviewer re-review that exact head. Repeat the correction/verification/review cycle until no Critical or Important findings remain. If review requires no code changes, the original implementation head remains the reviewed head.
+
+- [ ] **Step 7: Update the ledger, verify the new PR head, and stop unmerged**
+
+Only after independent review accepts a verified implementation head and its matching CI passes, update the C09 ledger row to `review`. Cite the exact reviewed implementation SHA and its CI run, along with local gate, coverage, schema, and whitespace evidence. Do not describe that CI as final-PR-head CI and do not put the ledger commit's own SHA in the row. Commit and push the ledger update as a separate docs-only commit on the implementation PR. This creates a new PR head: wait for all required CI jobs on that head, verify the exact final PR-head SHA and run, and record that evidence in the handoff (not in the ledger). Leave the implementation PR open and unmerged; the human retains merge authority.
