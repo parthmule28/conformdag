@@ -25,6 +25,7 @@ from conformdag.platform.db import (
     transition_running_scan,
     utcnow,
 )
+from conformdag.platform.domain import ScanStatus
 from conformdag.platform.logging import install_json_logging
 from conformdag.policy import select_policy_pack
 from conformdag.reporting import normalize_report
@@ -110,7 +111,8 @@ def _incomplete_error(report: ScanReport) -> str:
 
 def _was_cancelled(session: Session, scan_id: str) -> bool:
     """Re-read the scan status with a fresh query so cancellation wins over any runner outcome."""
-    return session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id)) == "cancelled"
+    status = session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id))
+    return status is not None and ScanStatus(status) is ScanStatus.CANCELLED
 
 
 def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> int:
@@ -120,7 +122,11 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
     install_json_logging()
     with factory() as session:
         scan = session.get(ScanRow, scan_id)
-        if scan is None or scan.status != "running" or (claim_attempt is not None and scan.attempts != claim_attempt):
+        if (
+            scan is None
+            or ScanStatus(scan.status) is not ScanStatus.RUNNING
+            or (claim_attempt is not None and scan.attempts != claim_attempt)
+        ):
             print(f"scan {scan_id} is not claimable for execution", file=sys.stderr)
             return 2
         repository = session.get(RepositoryRow, scan.repository_id)
@@ -128,7 +134,7 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
             transition_running_scan(
                 session,
                 scan_id,
-                "failed",
+                ScanStatus.FAILED,
                 "repository row disappeared",
                 expected_attempt=claim_attempt,
             )
@@ -152,7 +158,9 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
             )
         except PERSISTENT_FAILURES as exc:
             logger.info("scan_completed", extra={"scan_id": scan_id, "error": str(exc)})
-            if not transition_running_scan(session, scan_id, "failed", str(exc), expected_attempt=claim_attempt):
+            if not transition_running_scan(
+                session, scan_id, ScanStatus.FAILED, str(exc), expected_attempt=claim_attempt
+            ):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             return 1
@@ -167,7 +175,7 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
             if not transition_running_scan(
                 session,
                 scan_id,
-                "failed",
+                ScanStatus.FAILED,
                 _incomplete_error(normalized),
                 expected_attempt=claim_attempt,
             ):
@@ -209,7 +217,7 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0
         _ingest(session, scan, normalized)
-        if not transition_running_scan(session, scan_id, "succeeded", expected_attempt=claim_attempt):
+        if not transition_running_scan(session, scan_id, ScanStatus.SUCCEEDED, expected_attempt=claim_attempt):
             print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
             return 0
         return 0

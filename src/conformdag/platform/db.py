@@ -32,6 +32,8 @@ from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.pool import NullPool
 
+from conformdag.platform.domain import ScanStatus
+
 JSONVariant = JSON().with_variant(JSONB(), "postgresql")
 _MIGRATION_THREAD_LOCK = threading.Lock()
 
@@ -235,7 +237,7 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
     abandoned = (
         select(ScanRow)
         .where(
-            ScanRow.status == "running",
+            ScanRow.status == ScanStatus.RUNNING.value,
             ScanRow.claimed_at.is_not(None),
             ScanRow.claimed_at < stale_cutoff,
         )
@@ -245,7 +247,7 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
     abandoned_scan = session.scalars(abandoned).first()
     if abandoned_scan is not None:
         if abandoned_scan.attempts >= max_attempts:
-            abandoned_scan.status = "failed"
+            abandoned_scan.status = ScanStatus.FAILED.value
             abandoned_scan.error = "abandoned by a previous worker; attempt budget exhausted"
             abandoned_scan.finished_at = utcnow()
             return None
@@ -254,7 +256,7 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
         return abandoned_scan
     queued = (
         select(ScanRow)
-        .where(ScanRow.status == "queued")
+        .where(ScanRow.status == ScanStatus.QUEUED.value)
         .order_by(ScanRow.created_at)
         .limit(1)
         .with_for_update(skip_locked=True)
@@ -262,7 +264,7 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
     queued_scan = session.scalars(queued).first()
     if queued_scan is None:
         return None
-    queued_scan.status = "running"
+    queued_scan.status = ScanStatus.RUNNING.value
     queued_scan.claimed_at = utcnow()
     queued_scan.attempts += 1
     return queued_scan
@@ -271,7 +273,7 @@ def claim_queued_scan(session: Session, stale_cutoff: datetime, max_attempts: in
 def transition_running_scan(
     session: Session,
     scan_id: str,
-    status: str,
+    status: ScanStatus,
     error: str | None = None,
     *,
     requeue: bool = False,
@@ -286,10 +288,15 @@ def transition_running_scan(
     Requeueing clears the claim timestamp so the scan re-enters the queue;
     terminal transitions stamp ``finished_at``.
     """
-    predicates = [ScanRow.id == scan_id, ScanRow.status == "running"]
+    valid_target = (status is ScanStatus.QUEUED and requeue) or (
+        status in (ScanStatus.SUCCEEDED, ScanStatus.FAILED) and not requeue
+    )
+    if not valid_target:
+        raise ValueError(f"invalid running scan transition target: {status!r} with requeue={requeue}")
+    predicates = [ScanRow.id == scan_id, ScanRow.status == ScanStatus.RUNNING.value]
     if expected_attempt is not None:
         predicates.append(ScanRow.attempts == expected_attempt)
-    statement = update(ScanRow).where(*predicates).values(status=status, error=error)
+    statement = update(ScanRow).where(*predicates).values(status=status.value, error=error)
     statement = (
         statement.values(claimed_at=None) if requeue else statement.values(claimed_at=None, finished_at=utcnow())
     )
@@ -305,8 +312,8 @@ def transition_scan_to_cancelled(session: Session, scan_id: str) -> bool:
     """Atomically cancel a queued or running scan, allowing one winner."""
     statement = (
         update(ScanRow)
-        .where(ScanRow.id == scan_id, ScanRow.status.in_(("queued", "running")))
-        .values(status="cancelled", claimed_at=None, finished_at=utcnow())
+        .where(ScanRow.id == scan_id, ScanRow.status.in_((ScanStatus.QUEUED.value, ScanStatus.RUNNING.value)))
+        .values(status=ScanStatus.CANCELLED.value, claimed_at=None, finished_at=utcnow())
     )
     applied = cast("CursorResult[Any]", session.execute(statement))
     if applied.rowcount:
@@ -316,11 +323,9 @@ def transition_scan_to_cancelled(session: Session, scan_id: str) -> bool:
     return False
 
 
-def heartbeat_running_scan(session: Session, scan_id: str, *, expected_attempt: int | None = None) -> bool:
+def heartbeat_running_scan(session: Session, scan_id: str, attempt: int) -> bool:
     """Refresh a running scan claim only while its status and attempt remain current."""
-    predicates = [ScanRow.id == scan_id, ScanRow.status == "running"]
-    if expected_attempt is not None:
-        predicates.append(ScanRow.attempts == expected_attempt)
+    predicates = [ScanRow.id == scan_id, ScanRow.status == ScanStatus.RUNNING.value, ScanRow.attempts == attempt]
     statement = update(ScanRow).where(*predicates).values(claimed_at=utcnow())
     applied = cast("CursorResult[Any]", session.execute(statement))
     if applied.rowcount:
@@ -340,7 +345,7 @@ def eligible_baseline(session: Session, repository_id: str, scan_id: str) -> Sca
     scan = session.get(ScanRow, scan_id)
     if scan is None or scan.repository_id != repository_id:
         return None
-    if scan.status != "succeeded" or scan.complete is not True:
+    if ScanStatus(scan.status) is not ScanStatus.SUCCEEDED or scan.complete is not True:
         return None
     return scan
 

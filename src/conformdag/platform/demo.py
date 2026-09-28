@@ -36,6 +36,7 @@ from conformdag.platform.db import (
     new_suppression_id,
     utcnow,
 )
+from conformdag.platform.domain import TERMINAL_SCAN_STATUSES, ScanStatus, ScanTrigger
 from conformdag.platform.worker import WorkerSettings, run_worker, run_worker_once
 
 if TYPE_CHECKING:
@@ -95,7 +96,6 @@ def broken(:
 DEMO_REPOSITORY_NAME = "e2e-healthy"
 BROKEN_REPOSITORY_NAME = "e2e-broken"
 DEMO_DAG_PATH = Path(DEMO_REPOSITORY_NAME) / "dags" / "demo_dag.py"
-TERMINAL_SCAN_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 SEED_DEADLINE_SECONDS = 120.0
 SEED_WORKER_SETTINGS = WorkerSettings(
     poll_seconds=0.1,
@@ -227,7 +227,9 @@ def build_demo_workspace(root: Path) -> DemoWorkspace:
 
 
 def _queue_scan(session: Session, repository_id: str) -> str:
-    scan = ScanRow(id=new_id(), repository_id=repository_id, status="queued", trigger="demo")
+    scan = ScanRow(
+        id=new_id(), repository_id=repository_id, status=ScanStatus.QUEUED.value, trigger=ScanTrigger.DEMO.value
+    )
     session.add(scan)
     session.commit()
     return scan.id
@@ -257,12 +259,14 @@ def _queue_repositories(session_factory: sessionmaker[Session], workspace: DemoW
         }
 
 
-def _scan_state(session_factory: sessionmaker[Session], scan_id: str) -> tuple[str, bool | None, str | None] | None:
+def _scan_state(
+    session_factory: sessionmaker[Session], scan_id: str
+) -> tuple[ScanStatus, bool | None, str | None] | None:
     with session_factory() as session:
         scan = session.get(ScanRow, scan_id)
         if scan is None:
             return None
-        return scan.status, scan.complete, scan.error
+        return ScanStatus(scan.status), scan.complete, scan.error
 
 
 def _complete_scan(
@@ -270,7 +274,7 @@ def _complete_scan(
     dsn: str,
     scan_id: str,
     *,
-    expected_status: str,
+    expected_status: ScanStatus,
     expected_complete: bool,
 ) -> None:
     """Drive one queued job through the normal worker until its terminal state."""
@@ -380,7 +384,7 @@ def seed_demo_scenario(workspace: DemoWorkspace) -> DemoScenario:
         session_factory,
         workspace.dsn,
         ids["baseline_scan"],
-        expected_status="succeeded",
+        expected_status=ScanStatus.SUCCEEDED,
         expected_complete=True,
     )
     _set_baseline(session_factory, ids["repository"], ids["baseline_scan"])
@@ -393,7 +397,7 @@ def seed_demo_scenario(workspace: DemoWorkspace) -> DemoScenario:
         session_factory,
         workspace.dsn,
         probe_scan_id,
-        expected_status="succeeded",
+        expected_status=ScanStatus.SUCCEEDED,
         expected_complete=True,
     )
 
@@ -412,7 +416,7 @@ def seed_demo_scenario(workspace: DemoWorkspace) -> DemoScenario:
         session_factory,
         workspace.dsn,
         broken_scan_id,
-        expected_status="failed",
+        expected_status=ScanStatus.FAILED,
         expected_complete=False,
     )
 
@@ -423,7 +427,7 @@ def seed_demo_scenario(workspace: DemoWorkspace) -> DemoScenario:
         session_factory,
         workspace.dsn,
         current_scan_id,
-        expected_status="succeeded",
+        expected_status=ScanStatus.SUCCEEDED,
         expected_complete=True,
     )
     _validate_current_scan(session_factory, current_scan_id)
