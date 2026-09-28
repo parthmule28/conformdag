@@ -24,6 +24,7 @@ from conformdag.platform.db import (
     stale_running_cutoff,
     transition_running_scan,
 )
+from conformdag.platform.domain import ScanStatus
 from conformdag.platform.logging import install_json_logging
 
 DEFAULT_POLL_SECONDS = 2.0
@@ -104,13 +105,14 @@ class WorkerSettings:
 def _scan_cancelled(session_factory: sessionmaker[Session], scan_id: str) -> bool:
     """Return whether the scan was cancelled, read from a fresh session."""
     with session_factory() as session:
-        return session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id)) == "cancelled"
+        status = session.scalar(select(ScanRow.status).where(ScanRow.id == scan_id))
+        return status is not None and ScanStatus(status) is ScanStatus.CANCELLED
 
 
-def _refresh_heartbeat(session_factory: sessionmaker[Session], scan_id: str, claim_attempt: int | None = None) -> bool:
+def _refresh_heartbeat(session_factory: sessionmaker[Session], scan_id: str, claim_attempt: int) -> bool:
     """Refresh ownership in a short transaction while the runner remains healthy."""
     with session_factory() as session:
-        return heartbeat_running_scan(session, scan_id, expected_attempt=claim_attempt)
+        return heartbeat_running_scan(session, scan_id, claim_attempt)
 
 
 def _terminate_child(process: subprocess.Popen[str]) -> None:
@@ -137,7 +139,7 @@ def execute_claimed_scan(
     dsn: str,
     scan_id: str,
     settings: WorkerSettings,
-    claim_attempt: int | None = None,
+    claim_attempt: int,
 ) -> RunnerOutcome:
     """Execute one claimed scan in an isolated subprocess and return its outcome.
 
@@ -147,9 +149,15 @@ def execute_claimed_scan(
     result can never overwrite the cancellation.
     """
     try:
-        runner_arguments = [sys.executable, "-m", "conformdag.platform.runner", "--scan-id", scan_id]
-        if claim_attempt is not None:
-            runner_arguments.extend(["--claim-attempt", str(claim_attempt)])
+        runner_arguments = [
+            sys.executable,
+            "-m",
+            "conformdag.platform.runner",
+            "--scan-id",
+            scan_id,
+            "--claim-attempt",
+            str(claim_attempt),
+        ]
         process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
             runner_arguments,
             stdout=subprocess.PIPE,
@@ -210,12 +218,12 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
     with session_factory() as session:
         final = session.get(ScanRow, scan_id)
         if final is not None:
-            if final.status == "running" and not outcome.cancelled:
+            if ScanStatus(final.status) is ScanStatus.RUNNING and not outcome.cancelled:
                 if outcome.retryable and final.attempts < settings.max_attempts:
                     transition_running_scan(
                         session,
                         scan_id,
-                        "queued",
+                        ScanStatus.QUEUED,
                         outcome.error,
                         requeue=True,
                         expected_attempt=claim_attempt,
@@ -224,7 +232,7 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
                     transition_running_scan(
                         session,
                         scan_id,
-                        "failed",
+                        ScanStatus.FAILED,
                         outcome.error or _LOST_RUNNER_ERROR,
                         expected_attempt=claim_attempt,
                     )
