@@ -48,6 +48,7 @@ from conformdag.platform.db import (
     transition_scan_to_cancelled,
     utcnow,
 )
+from conformdag.platform.domain import ScanStatus, ScanTrigger
 from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackError, PackNotFoundError, PackService
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
@@ -316,10 +317,15 @@ def trigger_scan(request: Request, repository_id: str) -> dict[str, str]:
         repository = session.get(RepositoryRow, repository_id)
         if repository is None:
             raise HTTPException(status_code=404, detail="repository not registered")
-        scan = ScanRow(id=new_id(), repository_id=repository_id, status="queued", trigger="dashboard")
+        scan = ScanRow(
+            id=new_id(),
+            repository_id=repository_id,
+            status=ScanStatus.QUEUED.value,
+            trigger=ScanTrigger.DASHBOARD.value,
+        )
         session.add(scan)
         session.commit()
-        return {"scan_id": scan.id, "status": scan.status}
+        return {"scan_id": scan.id, "status": ScanStatus(scan.status).value}
 
 
 def cancel_scan(request: Request, scan_id: str) -> dict[str, str]:
@@ -331,9 +337,9 @@ def cancel_scan(request: Request, scan_id: str) -> dict[str, str]:
             raise HTTPException(status_code=404, detail="scan not found")
         if not transition_scan_to_cancelled(session, scan_id):
             current = session.get(ScanRow, scan_id)
-            status = current.status if current is not None else "gone"
+            status = ScanStatus(current.status).value if current is not None else "gone"
             raise HTTPException(status_code=409, detail=f"scan already {status}")
-        return {"scan_id": scan_id, "status": "cancelled"}
+        return {"scan_id": scan_id, "status": ScanStatus.CANCELLED.value}
 
 
 def scan_status(request: Request, scan_id: str) -> dict[str, object]:
@@ -346,7 +352,7 @@ def scan_status(request: Request, scan_id: str) -> dict[str, object]:
         return {
             "scan_id": scan.id,
             "repository_id": scan.repository_id,
-            "status": scan.status,
+            "status": ScanStatus(scan.status).value,
             "created_at": scan.created_at,
             "finished_at": scan.finished_at,
             "complete": scan.complete,
@@ -389,7 +395,7 @@ def scan_history(
             summaries.append(
                 ScanSummaryResponse(
                     scan_id=row.id,
-                    status=row.status,
+                    status=ScanStatus(row.status),
                     created_at=row.created_at,
                     finished_at=row.finished_at,
                     result_fingerprint=row.result_fingerprint,

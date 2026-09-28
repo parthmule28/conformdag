@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from conformdag.platform.domain import ScanStatus
+
 
 class FindingResponse(BaseModel):
     """One normalized finding as exposed by the findings API."""
@@ -30,7 +32,7 @@ class ScanSummaryResponse(BaseModel):
     """One scan history entry plus the additive completion and gate fields."""
 
     scan_id: str
-    status: str
+    status: ScanStatus
     created_at: datetime
     finished_at: datetime | None
     result_fingerprint: str | None
@@ -56,7 +58,7 @@ class OverviewScan(BaseModel):
     scan_id: str
     repository_id: str
     repository_name: str
-    status: str
+    status: ScanStatus
     created_at: datetime
     finished_at: datetime | None
     complete: bool | None

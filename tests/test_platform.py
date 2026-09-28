@@ -294,8 +294,10 @@ def test_demo_seed_creates_baseline_and_later_gate_failure(tmp_path: Path) -> No
 
         assert repository is not None
         assert baseline is not None and baseline.complete is True
+        assert baseline.trigger == "demo"
         assert repository.baseline_scan_id == baseline.id
         assert current is not None and current.complete is True
+        assert current.trigger == "demo"
         assert current.report_json is not None
         gate_result = cast("dict[str, object]", current.report_json.get("gate_result"))
         assert gate_result["passed"] is False
@@ -363,6 +365,7 @@ def test_demo_worker_processes_interactive_scans_after_seed(tmp_path: Path) -> N
         session.add(scan)
         session.commit()
         scan_id = scan.id
+        assert scan.trigger == "dashboard"
 
     worker = start_demo_worker(workspace)
     try:
@@ -867,12 +870,13 @@ def test_register_and_trigger_scan_lifecycle(client: TestClient, tmp_path: Path)
         headers={"Authorization": "Bearer secret-token"},
     )
     assert triggered.status_code == 200
+    assert triggered.json()["status"] == "queued"
     scan_id = triggered.json()["scan_id"]
 
     factory, _ = _platform_state(client)
     with factory() as session:
         scan = session.get(ScanRow, scan_id)
-        assert scan is not None and scan.status == "queued"
+        assert scan is not None and scan.status == "queued" and scan.trigger == "dashboard"
 
     history = _get(client, f"/api/v1/repos/{repository_id}/scans")
     assert [row["scan_id"] for row in history.json()] == [scan_id]
@@ -884,6 +888,41 @@ def test_register_and_trigger_scan_lifecycle(client: TestClient, tmp_path: Path)
     )
     assert cancelled.status_code == 200
     assert _get(client, f"/api/v1/scans/{scan_id}").json()["status"] == "cancelled"
+
+
+def test_scan_response_contracts_keep_lowercase_json_statuses() -> None:
+    from conformdag.platform.contracts import OverviewScan, ScanSummaryResponse
+
+    created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    summary = ScanSummaryResponse.model_validate(
+        {
+            "scan_id": "scan1",
+            "status": "queued",
+            "created_at": created_at,
+            "finished_at": None,
+            "result_fingerprint": None,
+            "complete": None,
+            "gate_passed": None,
+            "artifact_available": False,
+        }
+    )
+    recent = OverviewScan.model_validate(
+        {
+            "scan_id": "scan2",
+            "repository_id": "repo1",
+            "repository_name": "r",
+            "status": "succeeded",
+            "created_at": created_at,
+            "finished_at": created_at,
+            "complete": True,
+            "gate_passed": True,
+        }
+    )
+
+    assert summary.status is ScanStatus.QUEUED
+    assert summary.model_dump(mode="json")["status"] == "queued"
+    assert recent.status is ScanStatus.SUCCEEDED
+    assert recent.model_dump(mode="json")["status"] == "succeeded"
 
 
 def test_workspace_load_registers_repositories(client: TestClient, platform_env: str, tmp_path: Path) -> None:

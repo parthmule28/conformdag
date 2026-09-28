@@ -23,9 +23,8 @@ from conformdag.platform.contracts import (
     TrendPoint,
 )
 from conformdag.platform.db import FindingRow, RepositoryRow, ScanRow, eligible_baseline
+from conformdag.platform.domain import ACTIVE_SCAN_STATUSES, ScanStatus
 
-COMPLETED_STATUS = "succeeded"
-ACTIVE_STATUSES = ("queued", "running")
 RECENT_SCAN_LIMIT = 10
 
 
@@ -110,7 +109,7 @@ def _latest_completed_scan_by_repository(session: Session) -> dict[str, ScanRow]
     """Map each repository to its newest succeeded, complete scan."""
     scans = session.scalars(
         select(ScanRow)
-        .where(ScanRow.status == COMPLETED_STATUS, ScanRow.complete.is_(True))
+        .where(ScanRow.status == ScanStatus.SUCCEEDED.value, ScanRow.complete.is_(True))
         .order_by(ScanRow.created_at.desc(), ScanRow.id.desc())
     ).all()
     latest: dict[str, ScanRow] = {}
@@ -125,7 +124,7 @@ def _count_completed_scans(session: Session) -> int:
         session.scalar(
             select(func.count())
             .select_from(ScanRow)
-            .where(ScanRow.status == COMPLETED_STATUS, ScanRow.complete.is_(True))
+            .where(ScanRow.status == ScanStatus.SUCCEEDED.value, ScanRow.complete.is_(True))
         )
         or 0
     )
@@ -134,7 +133,12 @@ def _count_completed_scans(session: Session) -> int:
 def _count_active_scans(session: Session) -> int:
     """Count queued and running scans."""
     return int(
-        session.scalar(select(func.count()).select_from(ScanRow).where(ScanRow.status.in_(ACTIVE_STATUSES))) or 0
+        session.scalar(
+            select(func.count())
+            .select_from(ScanRow)
+            .where(ScanRow.status.in_(tuple(status.value for status in ACTIVE_SCAN_STATUSES)))
+        )
+        or 0
     )
 
 
@@ -147,7 +151,7 @@ def _trend_points(session: Session, repository_ids: set[str] | None, now: dateti
     """
     cutoff = now - timedelta(days=days)
     conditions: list[ColumnElement[bool]] = [
-        ScanRow.status == COMPLETED_STATUS,
+        ScanRow.status == ScanStatus.SUCCEEDED.value,
         ScanRow.complete.is_(True),
         ScanRow.finished_at.is_not(None),
         ScanRow.finished_at > cutoff,
@@ -203,7 +207,7 @@ def _recent_scans(session: Session, repository_names: dict[str, str]) -> list[Ov
             scan_id=row.id,
             repository_id=row.repository_id,
             repository_name=repository_names.get(row.repository_id, ""),
-            status=row.status,
+            status=ScanStatus(row.status),
             created_at=row.created_at,
             finished_at=row.finished_at,
             complete=row.complete,
