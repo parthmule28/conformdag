@@ -3602,6 +3602,30 @@ def test_platform_suppression_waives_error_before_gate_and_completion(platform_e
         assert gate["passed"] is True
 
 
+def test_platform_suppression_preserves_unrelated_parse_failure(platform_env: str, tmp_path: Path) -> None:
+    from conformdag.platform.runner import execute_scan
+
+    scan_id = _seed_error_scan(platform_env, tmp_path)
+    assert execute_scan(scan_id, platform_env) == 1
+
+    (tmp_path / "dags/broken.py").write_text("def broken(:\n", encoding="utf-8")
+    _add_platform_suppression(platform_env, scan_id, "scan-with-parse-error", expires_at=utcnow() + timedelta(days=1))
+
+    assert execute_scan("scan-with-parse-error", platform_env) == 1
+
+    scan = load_scan(platform_env, "scan-with-parse-error")
+    assert scan.status == "failed"
+    assert scan.complete is False
+    assert scan.report_json is not None
+    assert scan.report_json["complete"] is False
+    assert scan.report_json.get("gate_result") is None
+    issues = cast("list[dict[str, object]]", scan.report_json["issues"])
+    assert any(issue["code"] == "PARSE_ERROR" and issue["fatal"] for issue in issues)
+    assert not any(issue["code"] == "EVALUATION_ERROR" and issue["fatal"] for issue in issues)
+    findings = cast("list[dict[str, object]]", scan.report_json["findings"])
+    assert any(finding["suppressed"] is True for finding in findings)
+
+
 def test_expired_platform_suppression_does_not_waive_error(platform_env: str, tmp_path: Path) -> None:
     from conformdag.platform.runner import execute_scan
 
@@ -3675,7 +3699,9 @@ def test_runner_persists_gate_result(platform_env: str, tmp_path: Path, monkeypa
     with factory() as session:
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "succeeded"
+        assert scan.complete is True
         assert scan.report_json is not None
+        assert scan.report_json["complete"] is True
         gate = scan.report_json.get("gate_result")
         assert isinstance(gate, dict)
         assert gate["gate_id"] == "default"
@@ -4454,6 +4480,71 @@ def test_runner_completion_after_cancel_keeps_cancelled_status(
 
     scan = load_scan(platform_env, "scan1")
     assert scan.status == "cancelled"
+
+
+def test_runner_rejects_stale_attempt_after_application_execution(
+    platform_env: str,
+    tmp_path: Path,
+    build_repository: Callable[[Path], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.application import EffectiveScanConfiguration, ScanExecutionResult
+    from conformdag.platform.runner import execute_scan
+
+    repository_root = build_repository(tmp_path / "repository")
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="stale-attempt", path=str(repository_root)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running", attempts=1))
+        session.commit()
+
+    application_started = threading.Event()
+    resume_application = threading.Event()
+    real_application_execution = runner_module.execute_application_scan
+
+    def paused_application_execution(
+        options: ScanOptions,
+        configuration: EffectiveScanConfiguration,
+        **kwargs: Any,
+    ) -> ScanExecutionResult:
+        application_started.set()
+        if not resume_application.wait(timeout=5):
+            raise TimeoutError("test did not resume application execution")
+        return real_application_execution(options, configuration, **kwargs)
+
+    monkeypatch.setattr(runner_module, "execute_application_scan", paused_application_execution)
+    outcomes: list[int] = []
+    errors: list[Exception] = []
+
+    def run_claimed_attempt() -> None:
+        try:
+            outcomes.append(execute_scan("scan1", platform_env, claim_attempt=1))
+        except Exception as exc:
+            errors.append(exc)
+
+    runner_thread = threading.Thread(target=run_claimed_attempt)
+    runner_thread.start()
+    try:
+        assert application_started.wait(timeout=5)
+        with factory(platform_env)() as session:
+            scan = session.get(ScanRow, "scan1")
+            assert scan is not None and scan.status == "running"
+            scan.attempts = 2
+            session.commit()
+    finally:
+        resume_application.set()
+    runner_thread.join(timeout=10)
+
+    assert not runner_thread.is_alive()
+    assert errors == []
+    assert outcomes == [0]
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "running"
+    assert scan.attempts == 2
+    assert scan.report_json is None
+    assert scan.result_fingerprint is None
+    with factory(platform_env)() as session:
+        assert session.scalars(select(FindingRow).where(FindingRow.scan_id == "scan1")).all() == []
 
 
 def test_unknown_api_paths_return_json_404(client: TestClient) -> None:
