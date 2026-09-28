@@ -4,6 +4,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import FrozenInstanceError, fields
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -817,6 +818,46 @@ def test_execute_scan_operational_suppression_recovers_waived_evaluation_error(
     assert result.report.findings[0].suppression is operational
     assert result.report.complete is True
     assert result.report.issues == []
+
+
+def test_execute_scan_ignores_operational_suppression_expired_before_application(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finding = _finding_from_repository(build_repository, tmp_path / "repo")
+    core_report = _complete_report().model_copy(update={"findings": [finding]})
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, core_report)
+    selected_at = datetime(2026, 1, 1, tzinfo=UTC)
+    application_time = selected_at + timedelta(seconds=2)
+    operational = Suppression(
+        fingerprint=finding.fingerprint,
+        policy_id=finding.policy_id,
+        reason="expired while scan was running",
+        owner="platform",
+        created_at=selected_at - timedelta(days=1),
+        expires_at=selected_at + timedelta(seconds=1),
+    )
+
+    def fixed_now(_timezone: object) -> datetime:
+        return application_time
+
+    fixed_clock = SimpleNamespace(now=fixed_now)
+    monkeypatch.setattr("conformdag.application.scan.datetime", fixed_clock, raising=False)
+    monkeypatch.setattr("conformdag.reporting.datetime", fixed_clock)
+
+    result = execute_scan(
+        ScanOptions(tmp_path / "repo"),
+        _effective_configuration(tmp_path / "repo"),
+        operational_suppressions=[operational],
+    )
+
+    assert events == ["core"]
+    assert result.report.findings[0].suppressed is False
+    assert result.report.findings[0].suppression is None
+    assert result.report.issues == []
+    assert result.report.complete is True
 
 
 def test_execute_scan_operational_waiver_keeps_unrelated_fatal_issues(

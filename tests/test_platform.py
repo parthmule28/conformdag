@@ -3107,6 +3107,42 @@ def test_runner_application_report_parity_ignores_expired_operational_suppressio
     assert persisted_finding["suppression"] is None
 
 
+def test_runner_application_report_parity_ignores_unmatched_active_operational_suppression(
+    platform_env: str,
+    tmp_path: Path,
+    build_repository: Callable[[Path], Path],
+) -> None:
+    from conformdag.platform.runner import execute_scan as execute_platform_scan
+
+    repository_root = build_repository(tmp_path / "repository")
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="unmatched-parity", path=str(repository_root)))
+        session.add(
+            SuppressionRow(
+                id="unmatched-active-1",
+                policy_id="UNRELATED-POLICY",
+                fingerprint="d" * 64,
+                reason="platform exception for another repository",
+                owner="platform",
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                expires_at=datetime(2030, 1, 1, tzinfo=UTC),
+            )
+        )
+        session.add(ScanRow(id="unmatched", repository_id="repo1", status="running"))
+        session.commit()
+
+    assert execute_platform_scan("unmatched", platform_env) == 0
+
+    persisted = load_scan(platform_env, "unmatched").report_json
+    assert persisted is not None
+    application_report = _application_report(repository_root)
+    assert _canonical_report_without_run_timestamp(persisted) == _canonical_report_without_run_timestamp(
+        application_report
+    )
+    issues = cast("list[dict[str, object]]", persisted["issues"])
+    assert not any(issue["code"] == "SUPPRESSION_UNMATCHED" for issue in issues)
+
+
 def test_runner_application_report_parity_for_incomplete_report(platform_env: str, tmp_path: Path) -> None:
     from conformdag.platform.runner import execute_scan as execute_platform_scan
 
