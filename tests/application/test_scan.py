@@ -860,6 +860,35 @@ def test_execute_scan_ignores_operational_suppression_expired_before_application
     assert result.report.complete is True
 
 
+def test_execute_scan_ignores_active_unmatched_operational_suppression(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finding = _finding_from_repository(build_repository, tmp_path / "repo")
+    core_report = _complete_report().model_copy(update={"findings": [finding]})
+    events: list[str] = []
+    _install_core_stub(monkeypatch, events, core_report)
+    operational = _suppression_for_finding(
+        finding,
+        datetime.now(UTC),
+        reason="global operational waiver for another finding",
+        fingerprint="unmatched-operational-fingerprint",
+    )
+
+    result = execute_scan(
+        ScanOptions(tmp_path / "repo"),
+        _effective_configuration(tmp_path / "repo"),
+        operational_suppressions=[operational],
+    )
+
+    assert events == ["core"]
+    assert result.report.findings[0].suppressed is False
+    assert result.report.findings[0].suppression is None
+    assert result.report.issues == []
+    assert result.report.complete is True
+
+
 def test_execute_scan_operational_waiver_keeps_unrelated_fatal_issues(
     build_repository: Callable[[Path], Path],
     tmp_path: Path,
