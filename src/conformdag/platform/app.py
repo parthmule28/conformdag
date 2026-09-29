@@ -27,7 +27,6 @@ from starlette.types import Scope
 
 from conformdag.application import coerce_platform_airflow_profile
 from conformdag.models import ScanReport
-from conformdag.platform.aggregates import build_overview, build_repository_trends
 from conformdag.platform.contracts import (
     FindingResponse,
     GateResponse,
@@ -51,6 +50,8 @@ from conformdag.platform.db import (
 from conformdag.platform.domain import ScanStatus, ScanTrigger
 from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackError, PackNotFoundError, PackService
+from conformdag.platform.services import ConflictError, InvalidOperationError, NotFoundError
+from conformdag.platform.services import repositories as repository_service
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
 from conformdag.policy import PolicyValidationError
 from conformdag.reporting import render_html, render_sarif
@@ -248,23 +249,24 @@ def _health() -> dict[str, str]:
 
 def register_repository(request: Request, payload: RepositoryCreate) -> dict[str, str]:
     """Register one existing local DAG repository."""
-    root = _resolve_existing_directory(payload.path)
-    pack = _resolve_existing_file(payload.policy_pack) if payload.policy_pack else None
     factory = _factory(request)
     with factory() as session:
-        duplicate = session.scalars(select(RepositoryRow).where(RepositoryRow.name == payload.name)).first()
-        if duplicate is not None:
-            raise HTTPException(status_code=409, detail="repository name already registered")
-        row = RepositoryRow(
-            id=new_id(),
-            name=payload.name,
-            path=str(root),
-            policy_pack=str(pack) if pack else None,
-            airflow_profile=payload.airflow_profile,
-        )
-        session.add(row)
+        try:
+            result = repository_service.register_repository(
+                session,
+                name=payload.name,
+                path=payload.path,
+                policy_pack=payload.policy_pack,
+                airflow_profile=payload.airflow_profile,
+            )
+        except ConflictError as exc:
+            session.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except InvalidOperationError as exc:
+            session.rollback()
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         session.commit()
-        return {"id": row.id, "name": row.name}
+        return result
 
 
 def load_workspace_file(request: Request, payload: WorkspaceLoadRequest) -> dict[str, int]:
@@ -272,22 +274,8 @@ def load_workspace_file(request: Request, payload: WorkspaceLoadRequest) -> dict
     workspace, _ = load_workspace(Path(payload.path).resolve() if payload.path else None)
     _register_workspace_packs(request.app.state.pack_service, workspace)
     factory = _factory(request)
-    registered = 0
     with factory() as session:
-        existing_names = {row.name for row in session.scalars(select(RepositoryRow)).all()}
-        for repository in workspace.repositories:
-            if repository.name in existing_names:
-                continue
-            session.add(
-                RepositoryRow(
-                    id=new_id(),
-                    name=repository.name,
-                    path=str(repository.path),
-                    policy_pack=str(repository.policy_pack) if repository.policy_pack else None,
-                    airflow_profile=repository.airflow_profile,
-                )
-            )
-            registered += 1
+        registered = repository_service.register_workspace_repositories(session, workspace.repositories)
         session.commit()
     return {"repositories_registered": registered}
 
@@ -296,18 +284,7 @@ def list_repositories(request: Request) -> list[dict[str, str | None]]:
     """List every registered DAG repository."""
     factory = _factory(request)
     with factory() as session:
-        rows = session.scalars(select(RepositoryRow).order_by(RepositoryRow.name)).all()
-        return [
-            {
-                "id": row.id,
-                "name": row.name,
-                "path": row.path,
-                "policy_pack": row.policy_pack,
-                "airflow_profile": row.airflow_profile,
-                "baseline_scan_id": row.baseline_scan_id,
-            }
-            for row in rows
-        ]
+        return repository_service.list_repositories(session)
 
 
 def trigger_scan(request: Request, repository_id: str) -> dict[str, str]:
@@ -569,7 +546,7 @@ def overview(request: Request, days: Annotated[int, Query(ge=1, le=365)] = 30) -
     """Return read-only overview aggregates across registered repositories."""
     factory = _factory(request)
     with factory() as session:
-        return build_overview(session, utcnow(), days)
+        return repository_service.overview(session, now=utcnow(), days=days)
 
 
 def repository_trends(
@@ -578,9 +555,10 @@ def repository_trends(
     """Return read-only daily trend aggregates for one repository."""
     factory = _factory(request)
     with factory() as session:
-        if session.get(RepositoryRow, repository_id) is None:
-            raise HTTPException(status_code=404, detail="repository not registered")
-        return build_repository_trends(session, repository_id, utcnow(), days)
+        try:
+            return repository_service.repository_trends(session, repository_id=repository_id, now=utcnow(), days=days)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def create_app(
@@ -838,17 +816,3 @@ def _suppression_payload(row: SuppressionRow) -> dict[str, object]:
         "expires_at": row.expires_at,
         "source": row.source,
     }
-
-
-def _resolve_existing_directory(path: str) -> Path:
-    resolved = Path(path).resolve()
-    if not resolved.is_dir():
-        raise HTTPException(status_code=422, detail=f"repository path does not exist: {resolved}")
-    return resolved
-
-
-def _resolve_existing_file(path: str) -> Path:
-    resolved = Path(path).resolve()
-    if not resolved.is_file():
-        raise HTTPException(status_code=422, detail=f"policy pack path does not exist: {resolved}")
-    return resolved

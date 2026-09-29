@@ -660,6 +660,34 @@ def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
     assert isinstance(workspace.repositories[0].airflow_profile, str)
 
 
+def test_workspace_registration_keeps_existing_path_kind_and_duplicate_behavior(
+    client: TestClient, platform_env: str, tmp_path: Path
+) -> None:
+    repo_file = tmp_path / "repo.py"
+    repo_file.write_text("pass", encoding="utf-8")
+    pack_dir = tmp_path / "policies"
+    pack_dir.mkdir()
+    workspace_path = tmp_path / "workspace.yaml"
+    workspace_path.write_text(
+        "schema_version: '1'\nrepositories:\n  - name: workspace-file\n    path: repo.py\n    policy_pack: policies\n",
+        encoding="utf-8",
+    )
+    factory = initialize_session_factory(platform_env)
+    for expected_count in (1, 0):
+        response = _post(
+            client,
+            "/api/v1/workspace/load",
+            json={"path": str(workspace_path)},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"repositories_registered": expected_count}
+    with factory() as session:
+        row = session.scalar(select(RepositoryRow).where(RepositoryRow.name == "workspace-file"))
+        assert row is not None
+        assert (row.path, row.policy_pack) == (str(repo_file.resolve()), str(pack_dir.resolve()))
+
+
 def test_workspace_rejects_unsupported_airflow_profile(tmp_path: Path) -> None:
     from conformdag.platform.workspace import WorkspaceError, load_workspace
 
