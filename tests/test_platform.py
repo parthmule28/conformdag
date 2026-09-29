@@ -660,6 +660,34 @@ def test_workspace_loader_resolves_relative_paths(tmp_path: Path) -> None:
     assert isinstance(workspace.repositories[0].airflow_profile, str)
 
 
+def test_workspace_registration_keeps_existing_path_kind_and_duplicate_behavior(
+    client: TestClient, platform_env: str, tmp_path: Path
+) -> None:
+    repo_file = tmp_path / "repo.py"
+    repo_file.write_text("pass", encoding="utf-8")
+    pack_dir = tmp_path / "policies"
+    pack_dir.mkdir()
+    workspace_path = tmp_path / "workspace.yaml"
+    workspace_path.write_text(
+        "schema_version: '1'\nrepositories:\n  - name: workspace-file\n    path: repo.py\n    policy_pack: policies\n",
+        encoding="utf-8",
+    )
+    factory = initialize_session_factory(platform_env)
+    for expected_count in (1, 0):
+        response = _post(
+            client,
+            "/api/v1/workspace/load",
+            json={"path": str(workspace_path)},
+            headers={"Authorization": "Bearer secret-token"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"repositories_registered": expected_count}
+    with factory() as session:
+        row = session.scalar(select(RepositoryRow).where(RepositoryRow.name == "workspace-file"))
+        assert row is not None
+        assert (row.path, row.policy_pack) == (str(repo_file.resolve()), str(pack_dir.resolve()))
+
+
 def test_workspace_rejects_unsupported_airflow_profile(tmp_path: Path) -> None:
     from conformdag.platform.workspace import WorkspaceError, load_workspace
 
@@ -2395,9 +2423,29 @@ def test_export_json_is_byte_compatible_with_stored_report(client: TestClient, t
     exported = _get(client, f"/api/v1/scans/{scan_id}/export/json")
     assert exported.status_code == 200
     assert json.loads(exported.text)["result_fingerprint"] == "c" * 64
+    assert exported.content == (stored.model_dump_json(indent=2) + "\n").encode()
     sarif = _get(client, f"/api/v1/scans/{scan_id}/export/sarif")
     assert sarif.status_code == 200
     assert json.loads(sarif.text)["version"] == "2.1.0"
+    assert sarif.headers["content-type"].startswith("application/sarif+json")
+    from conformdag.reporting import render_html, render_sarif
+
+    assert sarif.content == (json.dumps(render_sarif(stored), indent=2, sort_keys=True) + "\n").encode()
+    html = _get(client, f"/api/v1/scans/{scan_id}/export/html")
+    assert html.status_code == 200
+    assert html.headers["content-type"].startswith("text/html")
+    assert html.content == render_html(stored, include_evidence=True).encode()
+
+    with factory() as session:
+        prune_scan_artifact(session, scan_id)
+        session.commit()
+    for url in (f"/api/v1/scans/{scan_id}/report", f"/api/v1/scans/{scan_id}/export/html"):
+        unavailable = _get(client, url)
+        assert unavailable.status_code == 404
+        assert unavailable.json() == {"detail": "scan report not available"}
+    missing = _get(client, "/api/v1/scans/missing/export/json")
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "scan report not available"}
 
 
 def test_worker_skips_cancelled_scan(platform_env: str) -> None:
