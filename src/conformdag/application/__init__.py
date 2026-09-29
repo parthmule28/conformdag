@@ -7,6 +7,7 @@ from conformdag.application.configuration import (
     resolve_effective_configuration,
 )
 from conformdag.application.errors import RuntimeExecutionError, ScanInputError
+from conformdag.application.outcomes import ExecutionOutcome, classify_report
 from conformdag.application.scan import (
     BaselineInput,
     RuntimeExecutor,
@@ -18,6 +19,7 @@ from conformdag.application.scan import (
 __all__ = [
     "BaselineInput",
     "EffectiveScanConfiguration",
+    "ExecutionOutcome",
     "RuntimeExecutionError",
     "RuntimeExecutor",
     "ScanExecutionResult",
@@ -25,6 +27,7 @@ __all__ = [
     "ScanOptions",
     "ScanOverrides",
     "coerce_platform_airflow_profile",
+    "classify_report",
     "execute_scan",
     "resolve_effective_configuration",
 ]

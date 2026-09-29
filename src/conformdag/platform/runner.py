@@ -15,8 +15,10 @@ from sqlalchemy.orm import Session
 from conformdag.analysis import ParseCache
 from conformdag.application import (
     BaselineInput,
+    ExecutionOutcome,
     ScanOptions,
     ScanOverrides,
+    classify_report,
     coerce_platform_airflow_profile,
     resolve_effective_configuration,
 )
@@ -185,7 +187,7 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
             return 1
         logger.info("scan_completed", extra={"scan_id": scan_id})
         report = result.report
-        if not report.complete:
+        if classify_report(report) is ExecutionOutcome.INCOMPLETE:
             if _was_cancelled(session, scan_id):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0

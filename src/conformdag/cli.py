@@ -17,11 +17,13 @@ from ruamel.yaml import YAML
 from conformdag import __version__
 from conformdag.application import (
     BaselineInput,
+    ExecutionOutcome,
     RuntimeExecutionError,
     RuntimeExecutor,
     ScanInputError,
     ScanOptions,
     ScanOverrides,
+    classify_report,
     execute_scan,
     resolve_effective_configuration,
 )
@@ -35,7 +37,6 @@ from conformdag.config import load_project_config, semantic_api_key
 from conformdag.fixing import run_fix
 from conformdag.models import (
     AirflowProfile,
-    FindingStatus,
     Policy,
     PolicyPack,
     ProjectConfig,
@@ -57,7 +58,7 @@ from conformdag.reference import (
     RUNTIME_REFERENCE,
     ReferenceEntry,
 )
-from conformdag.reporting import has_blocking_failures, render_html, render_sarif
+from conformdag.reporting import render_html, render_sarif
 from conformdag.runtime import RuntimePhaseError, build_runtime_manifest, execute_runtime
 from conformdag.scan import preview_model_context as build_model_context_preview
 from conformdag.semantic import CachedSemanticProvider, OpenAICompatibleProvider, SemanticCache
@@ -644,7 +645,6 @@ def scan(
             baseline=baseline_input,
         )
         report = execution.report
-        gate_result = execution.gate_result
     except (PolicyValidationError, RuntimePhaseError, ValueError) as exc:
         _fail(exc)
 
@@ -679,14 +679,10 @@ def scan(
         f"{len(report.files_scanned)} files, {len(report.findings)} findings",
         err=True,
     )
-    if any(issue.fatal for issue in report.issues):
+    outcome = classify_report(report)
+    if outcome is ExecutionOutcome.INCOMPLETE:
         raise typer.Exit(code=3)
-    if gate_result is not None:
-        if not gate_result.passed:
-            raise typer.Exit(code=1)
-    elif has_blocking_failures(report):
-        raise typer.Exit(code=1)
-    if any(observation.status is FindingStatus.FAIL for observation in report.runtime_observations):
+    if outcome is ExecutionOutcome.POLICY_FAILURE:
         raise typer.Exit(code=1)
 
 

@@ -44,13 +44,16 @@ from conformdag.models import (
     Finding,
     FindingLocation,
     FindingStatus,
+    GateResult,
     Ownership,
     PolicyPack,
     PolicySource,
     RemediationAction,
     RemediationPayload,
     RemediationTarget,
+    RunIssue,
     RunMetadata,
+    RuntimeObservation,
     ScanReport,
     Severity,
     Suppression,
@@ -3281,6 +3284,57 @@ def test_runner_passes_application_inputs(
     assert configuration.resolved_policy_pack == (repository_root / "policies/pack.yaml").resolve()
     assert actual_baseline == expected_baseline
     assert actual_suppressions == (expected_suppression,)
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected_status", "expected_exit"),
+    [
+        (
+            {"complete": True, "issues": [RunIssue(code="FATAL", message="broken", phase="discovery", fatal=True)]},
+            "failed",
+            1,
+        ),
+        ({"complete": False}, "failed", 1),
+        ({"gate_result": GateResult(gate_id="g", passed=False, rules=[])}, "succeeded", 0),
+        ({"runtime_observations": [RuntimeObservation(status=FindingStatus.FAIL, policy_id="P")]}, "succeeded", 0),
+    ],
+)
+def test_runner_maps_report_outcome_to_platform_status(
+    platform_env: str,
+    tmp_path: Path,
+    build_repository: Callable[[Path], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    changes: dict[str, object],
+    expected_status: str,
+    expected_exit: int,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.application import ScanExecutionResult
+
+    root = build_repository(tmp_path / "repository")
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="outcomes", path=str(root)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running", attempts=1))
+        session.commit()
+
+    report = ScanReport(
+        complete=True,
+        result_fingerprint="f" * 64,
+        run=RunMetadata(
+            tool_version="0", policy_pack_id="x", policy_pack_version="1", timestamp=datetime(2026, 1, 1, tzinfo=UTC)
+        ),
+    ).model_copy(update=changes)
+
+    def execute_service(*_args: object, **_kwargs: object) -> ScanExecutionResult:
+        return ScanExecutionResult(report=report, gate_result=report.gate_result)
+
+    monkeypatch.setattr(runner_module, "execute_application_scan", execute_service)
+    assert runner_module.execute_scan("scan1", platform_env, claim_attempt=1) == expected_exit
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == expected_status
+    assert scan.complete is report.complete
+    assert scan.report_json == report.model_dump(mode="json")
+    assert (scan.error is not None) is (expected_status == "failed")
 
 
 def test_runner_marks_incomplete_report_failed(platform_env: str, tmp_path: Path) -> None:
