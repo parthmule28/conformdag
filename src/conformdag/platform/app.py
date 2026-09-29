@@ -18,8 +18,6 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
@@ -36,8 +34,6 @@ from conformdag.platform.contracts import (
     ScanSummaryResponse,
 )
 from conformdag.platform.db import (
-    SuppressionRow,
-    new_id,
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
@@ -46,6 +42,7 @@ from conformdag.platform.services import ConflictError, InvalidOperationError, N
 from conformdag.platform.services import baselines as baseline_service
 from conformdag.platform.services import repositories as repository_service
 from conformdag.platform.services import scans as scan_service
+from conformdag.platform.services import suppressions as suppression_service
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
 from conformdag.policy import PolicyValidationError
 from conformdag.reporting import render_html, render_sarif
@@ -411,49 +408,40 @@ def export_scan(request: Request, scan_id: str, scan_format: str) -> Response:
 
 def list_suppressions(request: Request) -> list[dict[str, object]]:
     """List the operational suppression layer with audit fields."""
-    factory = _factory(request)
-    with factory() as session:
-        rows = session.scalars(select(SuppressionRow).order_by(SuppressionRow.created_at)).all()
-        return [_suppression_payload(row) for row in rows]
+    with _factory(request)() as session:
+        return suppression_service.list_suppressions(session)
 
 
 def create_suppression(request: Request, payload: SuppressionCreate) -> dict[str, object]:
     """Create one operational suppression owned by the platform."""
-    factory = _factory(request)
-    with factory() as session:
-        row = SuppressionRow(
-            id=new_id(),
-            policy_id=payload.policy_id,
-            fingerprint=payload.fingerprint,
-            reason=payload.reason,
-            owner=payload.owner,
-            expires_at=payload.expires_at,
-            source="platform",
-        )
-        session.add(row)
+    with _factory(request)() as session:
         try:
+            result = suppression_service.create_suppression(
+                session,
+                policy_id=payload.policy_id,
+                fingerprint=payload.fingerprint,
+                reason=payload.reason,
+                owner=payload.owner,
+                expires_at=payload.expires_at,
+            )
             session.commit()
-        except IntegrityError as exc:
+        except ConflictError as exc:
             session.rollback()
-            raise HTTPException(status_code=409, detail="suppression already exists for this policy finding") from exc
-        return _suppression_payload(row)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return result
 
 
 def update_suppression(request: Request, suppression_id: str, payload: SuppressionUpdate) -> dict[str, object]:
     """Update the editable audit fields of one platform suppression."""
-    factory = _factory(request)
-    with factory() as session:
-        row = session.get(SuppressionRow, suppression_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="suppression not found")
-        if payload.reason is not None:
-            row.reason = payload.reason
-        if payload.owner is not None:
-            row.owner = payload.owner
-        if payload.expires_at is not None:
-            row.expires_at = payload.expires_at
+    with _factory(request)() as session:
+        try:
+            result = suppression_service.update_suppression(
+                session, suppression_id, reason=payload.reason, owner=payload.owner, expires_at=payload.expires_at
+            )
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         session.commit()
-        return _suppression_payload(row)
+        return result
 
 
 def overview(request: Request, days: Annotated[int, Query(ge=1, le=365)] = 30) -> OverviewResponse:
@@ -688,16 +676,3 @@ def _pack_delete_gate(request: Request, pack_name: str, gate_id: str) -> dict[st
 def _api_fallback(rest: str = "") -> dict[str, str]:
     """Return a JSON 404 for unknown API paths instead of the dashboard SPA."""
     raise HTTPException(status_code=404, detail=f"unknown API path: /api/{rest}")
-
-
-def _suppression_payload(row: SuppressionRow) -> dict[str, object]:
-    return {
-        "id": row.id,
-        "policy_id": row.policy_id,
-        "fingerprint": row.fingerprint,
-        "reason": row.reason,
-        "owner": row.owner,
-        "created_at": row.created_at,
-        "expires_at": row.expires_at,
-        "source": row.source,
-    }

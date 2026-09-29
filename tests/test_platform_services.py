@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -23,6 +24,7 @@ from conformdag.platform.services.scans import (
     scan_history,
     scan_status,
 )
+from conformdag.platform.services.suppressions import create_suppression, list_suppressions, update_suppression
 from conformdag.platform.workspace import WorkspaceRepository
 
 
@@ -194,3 +196,32 @@ def test_baseline_requires_same_repository_succeeded_complete_scan(tmp_path: Pat
     with factory() as session:
         row = session.get(RepositoryRow, "first")
         assert row is not None and row.baseline_scan_id == "eligible"
+
+
+def test_suppression_create_unique_update_and_rollback(tmp_path: Path) -> None:
+    factory = initialize_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    expiry = datetime.now(UTC) + timedelta(days=1)
+    with factory() as session:
+        first = create_suppression(
+            session, policy_id="p", fingerprint="f", reason="reason", owner="owner", expires_at=expiry
+        )
+        assert first["source"] == "platform"
+        assert first["created_at"] is not None
+        assert first["expires_at"] == expiry
+        session.commit()
+        with pytest.raises(ConflictError, match="suppression already exists for this policy finding"):
+            create_suppression(
+                session, policy_id="p", fingerprint="f", reason="again", owner="owner", expires_at=expiry
+            )
+        session.rollback()
+        other = create_suppression(
+            session, policy_id="p", fingerprint="other", reason="second", owner="owner", expires_at=expiry
+        )
+        session.commit()
+        assert [row["id"] for row in list_suppressions(session)] == [first["id"], other["id"]]
+        with pytest.raises(NotFoundError, match="suppression not found"):
+            update_suppression(session, "missing", reason=None, owner=None, expires_at=None)
+        unchanged = update_suppression(session, cast("str", first["id"]), reason=None, owner=None, expires_at=None)
+        assert (unchanged["reason"], unchanged["owner"]) == ("reason", "owner")
+        updated = update_suppression(session, cast("str", first["id"]), reason="changed", owner="new", expires_at=None)
+        assert (updated["reason"], updated["owner"]) == ("changed", "new")
