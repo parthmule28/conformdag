@@ -8,6 +8,8 @@ Give CLI, platform, and future adapters one reproducible interpretation of a com
 
 `src/conformdag/application/outcomes.py` owns a transport-neutral `ExecutionOutcome(StrEnum)` with `SUCCESS = "success"`, `POLICY_FAILURE = "policy_failure"`, and `INCOMPLETE = "incomplete"`, and the pure function `classify_report(report: ScanReport) -> ExecutionOutcome`. Classification depends only on the supplied canonical report, not exceptions, transport types, persistence, or hidden state. It can therefore be repeated for a stored report. The classifier uses `conformdag.gates.blocking_findings(report)` for the existing unsuppressed blocking semantics; it does not use the exit-code-oriented `reporting.has_blocking_failures()`.
 
+Re-export `ExecutionOutcome` and `classify_report` through `conformdag.application.__init__` and its `__all__`, alongside the existing application contracts.
+
 Apply precedence in this order:
 
 1. `not report.complete` **or** any fatal issue → `INCOMPLETE`, regardless of other signals.
@@ -17,6 +19,8 @@ Apply precedence in this order:
 5. Otherwise → `SUCCESS`.
 
 No gate means the existing legacy blocking-finding path applies, not an incomplete scan. Suppressed findings do not block through that path. Do not change how gates or finding blocking are computed.
+
+C11 intentionally resolves the existing CLI/platform inconsistency for malformed or historically inconsistent reports: either `complete=False` or any fatal issue is sufficient to classify the report as `INCOMPLETE`. Normal reports produced by the application workflow already keep these signals aligned, so this does not change ordinary scan behavior.
 
 ## Adapter mappings and error handling
 
@@ -28,8 +32,8 @@ The application workflow keeps returning `ScanExecutionResult(report, gate_resul
 
 ## Testing and verification
 
-First add a table-driven classifier test covering complete pass, failed gate, passing gate plus blocking finding (success), passing gate plus runtime `FAIL` (policy failure), no-gate blocking finding, suppressed blocking finding, fatal issue, `complete=False` without fatal issue, and no gate with no failures. Confirm the test fails because the classifier is absent before implementing it. Add focused CLI and runner regressions for exit/state mappings, including that policy failure persists as platform success and incomplete persists as failure. Run outcome, CLI, application, runner, gate, and platform tests, then `mise run check`, `mise run test:coverage`, and `mise run schema --check`; report unavailable environment gates rather than claiming they passed.
+First add a table-driven classifier test covering complete pass, failed gate, passing gate plus blocking finding (success), passing gate plus runtime `FAIL` (policy failure), no-gate blocking finding, suppressed blocking finding, `complete=True` plus fatal issue (incomplete), `complete=False` without fatal issue (incomplete), and no gate with no failures. Confirm the test fails because the classifier is absent before implementing it. Add focused CLI and runner regressions for exit/state mappings, including that policy failure persists as platform success and incomplete persists as failure. Run outcome, CLI, application, runner, gate, and platform tests, then `mise run check`, `mise run test:coverage`, and `mise run schema --check`; report unavailable environment gates rather than claiming they passed.
 
 ## Boundaries
 
-Touch `application/outcomes.py`, `cli.py`, `platform/runner.py`, and focused tests; change `application/scan.py` only if an existing seam genuinely requires it. No schema/model changes, SQL migrations, new evaluation pipeline, or transport dependencies in the application layer. Update only the C11 progress ledger row with actual evidence. Open a PR without merging, as required by the C11 slice contract.
+Touch `application/outcomes.py`, `application/__init__.py`, `cli.py`, `platform/runner.py`, and focused tests; change `application/scan.py` only if an existing seam genuinely requires it. No schema/model changes, SQL migrations, new evaluation pipeline, or transport dependencies in the application layer. Update only the C11 progress ledger row with actual evidence. Open a PR without merging, as required by the C11 slice contract.
