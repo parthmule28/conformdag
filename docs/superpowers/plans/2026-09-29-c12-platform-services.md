@@ -1,6 +1,6 @@
 # C12 Platform Services Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task in one native/single-session implementation context. No subagent-driven implementation. Steps use checkbox (`- [ ]`) syntax for tracking. Obtain an independent whole-branch review after implementation.
 
 **Goal:** Move repository, scan, baseline, and suppression reads and mutations from FastAPI routes into independently callable platform services without changing the public API.
 
@@ -36,6 +36,13 @@
 - Create `suppressions.py`: list/create/update and conflict translation.
 - Modify `src/conformdag/platform/app.py`: session/commit/rollback, service calls, status translation, transport projection only; keep route registration in place.
 - Test `tests/test_platform_services.py` (new real-session tests), `tests/test_platform.py` (HTTP compatibility/characterization). Modify `db.py` only if two services genuinely require the same query primitive. Do not modify `contracts.py`, `workspace.py`, or `aggregates.py` without a demonstrated contract gap.
+
+## Pre-implementation isolation (after plan approval)
+
+- [ ] Wait for the approved plan's **exact-head CI** to pass; record the approved spec and plan commit SHAs. Do not treat this plan's publication as implementation approval.
+- [ ] Fetch latest `origin/main`; use `using-git-worktrees` to create a separate `feat/c12-platform-services` implementation worktree based on that exact tip, without moving or deleting either docs-only branch.
+- [ ] Carry **only** the approved C12 spec and plan documents onto the feature branch (for example, copy their blobs from the two approved commit SHAs and commit them as docs). Verify each carried file byte-for-byte against its approved Git blob with `git show <approved-sha>:<path>` and `cmp`; never bring unreviewed docs changes or other files along.
+- [ ] Confirm the feature branch's base equals the fetched `origin/main`, both documents match the approved heads, the worktree has no unintended tracked/untracked changes, and existing `.serena/` in the docs worktree remains untracked and untouched. Then begin Task 1.
 
 ### Task 1: Repository service and workspace compatibility
 
@@ -87,13 +94,14 @@
 
 ### Task 5: Integration, review, and handoff
 
-**Files:** Modify only C12 row in `docs/consolidation/progress.md` for actual evidence; touch service/route tests for discovered parity gaps, not unrelated modules.
+**Files:** Modify only the C12 row in `docs/consolidation/progress.md` **after** exact implementation-head CI and independent review; touch service/route tests for discovered parity gaps, not unrelated modules.
 
 - [ ] **Step 1: Audit boundary.** Search service imports for `fastapi`, `starlette`, `Request`, `Response`, `HTTPException`, `typer`; search targeted `app.py` handlers for `select(`, `session.get(`, SQL mutation and domain eligibility. Confirm aggregate implementation remains in `aggregates.py`, no new migration, no runner/worker/pack changes.
 - [ ] **Step 2: Run full local verification.** `mise run setup`, `mise exec -- uv run pytest tests/test_platform_services.py tests/test_platform.py -x --tb=short`, `mise run check`, `mise run test:coverage`, `mise run schema --check`, `git diff --check`; verify migration/platform tests included and record any unavailable external gate. Fix regressions before claiming completion.
-- [ ] **Step 3: Commit implementation and ledger evidence.** Record commands/results, compatibility notes, and review state in only the C12 ledger row. Final implementation commit should use `refactor: extract platform services` (squash implementation commits for PR if needed without discarding unrelated changes).
-- [ ] **Step 4: Push and open implementation PR from separate worktree based on current `origin/main`; wait for exact-head CI.** Obtain independent whole-branch review focused on service usability without FastAPI, SQL-free route business logic, transaction ownership, and exact HTTP compatibility. Address findings, rerun exact-head CI on any amendment, update ledger via PR, and stop unmerged.
+- [ ] **Step 3: Commit, push, and open implementation PR.** Keep useful task commits; add the final product/integration commit as `refactor: extract platform services` to satisfy the C12 prompt. Push the feature branch from its isolated worktree and open an implementation PR against `main`. Do not update the ledger yet.
+- [ ] **Step 4: Verify the implementation head and review independently.** Wait for exact implementation-head CI. Obtain an independent whole-branch review focused on service usability without FastAPI, SQL-free route business logic, transaction ownership, and exact HTTP compatibility. Fix Critical/Important findings; if amended, rerun local gates and exact-head CI, then obtain independent re-review when needed.
+- [ ] **Step 5: Record evidence last.** Only after the preceding CI/review gate, update **only** the C12 ledger row to `review` with actual local commands/results, implementation-head CI run/SHA, independent review findings, compatibility notes, and outstanding limitations. Make a ledger-only commit, push, await **final PR-head CI**, and stop with the PR open/unmerged. After a separately user-authorized merge and passing post-merge `main` CI, record `accepted` in separate acceptance bookkeeping, not in this implementation PR.
 
 ## Execution handoff
 
-This is a docs-only plan for review, not authorization to start product work. After written plan approval, create a fresh implementation worktree from current `origin/main` using `using-git-worktrees`, choose the execution method explicitly, and follow the checked tasks. Preserve the existing `.serena/` files in this worktree.
+This is a docs-only plan for review, not authorization to start product work. After written plan approval and exact-head CI, use native single-session `executing-plans` in the isolated worktree and follow Tasks 1 → 2 → 3 → 4 → integration. Independent whole-branch review follows implementation; no subagent-driven implementation. Preserve the existing `.serena/` files in the docs worktree.
