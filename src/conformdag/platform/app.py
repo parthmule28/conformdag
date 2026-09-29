@@ -36,16 +36,14 @@ from conformdag.platform.contracts import (
     ScanSummaryResponse,
 )
 from conformdag.platform.db import (
-    RepositoryRow,
-    ScanRow,
     SuppressionRow,
-    eligible_baseline,
     new_id,
     utcnow,
 )
 from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackError, PackNotFoundError, PackService
 from conformdag.platform.services import ConflictError, InvalidOperationError, NotFoundError
+from conformdag.platform.services import baselines as baseline_service
 from conformdag.platform.services import repositories as repository_service
 from conformdag.platform.services import scans as scan_service
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
@@ -335,22 +333,15 @@ def scan_history(
 
 def set_baseline(request: Request, repository_id: str, payload: BaselineSetRequest) -> dict[str, str]:
     """Mark one finished scan as the baseline for its repository."""
-    factory = _factory(request)
-    with factory() as session:
-        repository = session.get(RepositoryRow, repository_id)
-        if repository is None:
-            raise HTTPException(status_code=404, detail="repository not registered")
-        scan = session.get(ScanRow, payload.scan_id)
-        if scan is None or scan.repository_id != repository_id:
-            raise HTTPException(status_code=404, detail="scan not found for this repository")
-        if eligible_baseline(session, repository_id, payload.scan_id) is None:
-            raise HTTPException(
-                status_code=409,
-                detail="scan is not eligible as a baseline: it must be a succeeded, complete scan",
-            )
-        repository.baseline_scan_id = payload.scan_id
+    with _factory(request)() as session:
+        try:
+            result = baseline_service.set_baseline(session, repository_id, payload.scan_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         session.commit()
-        return {"repository_id": repository_id, "baseline_scan_id": payload.scan_id}
+        return result
 
 
 def scan_report(request: Request, scan_id: str) -> dict[str, Any]:

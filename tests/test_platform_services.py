@@ -7,6 +7,7 @@ import pytest
 
 from conformdag.platform.db import FindingRow, RepositoryRow, ScanRow, initialize_session_factory
 from conformdag.platform.services import ConflictError, InvalidOperationError, NotFoundError
+from conformdag.platform.services.baselines import set_baseline
 from conformdag.platform.services.repositories import (
     list_repositories,
     register_repository,
@@ -156,3 +157,40 @@ def test_scan_history_findings_filters_and_missing_report(tmp_path: Path) -> Non
         for scan_id in ("missing", "older"):
             with pytest.raises(NotFoundError, match="scan report not available"):
                 load_report(session, scan_id)
+
+
+def test_baseline_requires_same_repository_succeeded_complete_scan(tmp_path: Path) -> None:
+    factory = initialize_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    with factory() as session:
+        session.add_all(
+            [
+                RepositoryRow(id="first", name="first", path=str(tmp_path)),
+                RepositoryRow(id="second", name="second", path=str(tmp_path)),
+            ]
+        )
+        session.add_all(
+            [
+                ScanRow(id="eligible", repository_id="first", status="succeeded", complete=True),
+                ScanRow(id="incomplete", repository_id="first", status="succeeded", complete=False),
+                ScanRow(id="queued", repository_id="first", status="queued", complete=None),
+                ScanRow(id="foreign", repository_id="second", status="succeeded", complete=True),
+            ]
+        )
+        session.commit()
+        with pytest.raises(NotFoundError, match="repository not registered"):
+            set_baseline(session, "missing", "eligible")
+        for scan_id in ("missing", "foreign"):
+            with pytest.raises(NotFoundError, match="scan not found for this repository"):
+                set_baseline(session, "first", scan_id)
+        for scan_id in ("incomplete", "queued"):
+            with pytest.raises(ConflictError, match="scan is not eligible as a baseline"):
+                set_baseline(session, "first", scan_id)
+        assert set_baseline(session, "first", "eligible") == {"repository_id": "first", "baseline_scan_id": "eligible"}
+        session.rollback()
+        rolled_back = session.get(RepositoryRow, "first")
+        assert rolled_back is not None and rolled_back.baseline_scan_id is None
+        set_baseline(session, "first", "eligible")
+        session.commit()
+    with factory() as session:
+        row = session.get(RepositoryRow, "first")
+        assert row is not None and row.baseline_scan_id == "eligible"
