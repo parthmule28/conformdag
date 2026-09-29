@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -174,33 +175,44 @@ def execute_scan(
             )
 
     if operational_suppressions:
-        had_unresolved_errors = any(
-            finding.status is FindingStatus.ERROR and not finding.suppressed for finding in report.findings
-        )
-        findings, suppression_issues = apply_suppressions(
-            report.findings,
-            list(operational_suppressions),
-            preserve_existing_provenance=True,
-        )
-        remaining_errors = [
-            finding for finding in findings if finding.status is FindingStatus.ERROR and not finding.suppressed
+        # Operational overlays may be global or stale; only active exact matches affect this report.
+        suppression_time = datetime.now(UTC)
+        finding_identities = {(finding.policy_id, finding.fingerprint) for finding in report.findings}
+        applicable_suppressions = [
+            suppression
+            for suppression in operational_suppressions
+            if suppression.expires_at > suppression_time
+            and (suppression.policy_id, suppression.fingerprint) in finding_identities
         ]
-        issues = list(report.issues)
-        complete = report.complete
-        if had_unresolved_errors and not remaining_errors:
-            issues = [
-                issue
-                for issue in issues
-                if not (issue.code == "EVALUATION_ERROR" and issue.phase == "evaluation" and issue.fatal)
+        if applicable_suppressions:
+            had_unresolved_errors = any(
+                finding.status is FindingStatus.ERROR and not finding.suppressed for finding in report.findings
+            )
+            findings, suppression_issues = apply_suppressions(
+                report.findings,
+                list(applicable_suppressions),
+                suppression_time,
+                preserve_existing_provenance=True,
+            )
+            remaining_errors = [
+                finding for finding in findings if finding.status is FindingStatus.ERROR and not finding.suppressed
             ]
-            complete = not any(issue.fatal for issue in issues)
-        report = report.model_copy(
-            update={
-                "findings": findings,
-                "issues": [*issues, *suppression_issues],
-                "complete": complete,
-            }
-        )
+            issues = list(report.issues)
+            complete = report.complete
+            if had_unresolved_errors and not remaining_errors:
+                issues = [
+                    issue
+                    for issue in issues
+                    if not (issue.code == "EVALUATION_ERROR" and issue.phase == "evaluation" and issue.fatal)
+                ]
+                complete = not any(issue.fatal for issue in issues)
+            report = report.model_copy(
+                update={
+                    "findings": findings,
+                    "issues": [*issues, *suppression_issues],
+                    "complete": complete,
+                }
+            )
 
     final_report = normalize_report(report.model_copy(update={"gate_result": None}))
     gate_result = None
