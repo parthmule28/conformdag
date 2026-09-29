@@ -34,7 +34,9 @@ from conformdag.models import (
     FindingEvidence,
     FindingLocation,
     FindingStatus,
+    GateResult,
     ProjectRuntimeConfig,
+    RunIssue,
     RunMetadata,
     RuntimeObservation,
     ScanReport,
@@ -945,6 +947,44 @@ def _application_report(*, include_finding: bool = False) -> ScanReport:
             timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected_exit"),
+    [
+        ({"complete": False}, 3),
+        ({"issues": [RunIssue(code="FATAL", message="broken", phase="discovery", fatal=True)]}, 3),
+        ({"gate_result": GateResult(gate_id="g", passed=True, rules=[])}, 0),
+        (
+            {
+                "gate_result": GateResult(gate_id="g", passed=True, rules=[]),
+                "runtime_observations": [RuntimeObservation(status=FindingStatus.FAIL, policy_id="P")],
+            },
+            1,
+        ),
+    ],
+)
+def test_scan_maps_report_outcome_without_changing_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changes: dict[str, object], expected_exit: int
+) -> None:
+    root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
+    source = _application_report(include_finding=True)
+    report = source.model_copy(
+        update={"findings": [source.findings[0].model_copy(update={"status": FindingStatus.FAIL})], **changes}
+    )
+
+    def execute_service(*_args: object, **_kwargs: object) -> ScanExecutionResult:
+        return ScanExecutionResult(report=report, gate_result=report.gate_result)
+
+    monkeypatch.setattr("conformdag.cli.execute_scan", execute_service)
+    result = CliRunner().invoke(
+        app, ["scan", "--path", str(root), "--policy-pack", str(root / "pack.yaml"), "--format", "json"]
+    )
+
+    assert result.exit_code == expected_exit, result.stderr
+    payload = json.loads(result.stdout)
+    assert "outcome" not in payload
+    assert payload["complete"] is report.complete
 
 
 @pytest.mark.parametrize("runtime_enabled", [False, True])
