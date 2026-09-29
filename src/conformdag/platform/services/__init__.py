@@ -1,4 +1,8 @@
-"""Transport-independent errors shared by platform services."""
+"""Reusable platform operations: callers own sessions and ordinary commits.
+
+Services may flush but never commit, except existing atomic DB transition
+primitives invoked by a service. HTTP binding and error mapping stay in routes.
+"""
 
 
 class ServiceError(Exception):
