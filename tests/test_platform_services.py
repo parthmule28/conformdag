@@ -1,17 +1,26 @@
 """Real-session tests for transport-independent platform services."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from conformdag.platform.db import RepositoryRow, initialize_session_factory
+from conformdag.platform.db import FindingRow, RepositoryRow, ScanRow, initialize_session_factory
 from conformdag.platform.services import ConflictError, InvalidOperationError, NotFoundError
 from conformdag.platform.services.repositories import (
     list_repositories,
     register_repository,
     register_workspace_repositories,
     repository_trends,
+)
+from conformdag.platform.services.scans import (
+    FindingFilters,
+    cancel_scan,
+    load_report,
+    queue_scan,
+    scan_findings,
+    scan_history,
+    scan_status,
 )
 from conformdag.platform.workspace import WorkspaceRepository
 
@@ -75,3 +84,75 @@ def test_workspace_repository_persists_existing_paths_without_kind_checks(tmp_pa
         session.commit()
         row = session.query(RepositoryRow).filter_by(name="workspace").one()
         assert (row.path, row.policy_pack) == (str(repo_file), str(pack_dir))
+
+
+def test_scan_queue_cancel_uses_atomic_transition_and_conflict_detail(tmp_path: Path) -> None:
+    factory = initialize_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    with factory() as session:
+        with pytest.raises(NotFoundError, match="repository not registered"):
+            queue_scan(session, "missing")
+        session.add(RepositoryRow(id="repo", name="repo", path=str(tmp_path)))
+        session.commit()
+        queued = queue_scan(session, "repo")
+        assert queued["status"] == "queued"
+        row = session.get(ScanRow, queued["scan_id"])
+        assert row is not None and row.trigger == "dashboard"
+        session.commit()
+        assert scan_status(session, queued["scan_id"])["status"] == "queued"
+        with pytest.raises(NotFoundError, match="scan not found"):
+            cancel_scan(session, "missing")
+        assert cancel_scan(session, queued["scan_id"])["status"] == "cancelled"
+        with pytest.raises(ConflictError, match="scan already cancelled"):
+            cancel_scan(session, queued["scan_id"])
+
+
+def test_scan_history_findings_filters_and_missing_report(tmp_path: Path) -> None:
+    factory = initialize_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    now = datetime.now(UTC)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo", name="repo", path=str(tmp_path)))
+        session.add_all(
+            [
+                ScanRow(id="older", repository_id="repo", status="succeeded", created_at=now - timedelta(days=1)),
+                ScanRow(id="newer", repository_id="repo", status="queued", created_at=now),
+            ]
+        )
+        session.add_all(
+            [
+                FindingRow(
+                    scan_id="older",
+                    repository_id="repo",
+                    policy_id="a",
+                    policy_version="1",
+                    status="FAIL",
+                    severity="high",
+                    fingerprint="f1",
+                    suppressed=False,
+                ),
+                FindingRow(
+                    scan_id="older",
+                    repository_id="repo",
+                    policy_id="b",
+                    policy_version="1",
+                    status="PASS",
+                    severity="low",
+                    fingerprint="f2",
+                    suppressed=True,
+                ),
+            ]
+        )
+        session.commit()
+        history = scan_history(session, "repo", limit=1, offset=0)
+        assert (history.total, [item.scan_id for item in history.items]) == (2, ["newer"])
+        findings = scan_findings(session, "older", filters=FindingFilters(status="fail"), limit=10, offset=0)
+        assert (findings.total, [item.fingerprint for item in findings.items]) == (1, ["f1"])
+        assert findings.items[0].baseline_status is None
+        assert (
+            scan_findings(
+                session, "older", filters=FindingFilters(baseline_status="existing"), limit=10, offset=0
+            ).total
+            == 0
+        )
+        for scan_id in ("missing", "older"):
+            with pytest.raises(NotFoundError, match="scan report not available"):
+                load_report(session, scan_id)

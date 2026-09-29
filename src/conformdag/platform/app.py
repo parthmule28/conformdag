@@ -18,7 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import ColumnElement, false, func, nullslast, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -26,7 +26,6 @@ from starlette.responses import PlainTextResponse
 from starlette.types import Scope
 
 from conformdag.application import coerce_platform_airflow_profile
-from conformdag.models import ScanReport
 from conformdag.platform.contracts import (
     FindingResponse,
     GateResponse,
@@ -37,21 +36,18 @@ from conformdag.platform.contracts import (
     ScanSummaryResponse,
 )
 from conformdag.platform.db import (
-    FindingRow,
     RepositoryRow,
     ScanRow,
     SuppressionRow,
-    count_scans,
     eligible_baseline,
     new_id,
-    transition_scan_to_cancelled,
     utcnow,
 )
-from conformdag.platform.domain import ScanStatus, ScanTrigger
 from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackError, PackNotFoundError, PackService
 from conformdag.platform.services import ConflictError, InvalidOperationError, NotFoundError
 from conformdag.platform.services import repositories as repository_service
+from conformdag.platform.services import scans as scan_service
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
 from conformdag.policy import PolicyValidationError
 from conformdag.reporting import render_html, render_sarif
@@ -289,58 +285,33 @@ def list_repositories(request: Request) -> list[dict[str, str | None]]:
 
 def trigger_scan(request: Request, repository_id: str) -> dict[str, str]:
     """Queue one scan for a registered repository."""
-    factory = _factory(request)
-    with factory() as session:
-        repository = session.get(RepositoryRow, repository_id)
-        if repository is None:
-            raise HTTPException(status_code=404, detail="repository not registered")
-        scan = ScanRow(
-            id=new_id(),
-            repository_id=repository_id,
-            status=ScanStatus.QUEUED.value,
-            trigger=ScanTrigger.DASHBOARD.value,
-        )
-        session.add(scan)
+    with _factory(request)() as session:
+        try:
+            result = scan_service.queue_scan(session, repository_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         session.commit()
-        return {"scan_id": scan.id, "status": ScanStatus(scan.status).value}
+        return result
 
 
 def cancel_scan(request: Request, scan_id: str) -> dict[str, str]:
     """Cancel one queued or running scan."""
-    factory = _factory(request)
-    with factory() as session:
-        scan = session.get(ScanRow, scan_id)
-        if scan is None:
-            raise HTTPException(status_code=404, detail="scan not found")
-        if not transition_scan_to_cancelled(session, scan_id):
-            current = session.get(ScanRow, scan_id)
-            status = ScanStatus(current.status).value if current is not None else "gone"
-            raise HTTPException(status_code=409, detail=f"scan already {status}")
-        return {"scan_id": scan_id, "status": ScanStatus.CANCELLED.value}
+    with _factory(request)() as session:
+        try:
+            return scan_service.cancel_scan(session, scan_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def scan_status(request: Request, scan_id: str) -> dict[str, object]:
     """Return the current status of one scan."""
-    factory = _factory(request)
-    with factory() as session:
-        scan = session.get(ScanRow, scan_id)
-        if scan is None:
-            raise HTTPException(status_code=404, detail="scan not found")
-        return {
-            "scan_id": scan.id,
-            "repository_id": scan.repository_id,
-            "status": ScanStatus(scan.status).value,
-            "created_at": scan.created_at,
-            "finished_at": scan.finished_at,
-            "complete": scan.complete,
-            "result_fingerprint": scan.result_fingerprint,
-            "error": scan.error,
-            "gate_passed": (
-                cast("dict[str, object]", scan.report_json.get("gate_result") or {}).get("passed")
-                if scan.report_json
-                else None
-            ),
-        }
+    with _factory(request)() as session:
+        try:
+            return scan_service.scan_status(session, scan_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def scan_history(
@@ -356,32 +327,10 @@ def scan_history(
     tie-breaker, so entries sharing a timestamp keep a deterministic order.
     ``X-Total-Count`` carries the repository's unpaged scan count.
     """
-    factory = _factory(request)
-    with factory() as session:
-        response.headers["X-Total-Count"] = str(count_scans(session, repository_id))
-        rows = session.scalars(
-            select(ScanRow)
-            .where(ScanRow.repository_id == repository_id)
-            .order_by(ScanRow.created_at.desc(), ScanRow.id.desc())
-            .limit(limit)
-            .offset(offset)
-        ).all()
-        summaries: list[ScanSummaryResponse] = []
-        for row in rows:
-            gate_result = cast("dict[str, object]", row.report_json.get("gate_result") or {}) if row.report_json else {}
-            summaries.append(
-                ScanSummaryResponse(
-                    scan_id=row.id,
-                    status=ScanStatus(row.status),
-                    created_at=row.created_at,
-                    finished_at=row.finished_at,
-                    result_fingerprint=row.result_fingerprint,
-                    complete=row.complete,
-                    gate_passed=cast("bool | None", gate_result.get("passed")),
-                    artifact_available=row.report_json is not None,
-                )
-            )
-        return summaries
+    with _factory(request)() as session:
+        page = scan_service.scan_history(session, repository_id, limit=limit, offset=offset)
+    response.headers["X-Total-Count"] = str(page.total)
+    return page.items
 
 
 def set_baseline(request: Request, repository_id: str, payload: BaselineSetRequest) -> dict[str, str]:
@@ -406,7 +355,11 @@ def set_baseline(request: Request, repository_id: str, payload: BaselineSetReque
 
 def scan_report(request: Request, scan_id: str) -> dict[str, Any]:
     """Return the canonical report JSON artifact for one scan."""
-    return _load_report(_factory(request), scan_id).model_dump(mode="json")
+    with _factory(request)() as session:
+        try:
+            return scan_service.load_report(session, scan_id).model_dump(mode="json")
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def scan_findings(
@@ -431,60 +384,30 @@ def scan_findings(
     applied before counting, so ``X-Total-Count`` always carries the unpaged
     number of matching findings, and ordering is deterministic.
     """
-    factory = _factory(request)
-    with factory() as session:
-        scan = session.get(ScanRow, scan_id)
-        if scan is None:
-            raise HTTPException(status_code=404, detail="scan not found")
-        repository = session.get(RepositoryRow, scan.repository_id)
-        baseline_fingerprints: set[str] | None = None
-        baseline = (
-            eligible_baseline(session, scan.repository_id, repository.baseline_scan_id)
-            if repository is not None and repository.baseline_scan_id
-            else None
-        )
-        if baseline is not None:
-            baseline_fingerprints = set(
-                session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline.id)).all()
-            )
-        filters: list[ColumnElement[bool]] = [FindingRow.scan_id == scan_id]
-        if status:
-            filters.append(FindingRow.status == status.upper())
-        if severity:
-            filters.append(FindingRow.severity == severity.lower())
-        if policy_id:
-            filters.append(FindingRow.policy_id == policy_id)
-        if file_path:
-            filters.append(FindingRow.file_path == file_path)
-        if suppressed is not None:
-            filters.append(FindingRow.suppressed == suppressed)
-        if baseline_status is not None:
-            if baseline_fingerprints is None:
-                filters.append(false())
-            elif baseline_status == "existing":
-                filters.append(FindingRow.fingerprint.in_(baseline_fingerprints))
-            else:
-                filters.append(FindingRow.fingerprint.not_in(baseline_fingerprints))
-        total = session.scalar(select(func.count()).select_from(FindingRow).where(*filters)) or 0
-        response.headers["X-Total-Count"] = str(total)
-        rows = session.scalars(
-            select(FindingRow)
-            .where(*filters)
-            .order_by(
-                FindingRow.policy_id,
-                nullslast(FindingRow.file_path),
-                nullslast(FindingRow.start_line),
-                FindingRow.fingerprint,
-            )
-            .limit(limit)
-            .offset(offset)
-        ).all()
-        return [_finding_payload(row, baseline_fingerprints) for row in rows]
+    filters = scan_service.FindingFilters(
+        status=status,
+        severity=severity,
+        policy_id=policy_id,
+        file_path=file_path,
+        suppressed=suppressed,
+        baseline_status=baseline_status,
+    )
+    with _factory(request)() as session:
+        try:
+            page = scan_service.scan_findings(session, scan_id, filters=filters, limit=limit, offset=offset)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    response.headers["X-Total-Count"] = str(page.total)
+    return page.items
 
 
 def export_scan(request: Request, scan_id: str, scan_format: str) -> Response:
     """Export one stored canonical report as json, sarif, or html."""
-    report = _load_report(_factory(request), scan_id)
+    with _factory(request)() as session:
+        try:
+            report = scan_service.load_report(session, scan_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     if scan_format == "json":
         return Response(report.model_dump_json(indent=2) + "\n", media_type="application/json")
     if scan_format == "sarif":
@@ -774,35 +697,6 @@ def _pack_delete_gate(request: Request, pack_name: str, gate_id: str) -> dict[st
 def _api_fallback(rest: str = "") -> dict[str, str]:
     """Return a JSON 404 for unknown API paths instead of the dashboard SPA."""
     raise HTTPException(status_code=404, detail=f"unknown API path: /api/{rest}")
-
-
-def _load_report(session_factory: sessionmaker[Session], scan_id: str) -> ScanReport:
-    with session_factory() as session:
-        scan = session.get(ScanRow, scan_id)
-        if scan is None or scan.report_json is None:
-            raise HTTPException(status_code=404, detail="scan report not available")
-        return ScanReport.model_validate(scan.report_json)
-
-
-def _finding_payload(row: FindingRow, baseline_fingerprints: set[str] | None = None) -> FindingResponse:
-    baseline_status: str | None = None
-    if baseline_fingerprints is not None:
-        baseline_status = "existing" if row.fingerprint in baseline_fingerprints else "new"
-    return FindingResponse(
-        policy_id=row.policy_id,
-        policy_version=row.policy_version,
-        status=row.status,
-        severity=row.severity,
-        file_path=row.file_path,
-        start_line=row.start_line,
-        end_line=row.end_line,
-        fingerprint=row.fingerprint,
-        explanation=row.explanation,
-        remediation=row.remediation,
-        fix=row.fix_json,
-        suppressed=row.suppressed,
-        baseline_status=baseline_status,
-    )
 
 
 def _suppression_payload(row: SuppressionRow) -> dict[str, object]:
