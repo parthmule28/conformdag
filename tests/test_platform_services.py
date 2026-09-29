@@ -74,6 +74,32 @@ def test_repository_duplicate_flush_rollback_and_sorted_reads(tmp_path: Path) ->
             repository_trends(session, repository_id="missing", now=datetime.now(UTC), days=7)
 
 
+def test_repository_unique_flush_conflict_recovers_after_caller_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    factory = initialize_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
+    with factory() as session:
+        session.add(RepositoryRow(id="existing", name="same", path=str(tmp_path)))
+        session.commit()
+        # Model a concurrent insert after the service's duplicate precheck; the
+        # actual uniqueness failure still comes from the real SQLite index.
+        real_scalar = session.scalar
+
+        def _stale_duplicate_check(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(session, "scalar", _stale_duplicate_check)
+        with pytest.raises(ConflictError, match="repository name already registered"):
+            register_repository(session, name="same", path=str(tmp_path), policy_pack=None, airflow_profile=None)
+        monkeypatch.setattr(session, "scalar", real_scalar)
+        session.rollback()
+        registered = register_repository(
+            session, name="good", path=str(tmp_path), policy_pack=None, airflow_profile=None
+        )
+        session.commit()
+        assert registered["name"] == "good"
+
+
 def test_workspace_repository_persists_existing_paths_without_kind_checks(tmp_path: Path) -> None:
     factory = initialize_session_factory(f"sqlite:///{tmp_path / 'db.sqlite'}")
     repo_file = tmp_path / "repo.py"
@@ -156,6 +182,8 @@ def test_scan_history_findings_filters_and_missing_report(tmp_path: Path) -> Non
             ).total
             == 0
         )
+        with pytest.raises(InvalidOperationError, match="invalid baseline status"):
+            scan_findings(session, "older", filters=FindingFilters(baseline_status="typo"), limit=10, offset=0)
         for scan_id in ("missing", "older"):
             with pytest.raises(NotFoundError, match="scan report not available"):
                 load_report(session, scan_id)

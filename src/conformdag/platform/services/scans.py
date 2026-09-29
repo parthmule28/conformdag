@@ -20,7 +20,7 @@ from conformdag.platform.db import (
     transition_scan_to_cancelled,
 )
 from conformdag.platform.domain import ScanStatus, ScanTrigger
-from conformdag.platform.services import ConflictError, NotFoundError
+from conformdag.platform.services import ConflictError, InvalidOperationError, NotFoundError
 from conformdag.platform.services.repositories import require_repository
 
 
@@ -147,6 +147,8 @@ def scan_findings(
     session: Session, scan_id: str, *, filters: FindingFilters, limit: int, offset: int
 ) -> Page[FindingResponse]:
     """Filter findings before counting, preserving baseline and deterministic ordering."""
+    if filters.baseline_status is not None and filters.baseline_status not in {"existing", "new"}:
+        raise InvalidOperationError("invalid baseline status")
     scan = session.get(ScanRow, scan_id)
     if scan is None:
         raise NotFoundError("scan not found")

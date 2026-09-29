@@ -2423,9 +2423,29 @@ def test_export_json_is_byte_compatible_with_stored_report(client: TestClient, t
     exported = _get(client, f"/api/v1/scans/{scan_id}/export/json")
     assert exported.status_code == 200
     assert json.loads(exported.text)["result_fingerprint"] == "c" * 64
+    assert exported.content == (stored.model_dump_json(indent=2) + "\n").encode()
     sarif = _get(client, f"/api/v1/scans/{scan_id}/export/sarif")
     assert sarif.status_code == 200
     assert json.loads(sarif.text)["version"] == "2.1.0"
+    assert sarif.headers["content-type"].startswith("application/sarif+json")
+    from conformdag.reporting import render_html, render_sarif
+
+    assert sarif.content == (json.dumps(render_sarif(stored), indent=2, sort_keys=True) + "\n").encode()
+    html = _get(client, f"/api/v1/scans/{scan_id}/export/html")
+    assert html.status_code == 200
+    assert html.headers["content-type"].startswith("text/html")
+    assert html.content == render_html(stored, include_evidence=True).encode()
+
+    with factory() as session:
+        prune_scan_artifact(session, scan_id)
+        session.commit()
+    for url in (f"/api/v1/scans/{scan_id}/report", f"/api/v1/scans/{scan_id}/export/html"):
+        unavailable = _get(client, url)
+        assert unavailable.status_code == 404
+        assert unavailable.json() == {"detail": "scan report not available"}
+    missing = _get(client, "/api/v1/scans/missing/export/json")
+    assert missing.status_code == 404
+    assert missing.json() == {"detail": "scan report not available"}
 
 
 def test_worker_skips_cancelled_scan(platform_env: str) -> None:
