@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from sqlalchemy.orm import Session, sessionmaker
 
 import conformdag.platform.app as platform_app
 from conformdag.platform.app import API_PREFIX, RepositoryCreate, WorkspaceLoadRequest, require_admin
@@ -16,7 +15,7 @@ from conformdag.platform.services import ConflictError, InvalidOperationError
 from conformdag.platform.services import repositories as repository_service
 from conformdag.platform.workspace import WorkspaceFile, load_workspace
 
-_factory = cast("Callable[[Request], sessionmaker[Session]]", platform_app.__dict__["_factory"])
+_factory = platform_app.session_factory_for
 _register_workspace_packs = cast(
     "Callable[[PackService, WorkspaceFile], None]", platform_app.__dict__["_register_workspace_packs"]
 )

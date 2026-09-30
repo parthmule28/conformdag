@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -26,18 +26,10 @@ from conformdag.application import coerce_platform_airflow_profile
 from conformdag.platform.contracts import (
     GateResponse,
     GateUpsertRequest,
-    OverviewResponse,
     PolicyVocabularyRequest,
-    RepositoryTrendsResponse,
-)
-from conformdag.platform.db import (
-    utcnow,
 )
 from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackError, PackNotFoundError, PackService
-from conformdag.platform.services import ConflictError, NotFoundError
-from conformdag.platform.services import repositories as repository_service
-from conformdag.platform.services import suppressions as suppression_service
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
 from conformdag.policy import PolicyValidationError
 
@@ -218,6 +210,11 @@ def _factory(request: Request) -> sessionmaker[Session]:
     return factory
 
 
+def session_factory_for(request: Request) -> sessionmaker[Session]:
+    """Return the configured session factory for a route handler."""
+    return _factory(request)
+
+
 def _register_workspace_packs(service: PackService, workspace: WorkspaceFile) -> None:
     """Register every workspace pack (and per-repo pack) with the pack service."""
     for pack in workspace.policy_packs:
@@ -230,63 +227,6 @@ def _register_workspace_packs(service: PackService, workspace: WorkspaceFile) ->
 def _health() -> dict[str, str]:
     """Return the liveness payload."""
     return {"status": "ok"}
-
-
-def list_suppressions(request: Request) -> list[dict[str, object]]:
-    """List the operational suppression layer with audit fields."""
-    with _factory(request)() as session:
-        return suppression_service.list_suppressions(session)
-
-
-def create_suppression(request: Request, payload: SuppressionCreate) -> dict[str, object]:
-    """Create one operational suppression owned by the platform."""
-    with _factory(request)() as session:
-        try:
-            result = suppression_service.create_suppression(
-                session,
-                policy_id=payload.policy_id,
-                fingerprint=payload.fingerprint,
-                reason=payload.reason,
-                owner=payload.owner,
-                expires_at=payload.expires_at,
-            )
-            session.commit()
-        except ConflictError as exc:
-            session.rollback()
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return result
-
-
-def update_suppression(request: Request, suppression_id: str, payload: SuppressionUpdate) -> dict[str, object]:
-    """Update the editable audit fields of one platform suppression."""
-    with _factory(request)() as session:
-        try:
-            result = suppression_service.update_suppression(
-                session, suppression_id, reason=payload.reason, owner=payload.owner, expires_at=payload.expires_at
-            )
-        except NotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        session.commit()
-        return result
-
-
-def overview(request: Request, days: Annotated[int, Query(ge=1, le=365)] = 30) -> OverviewResponse:
-    """Return read-only overview aggregates across registered repositories."""
-    factory = _factory(request)
-    with factory() as session:
-        return repository_service.overview(session, now=utcnow(), days=days)
-
-
-def repository_trends(
-    request: Request, repository_id: str, days: Annotated[int, Query(ge=1, le=365)] = 30
-) -> RepositoryTrendsResponse:
-    """Return read-only daily trend aggregates for one repository."""
-    factory = _factory(request)
-    with factory() as session:
-        try:
-            return repository_service.repository_trends(session, repository_id=repository_id, now=utcnow(), days=days)
-        except NotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def create_app(
@@ -374,17 +314,15 @@ def create_app(
     app.middleware("http")(request_logging_middleware)
 
     app.get(API_PREFIX + "/health")(_health)
+    from conformdag.platform.routes import overview as overview_routes
     from conformdag.platform.routes import repositories as repository_routes
     from conformdag.platform.routes import scans as scan_routes
+    from conformdag.platform.routes import suppressions as suppression_routes
 
     repository_routes.register_routes(app)
     scan_routes.register_routes(app)
-
-    app.get(API_PREFIX + "/suppressions")(list_suppressions)
-    app.post(API_PREFIX + "/suppressions", dependencies=[Depends(require_admin)])(create_suppression)
-    app.patch(API_PREFIX + "/suppressions/{suppression_id}", dependencies=[Depends(require_admin)])(update_suppression)
-    app.get(API_PREFIX + "/overview")(overview)
-    app.get(API_PREFIX + "/repos/{repository_id}/trends")(repository_trends)
+    suppression_routes.register_routes(app)
+    overview_routes.register_routes(app)
 
     app.get(API_PREFIX + "/packs")(_pack_list)
     app.get(API_PREFIX + "/packs/{pack_name}/policies")(_pack_policies)

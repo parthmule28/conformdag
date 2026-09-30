@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from sqlalchemy.orm import Session, sessionmaker
 
 import conformdag.platform.app as platform_app
 from conformdag.platform.app import API_PREFIX, BaselineSetRequest, require_admin
@@ -17,7 +15,7 @@ from conformdag.platform.services import baselines as baseline_service
 from conformdag.platform.services import scans as scan_service
 from conformdag.reporting import render_html, render_sarif
 
-_factory = cast("Callable[[Request], sessionmaker[Session]]", platform_app.__dict__["_factory"])
+_factory = platform_app.session_factory_for
 
 
 def trigger_scan(request: Request, repository_id: str) -> dict[str, str]:
