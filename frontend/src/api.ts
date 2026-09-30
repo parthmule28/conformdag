@@ -9,6 +9,32 @@
 const BASE = "/api/v1";
 const TOKEN_KEY = "conformdag-admin-token";
 
+export type ScanLifecycleStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type FindingStatus = "PASS" | "FAIL" | "NEEDS_REVIEW" | "NOT_APPLICABLE" | "SKIPPED" | "ERROR";
+
+export type Severity = "info" | "low" | "medium" | "high" | "critical";
+
+export type RemediationAction = "add-kwarg" | "set-kwarg" | "add-owner" | "add-tags" | "move-statement" | "manual";
+
+export type RemediationNode = "dag-call" | "task-call" | "statement";
+
+export interface RemediationTarget {
+  line: number;
+  column: number;
+  enclosing: string | null;
+  node: RemediationNode;
+}
+
+export interface RemediationPayload {
+  fix_kind: string;
+  action: RemediationAction;
+  kwarg: string | null;
+  target: RemediationTarget | null;
+  value: string | null;
+  hint: string | null;
+}
+
 export interface Repository {
   id: string;
   name: string;
@@ -20,7 +46,7 @@ export interface Repository {
 
 export interface ScanSummary {
   scan_id: string;
-  status: string;
+  status: ScanLifecycleStatus;
   created_at: string;
   finished_at: string | null;
   result_fingerprint: string | null;
@@ -32,15 +58,15 @@ export interface ScanSummary {
 export interface Finding {
   policy_id: string;
   policy_version: string;
-  status: string;
-  severity: string;
+  status: FindingStatus;
+  severity: Severity;
   file_path: string | null;
   start_line: number | null;
   end_line: number | null;
   fingerprint: string;
   explanation: string | null;
   remediation: string | null;
-  fix: Record<string, unknown> | null;
+  fix: RemediationPayload | null;
   suppressed: boolean;
   baseline_status: "existing" | "new" | null;
 }
@@ -83,7 +109,7 @@ export interface OverviewScan {
   scan_id: string;
   repository_id: string;
   repository_name: string;
-  status: string;
+  status: ScanLifecycleStatus;
   created_at: string;
   finished_at: string | null;
   complete: boolean | null;
@@ -109,7 +135,7 @@ export interface RepositoryTrendsResponse {
 export interface ScanStatus {
   scan_id: string;
   repository_id: string;
-  status: string;
+  status: ScanLifecycleStatus;
   created_at: string;
   finished_at: string | null;
   complete: boolean | null;
@@ -147,15 +173,15 @@ export interface ReportFindingEvidence {
 export interface ReportFinding {
   policy_id: string;
   policy_version: string;
-  status: string;
-  severity: string;
+  status: FindingStatus;
+  severity: Severity;
   enforcement: string;
   location: ReportFindingLocation;
   evidence: ReportFindingEvidence | null;
   explanation: string | null;
   remediation: string | null;
   confidence: string | null;
-  fix: Record<string, unknown> | null;
+  fix: RemediationPayload | null;
   audit_evidence: Record<string, unknown>[];
   fingerprint: string;
   blocking: boolean;
@@ -187,7 +213,7 @@ export interface ScanReport {
 
 export type GateRule =
   | { type: "no-new-findings" }
-  | { type: "max-severity"; severity: string }
+  | { type: "max-severity"; severity: Severity }
   | { type: "max-findings"; count: number }
   | { type: "always-block"; policy_ids: string[] }
   | { type: "failure-rate"; max_percent: number };
@@ -222,7 +248,7 @@ export interface FindingParams extends PageParams {
 
 export interface ScanTransitionResponse {
   scan_id: string;
-  status: string;
+  status: ScanLifecycleStatus;
 }
 
 export interface BaselineResponse {
@@ -275,14 +301,14 @@ export interface PolicyInfo {
   title: string;
   version: string;
   status: string;
-  severity: string;
+  severity: Severity;
   tags: string[];
   deterministic_checks: string[];
   configuration: PolicyConfiguration;
   /** @deprecated Compatibility projection; use configuration.kind. */
   check_kind: string;
   /** @deprecated Compatibility projection; use configuration. */
-  check_config: Record<string, unknown>;
+  check_config: PolicyConfiguration;
   source_document: string;
   source_section: string;
   source_version: string | null;
@@ -299,8 +325,12 @@ export interface PolicyUpsertRequest {
   version: string;
   status: string;
   severity: string;
-  deterministic_checks: string[];
-  configuration: PolicyConfiguration;
+  deterministic_checks?: string[];
+  configuration?: PolicyConfiguration;
+  /** @deprecated Compatibility alias for configuration.kind. */
+  check_kind?: string;
+  /** @deprecated Compatibility alias for configuration. */
+  check_config?: PolicyConfiguration;
   source_document: string;
   source_section: string;
   invariant: string;
@@ -313,10 +343,14 @@ export interface PolicyUpsertRequest {
   tags?: string[];
 }
 
-export interface MutationResponse {
-  status: string;
-  policy_id?: string;
-  gate_id?: string;
+export interface PolicyMutationResponse {
+  status: "saved" | "deleted";
+  policy_id: string;
+}
+
+export interface GateMutationResponse {
+  status: "saved" | "deleted";
+  gate_id: string;
 }
 
 export interface PackValidation {
@@ -518,7 +552,7 @@ export function upsertPolicy(
   packName: string,
   policyId: string,
   payload: PolicyUpsertRequest,
-): Promise<MutationResponse> {
+): Promise<PolicyMutationResponse> {
   return request(`/packs/${encodeURIComponent(packName)}/policies/${encodeURIComponent(policyId)}`, {
     method: "PUT",
     body: JSON.stringify(payload),
@@ -529,11 +563,11 @@ export function updatePolicy(
   packName: string,
   policyId: string,
   payload: PolicyUpsertRequest,
-): Promise<MutationResponse> {
+): Promise<PolicyMutationResponse> {
   return upsertPolicy(packName, policyId, payload);
 }
 
-export function deletePolicy(packName: string, policyId: string): Promise<MutationResponse> {
+export function deletePolicy(packName: string, policyId: string): Promise<PolicyMutationResponse> {
   return request(`/packs/${encodeURIComponent(packName)}/policies/${encodeURIComponent(policyId)}`, {
     method: "DELETE",
   });
@@ -553,14 +587,14 @@ export function upsertGate(
   packName: string,
   gateId: string,
   payload: GateUpsertRequest,
-): Promise<MutationResponse> {
+): Promise<GateMutationResponse> {
   return request(`/packs/${encodeURIComponent(packName)}/gates/${encodeURIComponent(gateId)}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
-export function deleteGate(packName: string, gateId: string): Promise<MutationResponse> {
+export function deleteGate(packName: string, gateId: string): Promise<GateMutationResponse> {
   return request(`/packs/${encodeURIComponent(packName)}/gates/${encodeURIComponent(gateId)}`, {
     method: "DELETE",
   });

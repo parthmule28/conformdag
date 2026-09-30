@@ -35,7 +35,16 @@ import {
   upsertPolicy,
   validatePack,
   type GateUpsertRequest,
+  type Gate,
+  type GateMutationResponse,
+  type Finding,
+  type PolicyInfo,
+  type PolicyMutationResponse,
   type PolicyUpsertRequest,
+  type RemediationPayload,
+  type ReportFinding,
+  type ScanReport,
+  type ScanSummary,
   type SuppressionInput,
 } from "./api";
 
@@ -49,7 +58,7 @@ const REPOSITORY_FIXTURE = {
   airflow_profile: "3.3.0",
 };
 
-const SCAN_SUMMARY_FIXTURE = {
+const SCAN_SUMMARY_FIXTURE: ScanSummary = {
   scan_id: "scan-1",
   status: "succeeded",
   created_at: "2026-09-17T10:00:00Z",
@@ -60,28 +69,37 @@ const SCAN_SUMMARY_FIXTURE = {
   artifact_available: true,
 };
 
-const FINDING_FIXTURE = {
+const REMEDIATION_FIXTURE: RemediationPayload = {
+  fix_kind: "codemod",
+  action: "add-owner",
+  kwarg: null,
+  target: { line: 12, column: 0, enclosing: null, node: "statement" },
+  value: "data-platform",
+  hint: null,
+};
+
+const FINDING_FIXTURE: Finding = {
   policy_id: "OWN-001",
   policy_version: "2",
   status: "FAIL",
-  severity: "HIGH",
+  severity: "high",
   file_path: "dags/load orders.py",
   start_line: 12,
   end_line: 20,
   fingerprint: "fp-own-1",
   explanation: "DAG lacks an effective owner",
   remediation: "Declare owner on every DAG call",
-  fix: { fix_kind: "codemod", action: "add-owner", value: "data-platform" },
+  fix: REMEDIATION_FIXTURE,
   suppressed: false,
   baseline_status: "new",
 };
 
-const POLICY_FIXTURE = {
+const POLICY_FIXTURE: PolicyInfo = {
   id: "OWN-001",
   title: "Effective owner",
   version: "2",
   status: "ACTIVE",
-  severity: "HIGH",
+  severity: "high",
   tags: ["ownership", "core"],
   check_kind: "required-owner",
   check_config: { kind: "required-owner", owner: "data-platform" },
@@ -110,9 +128,9 @@ const POLICY_FIXTURE = {
   },
 };
 
-const GATE_FIXTURE = {
+const GATE_FIXTURE: Gate = {
   id: "release-critical",
-  rules: [{ type: "max-severity", severity: "HIGH" }],
+  rules: [{ type: "max-severity", severity: "high" }],
 };
 
 const TREND_POINT_FIXTURE = {
@@ -146,14 +164,33 @@ const OVERVIEW_FIXTURE = {
   ],
 };
 
-const REPORT_FIXTURE = {
+const REPORT_FINDING_FIXTURE: ReportFinding = {
+  policy_id: "OWN-001",
+  policy_version: "2",
+  status: "FAIL",
+  severity: "high",
+  enforcement: "deterministic",
+  location: { file: "dags/load orders.py", start_line: 12, end_line: 20 },
+  evidence: null,
+  explanation: "DAG lacks an effective owner",
+  remediation: "Declare owner on every DAG call",
+  confidence: null,
+  fix: REMEDIATION_FIXTURE,
+  audit_evidence: [],
+  fingerprint: "fp-own-1",
+  blocking: false,
+  suppressed: false,
+  suppression: null,
+};
+
+const REPORT_FIXTURE: ScanReport = {
   report_version: "2",
   complete: true,
   result_fingerprint: "fp-abc",
   files_scanned: ["dags/example.py"],
   policies_evaluated: ["OWN-001"],
   policies_skipped: [],
-  findings: [],
+  findings: [REPORT_FINDING_FIXTURE],
   runtime_observations: [],
   issues: [
     {
@@ -279,7 +316,7 @@ describe("error contract", () => {
         title: "",
         version: "",
         status: "ACTIVE",
-        severity: "HIGH",
+        severity: "high",
         deterministic_checks: ["effective-owner"],
         configuration: { kind: "required-owner" },
         source_document: "standards.md",
@@ -504,6 +541,7 @@ describe("scan report route", () => {
     expect(report.gate_result?.passed).toBe(false);
     expect(report.gate_result?.rules[0]?.rule_type).toBe("max-severity");
     expect(report.issues).toHaveLength(1);
+    expect(report.findings[0]?.fix).toEqual(REMEDIATION_FIXTURE);
   });
 });
 
@@ -580,7 +618,7 @@ describe("policy pack routes", () => {
       tags: ["ownership", "core"],
     };
     fetchMock.mockResolvedValue(jsonResponse({ status: "saved", policy_id: "OWN-001" }));
-    const saved = await upsertPolicy("core-pack", "OWN-001", payload);
+    const saved: PolicyMutationResponse = await upsertPolicy("core-pack", "OWN-001", payload);
     const { url, init } = lastCall();
     expect(url).toBe("/api/v1/packs/core-pack/policies/OWN-001");
     expect(init.method).toBe("PUT");
@@ -593,9 +631,9 @@ describe("policy pack routes", () => {
       title: "Effective owner",
       version: "3",
       status: "ACTIVE",
-      severity: "HIGH",
-      deterministic_checks: ["effective-owner"],
-      configuration: { kind: "required-owner" },
+      severity: "high",
+      check_kind: "required-owner",
+      check_config: { kind: "required-owner", allowed_values: ["platform"] },
       source_document: "standards.md",
       source_section: "§3 Owners",
       invariant: "invariant",
@@ -610,7 +648,7 @@ describe("policy pack routes", () => {
 
   it("deletes a policy with DELETE", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ status: "deleted", policy_id: "OWN-001" }));
-    const deleted = await deletePolicy("core-pack", "OWN-001");
+    const deleted: PolicyMutationResponse = await deletePolicy("core-pack", "OWN-001");
     const { url, init } = lastCall();
     expect(url).toBe("/api/v1/packs/core-pack/policies/OWN-001");
     expect(init.method).toBe("DELETE");
@@ -633,7 +671,7 @@ describe("quality gate routes", () => {
     const gates = await listPackGates("core-pack");
     expect(lastCall().url).toBe("/api/v1/packs/core-pack/gates");
     expect(gates[0]?.id).toBe("release-critical");
-    expect(gates[0]?.rules).toEqual([{ type: "max-severity", severity: "HIGH" }]);
+    expect(gates[0]?.rules).toEqual([{ type: "max-severity", severity: "high" }]);
   });
 
   it("upserts a gate with PUT and a rules body", async () => {
@@ -641,7 +679,7 @@ describe("quality gate routes", () => {
       rules: [{ type: "no-new-findings" }, { type: "max-findings", count: 3 }],
     };
     fetchMock.mockResolvedValue(jsonResponse({ status: "saved", gate_id: "release-critical" }));
-    const saved = await upsertGate("core-pack", "release-critical", payload);
+    const saved: GateMutationResponse = await upsertGate("core-pack", "release-critical", payload);
     const { url, init } = lastCall();
     expect(url).toBe("/api/v1/packs/core-pack/gates/release-critical");
     expect(init.method).toBe("PUT");
@@ -651,7 +689,7 @@ describe("quality gate routes", () => {
 
   it("deletes a gate with DELETE", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ status: "deleted", gate_id: "release-critical" }));
-    const deleted = await deleteGate("core-pack", "release-critical");
+    const deleted: GateMutationResponse = await deleteGate("core-pack", "release-critical");
     const { url, init } = lastCall();
     expect(url).toBe("/api/v1/packs/core-pack/gates/release-critical");
     expect(init.method).toBe("DELETE");
