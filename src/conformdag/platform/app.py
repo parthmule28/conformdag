@@ -310,6 +310,7 @@ def create_app(
 
     app.middleware("http")(request_logging_middleware)
 
+    # Registration order is part of the stable API contract; keep fallbacks last.
     app.get(API_PREFIX + "/health")(_health)
     from conformdag.platform.routes import overview as overview_routes
     from conformdag.platform.routes import packs as pack_routes
