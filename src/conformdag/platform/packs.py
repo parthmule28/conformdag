@@ -8,6 +8,7 @@ import os
 import tempfile
 import threading
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,7 +16,6 @@ from pydantic import TypeAdapter
 from ruamel.yaml import YAML
 
 from conformdag.models import Policy, PolicyConfiguration, PolicyPack, QualityGate
-from conformdag.platform.contracts import PolicyVocabularyResponse
 from conformdag.policy import PolicyValidationError, load_policy_pack, validate_policy_pack
 
 
@@ -25,6 +25,26 @@ class PackError(ValueError):
 
 class PackNotFoundError(PackError):
     """Raised when a registered pack or requested pack member does not exist."""
+
+
+@dataclass(frozen=True)
+class PackSummaryData:
+    """Internal pack listing metadata, detached from the HTTP response model."""
+
+    name: str
+    path: str
+    id: str | None
+    version: str | None
+    policy_count: int
+    error: str | None
+
+
+@dataclass(frozen=True)
+class PackValidationResult:
+    """Internal result of validating one registered policy pack."""
+
+    valid: bool
+    errors: list[str]
 
 
 _POLICY_CONFIGURATION_ADAPTER: TypeAdapter[PolicyConfiguration] = TypeAdapter(PolicyConfiguration)
@@ -41,58 +61,38 @@ class PackService:
         with self._lock:
             self.pack_paths[name] = path
 
-    def list_packs(self) -> list[dict[str, Any]]:
+    def list_packs(self) -> list[PackSummaryData]:
         with self._lock:
-            packs: list[dict[str, Any]] = []
+            packs: list[PackSummaryData] = []
             for name, path in sorted(self.pack_paths.items()):
-                entry: dict[str, Any] = {
-                    "name": name,
-                    "path": str(path),
-                    "id": None,
-                    "version": None,
-                    "policy_count": 0,
-                    "error": None,
-                }
+                pack_id: str | None = None
+                version: str | None = None
+                policy_count = 0
+                error: str | None = None
                 try:
                     pack = load_policy_pack(path, path.parent)
-                    entry["id"] = pack.id
-                    entry["version"] = pack.version
-                    entry["policy_count"] = len(pack.policies)
+                    pack_id = pack.id
+                    version = pack.version
+                    policy_count = len(pack.policies)
                 except PolicyValidationError as exc:
-                    entry["error"] = str(exc)
-                packs.append(entry)
+                    error = str(exc)
+                packs.append(
+                    PackSummaryData(
+                        name=name,
+                        path=str(path),
+                        id=pack_id,
+                        version=version,
+                        policy_count=policy_count,
+                        error=error,
+                    )
+                )
             return packs
 
-    def list_policies(self, pack_name: str) -> list[dict[str, Any]]:
+    def list_policies(self, pack_name: str) -> list[Policy]:
         with self._lock:
             pack_path = self._require_pack(pack_name)
             pack = load_policy_pack(pack_path, pack_path.parent)
-            return [
-                {
-                    "id": policy.id,
-                    "title": policy.title,
-                    "version": policy.version,
-                    "status": policy.status.value,
-                    "severity": policy.severity.value,
-                    "tags": policy.tags,
-                    "source_document": str(policy.source.document),
-                    "source_section": policy.source.section,
-                    "source_version": policy.source.version,
-                    "invariant": policy.invariant,
-                    "safe_path": policy.safe_path,
-                    "ownership": policy.ownership.model_dump(mode="json"),
-                    "scope": policy.scope.model_dump(mode="json"),
-                    "exceptions": policy.exceptions.model_dump(mode="json"),
-                    "enforcement": policy.enforcement.model_dump(mode="json"),
-                    **PolicyVocabularyResponse(
-                        deterministic_checks=policy.enforcement.deterministic_checks,
-                        configuration=policy.configuration.model_dump(mode="json"),
-                        check_kind=policy.configuration.kind,
-                        check_config=policy.configuration.model_dump(mode="json"),
-                    ).model_dump(mode="json"),
-                }
-                for policy in pack.policies
-            ]
+            return list(pack.policies)
 
     def upsert_policy(self, pack_name: str, policy_id: str, policy_data: dict[str, Any]) -> None:
         with self._lock:
@@ -134,11 +134,11 @@ class PackService:
                 raise PackError("; ".join(issues))
             _write_pack(pack, pack_path)
 
-    def list_gates(self, pack_name: str) -> list[dict[str, Any]]:
+    def list_gates(self, pack_name: str) -> list[QualityGate]:
         with self._lock:
             pack_path = self._require_pack(pack_name)
             pack = load_policy_pack(pack_path, pack_path.parent)
-            return [gate.model_dump(mode="json") for gate in pack.quality_gates]
+            return list(pack.quality_gates)
 
     def upsert_gate(self, pack_name: str, gate_id: str, gate_data: dict[str, Any]) -> None:
         with self._lock:
@@ -176,14 +176,14 @@ class PackService:
                 raise PackError("; ".join(issues))
             _write_pack(pack, pack_path)
 
-    def validate_pack(self, pack_name: str) -> dict[str, Any]:
+    def validate_pack(self, pack_name: str) -> PackValidationResult:
         with self._lock:
             pack_path = self._require_pack(pack_name)
             try:
                 load_policy_pack(pack_path, pack_path.parent)
             except PolicyValidationError as exc:
-                return {"valid": False, "errors": str(exc).split("; ")}
-            return {"valid": True, "errors": []}
+                return PackValidationResult(valid=False, errors=str(exc).split("; "))
+            return PackValidationResult(valid=True, errors=[])
 
     def _require_pack(self, pack_name: str) -> Path:
         path = self.pack_paths.get(pack_name)

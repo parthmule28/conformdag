@@ -2264,6 +2264,55 @@ def test_aggregate_functions_reject_non_positive_days(platform_env: str) -> None
             build_repository_trends(session, "repo1", now, 0)
 
 
+def test_aggregate_services_return_internal_data_records(platform_env: str) -> None:
+    from conformdag.platform.aggregates import (
+        OverviewData,
+        OverviewScanData,
+        RepositoryTrendsData,
+        TrendPointData,
+        build_overview,
+        build_repository_trends,
+    )
+
+    now = utcnow()
+    with initialize_session_factory(platform_env)() as session:
+        session.add(RepositoryRow(id="aggregate-repo", name="aggregate", path="/workspace"))
+        session.add(
+            ScanRow(
+                id="aggregate-scan",
+                repository_id="aggregate-repo",
+                status="succeeded",
+                complete=True,
+                created_at=now - timedelta(minutes=1),
+                finished_at=now,
+            )
+        )
+        session.add(
+            FindingRow(
+                scan_id="aggregate-scan",
+                repository_id="aggregate-repo",
+                policy_id="AIR-TST-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                fingerprint="aggregate-finding",
+                suppressed=False,
+            )
+        )
+        session.commit()
+
+        overview = build_overview(session, now, 7)
+        trends = build_repository_trends(session, "aggregate-repo", now, 7)
+
+    assert isinstance(overview, OverviewData)
+    assert overview.current_failure_count == 1
+    assert isinstance(overview.trends[0], TrendPointData)
+    assert isinstance(overview.recent_scans[0], OverviewScanData)
+    assert overview.trends[0].fail_finding_count == 1
+    assert isinstance(trends, RepositoryTrendsData)
+    assert trends.points == overview.trends
+
+
 def test_findings_migration_adds_nullable_end_line(platform_env: str) -> None:
     factory = initialize_session_factory(platform_env)
     with factory() as session:
@@ -5186,7 +5235,8 @@ def test_pack_service_serializes_snapshot_reads_with_writes(tmp_path: Path, monk
 def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
     from shutil import copyfile
 
-    from conformdag.platform.packs import PackError, PackService
+    from conformdag.models import Policy
+    from conformdag.platform.packs import PackError, PackService, PackSummaryData
 
     (tmp_path / "standards").mkdir()
     (tmp_path / "policies").mkdir()
@@ -5195,9 +5245,10 @@ def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
 
     service = PackService({"test": tmp_path / "policies" / "pack.yaml"})
     packs = service.list_packs()
-    assert len(packs) == 1 and packs[0]["error"] is None
+    assert len(packs) == 1 and isinstance(packs[0], PackSummaryData) and packs[0].error is None
 
     policies = service.list_policies("test")
+    assert all(isinstance(policy, Policy) for policy in policies)
     original_count = len(policies)
 
     service.upsert_policy(
@@ -5226,8 +5277,8 @@ def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
     )
     updated = service.list_policies("test")
     assert len(updated) == original_count
-    owner = next(p for p in updated if p["id"] == "AIR-DET-001")
-    assert owner["version"] == "2.0.0"
+    owner = next(p for p in updated if p.id == "AIR-DET-001")
+    assert owner.version == "2.0.0"
 
     service.delete_policy("test", "AIR-DET-001")
     after = service.list_policies("test")
@@ -5373,6 +5424,7 @@ def _write_gate_pack(tmp_path: Path, gates: list[dict[str, Any]]) -> Path:
 
 
 def test_pack_service_gate_crud_preserves_order_and_round_trips(tmp_path: Path) -> None:
+    from conformdag.models import QualityGate
     from conformdag.platform.packs import PackError, PackService
 
     pack_path = _write_gate_pack(
@@ -5389,7 +5441,9 @@ def test_pack_service_gate_crud_preserves_order_and_round_trips(tmp_path: Path) 
         ],
     )
     service = PackService({"test": pack_path})
-    assert [gate["id"] for gate in service.list_gates("test")] == ["release", "sandbox"]
+    gates = service.list_gates("test")
+    assert all(isinstance(gate, QualityGate) for gate in gates)
+    assert [gate.id for gate in gates] == ["release", "sandbox"]
 
     service.upsert_gate(
         "test",
@@ -5417,7 +5471,7 @@ def test_pack_service_gate_crud_preserves_order_and_round_trips(tmp_path: Path) 
 
     final = load_policy_pack(pack_path, tmp_path)
     assert [gate.id for gate in final.quality_gates] == ["release", "audit"]
-    assert [gate["id"] for gate in service.list_gates("test")] == ["release", "audit"]
+    assert [gate.id for gate in service.list_gates("test")] == ["release", "audit"]
 
     with pytest.raises(PackError):
         service.list_gates("missing")
@@ -6083,7 +6137,7 @@ def test_pack_policy_upsert_requires_complete_data_for_new_policy(client: TestCl
 def test_pack_service_validate(tmp_path: Path) -> None:
     from shutil import copyfile
 
-    from conformdag.platform.packs import PackService
+    from conformdag.platform.packs import PackService, PackValidationResult
 
     (tmp_path / "standards").mkdir()
     (tmp_path / "policies").mkdir()
@@ -6092,7 +6146,8 @@ def test_pack_service_validate(tmp_path: Path) -> None:
 
     service = PackService({"test": tmp_path / "policies" / "pack.yaml"})
     result = service.validate_pack("test")
-    assert result["valid"] is True
+    assert isinstance(result, PackValidationResult)
+    assert result.valid is True
 
 
 def _write_unknown_check_pack(tmp_path: Path) -> Path:
@@ -6134,14 +6189,15 @@ def _write_unknown_check_pack(tmp_path: Path) -> Path:
 
 
 def test_pack_service_validate_rejects_unknown_check(tmp_path: Path) -> None:
-    from conformdag.platform.packs import PackService
+    from conformdag.platform.packs import PackService, PackValidationResult
 
     pack_path = _write_unknown_check_pack(tmp_path)
 
     result = PackService({"test": pack_path}).validate_pack("test")
 
-    assert result["valid"] is False
-    assert any("unknown deterministic check" in error for error in result["errors"])
+    assert isinstance(result, PackValidationResult)
+    assert result.valid is False
+    assert any("unknown deterministic check" in error for error in result.errors)
 
 
 def test_workspace_registration_surfaces_unknown_check(client: TestClient, tmp_path: Path) -> None:
@@ -6266,7 +6322,7 @@ def test_pack_policy_list_returns_422_for_malformed_pack(client: TestClient, tmp
 
 
 def test_pack_validate_reports_gate_errors(tmp_path: Path) -> None:
-    from conformdag.platform.packs import PackService
+    from conformdag.platform.packs import PackService, PackValidationResult
 
     pack_path = tmp_path / "pack.yaml"
     pack_path.write_text(
@@ -6289,8 +6345,9 @@ def test_pack_validate_reports_gate_errors(tmp_path: Path) -> None:
 
     result = service.validate_pack("test")
 
-    assert not result["valid"]
-    assert any("unique" in error for error in result["errors"])
+    assert isinstance(result, PackValidationResult)
+    assert not result.valid
+    assert any("unique" in error for error in result.errors)
 
 
 def test_pack_list_endpoint_returns_empty_when_no_packs(client: TestClient) -> None:
@@ -6849,7 +6906,7 @@ def test_c14_platform_response_models_are_strict_and_serialize_wire_values() -> 
         "suppressed": False,
         "baseline_status": "new",
     }
-    cases: list[tuple[type[BaseModel], dict[str, object]]] = [
+    cases: list[tuple[type[BaseModel], dict[str, Any]]] = [
         (HealthResponse, {"status": "ok"}),
         (RepositoryRegistrationResponse, {"id": "repo1", "name": "dags"}),
         (WorkspaceLoadResponse, {"repositories_registered": 1}),

@@ -13,8 +13,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from conformdag.application import coerce_platform_airflow_profile
-from conformdag.platform.aggregates import build_overview, build_repository_trends
-from conformdag.platform.contracts import OverviewResponse, RepositoryTrendsResponse
+from conformdag.platform.aggregates import (
+    OverviewData,
+    RepositoryTrendsData,
+    build_overview,
+    build_repository_trends,
+)
 from conformdag.platform.db import RepositoryRow, new_id
 from conformdag.platform.services import ConflictError, InvalidOperationError, NotFoundError
 from conformdag.platform.workspace import WorkspaceRepository
@@ -123,12 +127,12 @@ def require_repository(session: Session, repository_id: str) -> RepositoryRow:
     return row
 
 
-def overview(session: Session, *, now: datetime, days: int) -> OverviewResponse:
+def overview(session: Session, *, now: datetime, days: int) -> OverviewData:
     """Delegate existing overview aggregation without exposing it to HTTP routes."""
     return build_overview(session, now, days)
 
 
-def repository_trends(session: Session, *, repository_id: str, now: datetime, days: int) -> RepositoryTrendsResponse:
+def repository_trends(session: Session, *, repository_id: str, now: datetime, days: int) -> RepositoryTrendsData:
     """Check repository existence before delegating existing trend aggregation."""
     require_repository(session, repository_id)
     return build_repository_trends(session, repository_id, now, days)

@@ -16,16 +16,58 @@ from typing import cast
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
-from conformdag.platform.contracts import (
-    OverviewResponse,
-    OverviewScan,
-    RepositoryTrendsResponse,
-    TrendPoint,
-)
 from conformdag.platform.db import FindingRow, RepositoryRow, ScanRow, eligible_baseline
 from conformdag.platform.domain import ACTIVE_SCAN_STATUSES, ScanStatus
 
 RECENT_SCAN_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class TrendPointData:
+    """Internal aggregate values for one UTC-day trend bucket."""
+
+    date: date
+    completed_scan_count: int
+    fail_finding_count: int
+    error_finding_count: int
+    suppressed_finding_count: int
+    new_finding_count: int
+
+
+@dataclass(frozen=True)
+class OverviewScanData:
+    """Internal values for one recent scan on the overview surface."""
+
+    scan_id: str
+    repository_id: str
+    repository_name: str
+    status: ScanStatus
+    created_at: datetime
+    finished_at: datetime | None
+    complete: bool | None
+    gate_passed: bool | None
+
+
+@dataclass(frozen=True)
+class OverviewData:
+    """Internal read-only overview aggregates across repositories."""
+
+    repository_count: int
+    completed_scan_count: int
+    active_scan_count: int
+    current_failure_count: int
+    current_error_count: int
+    current_new_finding_count: int
+    trends: list[TrendPointData]
+    recent_scans: list[OverviewScanData]
+
+
+@dataclass(frozen=True)
+class RepositoryTrendsData:
+    """Internal daily trend values for one repository."""
+
+    repository_id: str
+    points: list[TrendPointData]
 
 
 @dataclass
@@ -39,7 +81,7 @@ class _TrendTotals:
     new_finding_count: int = 0
 
 
-def build_overview(session: Session, now: datetime, days: int) -> OverviewResponse:
+def build_overview(session: Session, now: datetime, days: int) -> OverviewData:
     """Return overview aggregates across every registered repository."""
     _require_positive_days(days)
     repositories = session.scalars(select(RepositoryRow).order_by(RepositoryRow.name)).all()
@@ -63,7 +105,7 @@ def build_overview(session: Session, now: datetime, days: int) -> OverviewRespon
         if baseline_fingerprints is not None:
             current_new += sum(1 for row in rows if row.fingerprint not in baseline_fingerprints)
     repository_names = {repository.id: repository.name for repository in repositories}
-    return OverviewResponse(
+    return OverviewData(
         repository_count=len(repositories),
         completed_scan_count=_count_completed_scans(session),
         active_scan_count=_count_active_scans(session),
@@ -75,10 +117,10 @@ def build_overview(session: Session, now: datetime, days: int) -> OverviewRespon
     )
 
 
-def build_repository_trends(session: Session, repository_id: str, now: datetime, days: int) -> RepositoryTrendsResponse:
+def build_repository_trends(session: Session, repository_id: str, now: datetime, days: int) -> RepositoryTrendsData:
     """Return daily trend points for one repository."""
     _require_positive_days(days)
-    return RepositoryTrendsResponse(
+    return RepositoryTrendsData(
         repository_id=repository_id,
         points=_trend_points(session, {repository_id}, now, days),
     )
@@ -142,7 +184,7 @@ def _count_active_scans(session: Session) -> int:
     )
 
 
-def _trend_points(session: Session, repository_ids: set[str] | None, now: datetime, days: int) -> list[TrendPoint]:
+def _trend_points(session: Session, repository_ids: set[str] | None, now: datetime, days: int) -> list[TrendPointData]:
     """Aggregate completed scans and their findings into UTC-day points.
 
     Only successful complete scans with ``finished_at`` inside the UTC window
@@ -185,7 +227,7 @@ def _trend_points(session: Session, repository_ids: set[str] | None, now: dateti
     for scan in scans:
         totals[scan_dates[scan.id]].completed_scan_count += 1
     return [
-        TrendPoint(
+        TrendPointData(
             date=point_date,
             completed_scan_count=totals.completed_scan_count,
             fail_finding_count=totals.fail_finding_count,
@@ -197,13 +239,13 @@ def _trend_points(session: Session, repository_ids: set[str] | None, now: dateti
     ]
 
 
-def _recent_scans(session: Session, repository_names: dict[str, str]) -> list[OverviewScan]:
+def _recent_scans(session: Session, repository_names: dict[str, str]) -> list[OverviewScanData]:
     """Return the newest scan summaries of any status, newest first."""
     rows = session.scalars(
         select(ScanRow).order_by(ScanRow.created_at.desc(), ScanRow.id.desc()).limit(RECENT_SCAN_LIMIT)
     ).all()
     return [
-        OverviewScan(
+        OverviewScanData(
             scan_id=row.id,
             repository_id=row.repository_id,
             repository_name=repository_names.get(row.repository_id, ""),
