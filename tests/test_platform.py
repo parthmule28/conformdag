@@ -6429,3 +6429,612 @@ def test_dynamic_dag_evaluator_allow_config() -> None:
     context = EvaluationContext(policy, [model])
     findings = CHECK_EVALUATORS["dynamic-dag-factory"].evaluate(context)
     assert findings == []
+
+
+def test_c14_http_response_json_shapes_are_compatible(client: TestClient, platform_env: str, tmp_path: Path) -> None:
+    from conformdag.models import (
+        EnforcementType,
+        Finding,
+        FindingLocation,
+        RemediationAction,
+        RemediationPayload,
+        RemediationTarget,
+        RunMetadata,
+        ScanReport,
+    )
+
+    admin = {"Authorization": "Bearer secret-token"}
+    health = _get(client, "/api/v1/health")
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+
+    registration = _post(
+        client,
+        "/api/v1/repos",
+        json={"name": "c14-repo", "path": str(tmp_path / "repo"), "policy_pack": None},
+        headers=admin,
+    )
+    assert registration.status_code == 200
+    registered = registration.json()
+    assert set(registered) == {"id", "name"}
+    assert registered["name"] == "c14-repo"
+    repository_id = registered["id"]
+
+    repositories = _get(client, "/api/v1/repos").json()
+    repository = next(item for item in repositories if item["id"] == repository_id)
+    assert set(repository) == {
+        "id",
+        "name",
+        "path",
+        "policy_pack",
+        "airflow_profile",
+        "baseline_scan_id",
+    }
+    assert repository == {
+        "id": repository_id,
+        "name": "c14-repo",
+        "path": str((tmp_path / "repo").resolve()),
+        "policy_pack": None,
+        "airflow_profile": None,
+        "baseline_scan_id": None,
+    }
+
+    workspace_root = tmp_path / "workspace"
+    (workspace_root / "dags").mkdir(parents=True)
+    workspace_file = workspace_root / "conformdag-workspace.yaml"
+    workspace_file.write_text("repositories:\n  - name: c14-workspace\n    path: dags\n", encoding="utf-8")
+    loaded = _post(client, "/api/v1/workspace/load", json={"path": str(workspace_file)}, headers=admin)
+    assert loaded.status_code == 200
+    assert loaded.json() == {"repositories_registered": 1}
+
+    queued = _post(client, f"/api/v1/repos/{repository_id}/scans", headers=admin)
+    assert queued.status_code == 200
+    assert set(queued.json()) == {"scan_id", "status"}
+    assert queued.json()["status"] == "queued"
+    queued_scan_id = queued.json()["scan_id"]
+
+    queued_status = _get(client, f"/api/v1/scans/{queued_scan_id}")
+    assert set(queued_status.json()) == {
+        "scan_id",
+        "repository_id",
+        "status",
+        "created_at",
+        "finished_at",
+        "complete",
+        "result_fingerprint",
+        "error",
+        "gate_passed",
+    }
+    assert queued_status.json()["status"] == "queued"
+
+    cancelled = _post(client, f"/api/v1/scans/{queued_scan_id}/cancel", headers=admin)
+    assert cancelled.status_code == 200
+    assert cancelled.json() == {"scan_id": queued_scan_id, "status": "cancelled"}
+
+    now = datetime.now(UTC)
+    run = RunMetadata(
+        tool_version="test",
+        policy_pack_id="c14-test",
+        policy_pack_version="1.0.0",
+        timestamp=now,
+    )
+    baseline_report = ScanReport(complete=True, result_fingerprint="b" * 64, run=run)
+    fix = RemediationPayload(
+        fix_kind="set-kwarg",
+        action=RemediationAction.SET_KWARG,
+        kwarg="owner",
+        target=RemediationTarget(line=3),
+        value="platform",
+    )
+    report_finding = Finding(
+        policy_id="AIR-TST-001",
+        policy_version="1.0.0",
+        status=FindingStatus.FAIL,
+        severity=Severity.HIGH,
+        enforcement=EnforcementType.DETERMINISTIC,
+        location=FindingLocation(file=Path("dags/current.py"), start_line=3, end_line=4),
+        explanation="missing owner",
+        remediation="set an owner",
+        fix=fix,
+        fingerprint="c" * 64,
+    )
+    current_report = ScanReport(
+        complete=True,
+        result_fingerprint="c" * 64,
+        run=run,
+        findings=[report_finding],
+    )
+    factory, _ = _platform_state(client)
+    with factory() as session:
+        session.add(
+            ScanRow(
+                id="c14-baseline",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint=baseline_report.result_fingerprint,
+                report_json=baseline_report.model_dump(mode="json"),
+                created_at=now - timedelta(days=1),
+                finished_at=now - timedelta(days=1),
+            )
+        )
+        _seed_finding(session, "c14-baseline", repository_id, "d" * 64)
+        session.add(
+            ScanRow(
+                id="c14-current",
+                repository_id=repository_id,
+                status="succeeded",
+                complete=True,
+                result_fingerprint=current_report.result_fingerprint,
+                report_json=current_report.model_dump(mode="json"),
+                created_at=now - timedelta(minutes=2),
+                finished_at=now - timedelta(minutes=1),
+            )
+        )
+        session.add(
+            FindingRow(
+                scan_id="c14-current",
+                repository_id=repository_id,
+                policy_id="AIR-TST-001",
+                policy_version="1.0.0",
+                status="FAIL",
+                severity="high",
+                file_path="dags/current.py",
+                start_line=3,
+                end_line=4,
+                explanation="missing owner",
+                remediation="set an owner",
+                fix_json=fix.model_dump(mode="json"),
+                fingerprint="c" * 64,
+            )
+        )
+        session.commit()
+
+    baseline = _as_httpx(client).put(
+        f"/api/v1/repos/{repository_id}/baseline", json={"scan_id": "c14-baseline"}, headers=admin
+    )
+    assert baseline.status_code == 200
+    assert baseline.json() == {"repository_id": repository_id, "baseline_scan_id": "c14-baseline"}
+
+    history = _get(client, f"/api/v1/repos/{repository_id}/scans")
+    assert history.headers["X-Total-Count"] == "3"
+    current_summary = next(item for item in history.json() if item["scan_id"] == "c14-current")
+    assert set(current_summary) == {
+        "scan_id",
+        "status",
+        "created_at",
+        "finished_at",
+        "result_fingerprint",
+        "complete",
+        "gate_passed",
+        "artifact_available",
+    }
+
+    report_response = _get(client, "/api/v1/scans/c14-current/report")
+    assert report_response.status_code == 200
+    assert report_response.json() == current_report.model_dump(mode="json")
+    exported = _get(client, "/api/v1/scans/c14-current/export/json")
+    assert exported.headers["content-type"].startswith("application/json")
+    assert exported.content == (current_report.model_dump_json(indent=2) + "\n").encode()
+
+    findings_response = _get(client, "/api/v1/scans/c14-current/findings")
+    assert findings_response.headers["X-Total-Count"] == "1"
+    finding = findings_response.json()[0]
+    assert set(finding) == {
+        "policy_id",
+        "policy_version",
+        "status",
+        "severity",
+        "file_path",
+        "start_line",
+        "end_line",
+        "fingerprint",
+        "explanation",
+        "remediation",
+        "fix",
+        "suppressed",
+        "baseline_status",
+    }
+    assert finding["fix"] == fix.model_dump(mode="json")
+    assert finding["baseline_status"] == "new"
+
+    expires_at = (now + timedelta(days=30)).isoformat()
+    created_suppression = _post(
+        client,
+        "/api/v1/suppressions",
+        json={
+            "policy_id": "AIR-TST-001",
+            "fingerprint": "c" * 64,
+            "reason": "migration window",
+            "owner": "platform",
+            "expires_at": expires_at,
+        },
+        headers=admin,
+    )
+    assert created_suppression.status_code == 200
+    suppression = created_suppression.json()
+    assert set(suppression) == {
+        "id",
+        "policy_id",
+        "fingerprint",
+        "reason",
+        "owner",
+        "created_at",
+        "expires_at",
+        "source",
+    }
+    assert suppression["source"] == "platform"
+    updated_suppression = _patch(
+        client,
+        f"/api/v1/suppressions/{suppression['id']}",
+        json={"reason": "migration extended"},
+        headers=admin,
+    )
+    assert updated_suppression.status_code == 200
+    assert set(updated_suppression.json()) == set(suppression)
+    assert updated_suppression.json()["reason"] == "migration extended"
+    assert set(_get(client, "/api/v1/suppressions").json()[0]) == set(suppression)
+
+    overview = _get(client, "/api/v1/overview").json()
+    assert set(overview) == {
+        "repository_count",
+        "completed_scan_count",
+        "active_scan_count",
+        "current_failure_count",
+        "current_error_count",
+        "current_new_finding_count",
+        "trends",
+        "recent_scans",
+    }
+    trends = _get(client, f"/api/v1/repos/{repository_id}/trends?days=30").json()
+    assert set(trends) == {"repository_id", "points"}
+    assert all(
+        set(point)
+        == {
+            "date",
+            "completed_scan_count",
+            "fail_finding_count",
+            "error_finding_count",
+            "suppressed_finding_count",
+            "new_finding_count",
+        }
+        for point in trends["points"]
+    )
+
+    pack_path = _register_org_pack(client, tmp_path)
+    packs = _get(client, "/api/v1/packs").json()
+    assert len(packs) == 1
+    assert set(packs[0]) == {"name", "path", "id", "version", "policy_count", "error"}
+    policies = _get(client, "/api/v1/packs/org/policies").json()
+    assert policies
+    assert set(policies[0]) == {
+        "id",
+        "title",
+        "version",
+        "status",
+        "severity",
+        "tags",
+        "source_document",
+        "source_section",
+        "source_version",
+        "invariant",
+        "safe_path",
+        "ownership",
+        "scope",
+        "exceptions",
+        "enforcement",
+        "deterministic_checks",
+        "configuration",
+        "check_kind",
+        "check_config",
+    }
+
+    validation = _post(client, "/api/v1/packs/org/validate", headers=admin)
+    assert validation.status_code == 200
+    assert set(validation.json()) == {"valid", "errors"}
+
+    saved_gate = _as_httpx(client).put(
+        "/api/v1/packs/org/gates/c14-gate",
+        json={"rules": [{"type": "max-findings", "count": 2}]},
+        headers=admin,
+    )
+    assert saved_gate.status_code == 200
+    assert saved_gate.json() == {"status": "saved", "gate_id": "c14-gate"}
+    gate = next(item for item in _get(client, "/api/v1/packs/org/gates").json() if item["id"] == "c14-gate")
+    assert gate == {"id": "c14-gate", "rules": [{"type": "max-findings", "count": 2}]}
+    deleted_gate = _as_httpx(client).delete("/api/v1/packs/org/gates/c14-gate", headers=admin)
+    assert deleted_gate.status_code == 200
+    assert deleted_gate.json() == {"status": "deleted", "gate_id": "c14-gate"}
+
+    policy_pack = load_policy_pack(pack_path, tmp_path)
+    source_policy = next(policy for policy in policy_pack.policies if policy.id == "AIR-DET-001")
+    policy_payload = {
+        "title": "C14 transport shape policy",
+        "version": source_policy.version,
+        "status": source_policy.status.value,
+        "severity": source_policy.severity.value,
+        "source_document": str(source_policy.source.document),
+        "source_section": source_policy.source.section,
+        "source_version": source_policy.source.version,
+        "invariant": source_policy.invariant,
+        "safe_path": source_policy.safe_path,
+        "ownership": source_policy.ownership.model_dump(mode="json"),
+        "scope": source_policy.scope.model_dump(mode="json"),
+        "exceptions": source_policy.exceptions.model_dump(mode="json"),
+        "enforcement": source_policy.enforcement.model_dump(mode="json"),
+        "deterministic_checks": source_policy.enforcement.deterministic_checks,
+        "configuration": source_policy.configuration.model_dump(mode="json"),
+        "tags": source_policy.tags,
+    }
+    saved_policy = _as_httpx(client).put("/api/v1/packs/org/policies/C14-TEST-001", json=policy_payload, headers=admin)
+    assert saved_policy.status_code == 200
+    assert saved_policy.json() == {"status": "saved", "policy_id": "C14-TEST-001"}
+    deleted_policy = _as_httpx(client).delete("/api/v1/packs/org/policies/C14-TEST-001", headers=admin)
+    assert deleted_policy.status_code == 200
+    assert deleted_policy.json() == {"status": "deleted", "policy_id": "C14-TEST-001"}
+
+
+def test_c14_platform_response_models_are_strict_and_serialize_wire_values() -> None:
+    from pydantic import BaseModel, ValidationError
+
+    from conformdag.platform.contracts import (
+        BaselineResponse,
+        FindingResponse,
+        GateMutationResponse,
+        GateResponse,
+        HealthResponse,
+        OverviewResponse,
+        PackSummaryResponse,
+        PackValidationResponse,
+        PolicyMutationResponse,
+        PolicyResponse,
+        RepositoryRegistrationResponse,
+        RepositoryResponse,
+        RepositoryTrendsResponse,
+        ScanStatusResponse,
+        ScanSummaryResponse,
+        ScanTransitionResponse,
+        SuppressionResponse,
+        WorkspaceLoadResponse,
+    )
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    configuration = {"kind": "required-owner", "allowed_values": ["platform"]}
+    policy = {
+        "id": "AIR-TST-001",
+        "title": "Require an owner",
+        "version": "1.0.0",
+        "status": "ACTIVE",
+        "severity": "high",
+        "tags": ["ownership"],
+        "source_document": "standards/dag-authoring.md",
+        "source_section": "Ownership and metadata",
+        "source_version": None,
+        "invariant": "Every DAG has an owner.",
+        "safe_path": None,
+        "ownership": {"owner": "platform"},
+        "scope": {"files": ["dags/**/*.py"], "operators": []},
+        "exceptions": {"require_reason": True, "require_expiry": True},
+        "enforcement": {
+            "type": "deterministic",
+            "deterministic_checks": ["effective-owner"],
+            "model_check": False,
+            "allow_abstention": True,
+            "blocking": True,
+        },
+        "deterministic_checks": ["effective-owner"],
+        "configuration": configuration,
+        "check_kind": "required-owner",
+        "check_config": configuration,
+    }
+    finding = {
+        "policy_id": "AIR-TST-001",
+        "policy_version": "1.0.0",
+        "status": "FAIL",
+        "severity": "high",
+        "file_path": "dags/current.py",
+        "start_line": 3,
+        "end_line": 4,
+        "fingerprint": "c" * 64,
+        "explanation": "missing owner",
+        "remediation": "set an owner",
+        "fix": {
+            "fix_kind": "set-kwarg",
+            "action": "set-kwarg",
+            "kwarg": "owner",
+            "target": {"line": 3, "column": 0, "enclosing": None, "node": "statement"},
+            "value": "platform",
+            "hint": None,
+        },
+        "suppressed": False,
+        "baseline_status": "new",
+    }
+    cases: list[tuple[type[BaseModel], dict[str, object]]] = [
+        (HealthResponse, {"status": "ok"}),
+        (RepositoryRegistrationResponse, {"id": "repo1", "name": "dags"}),
+        (WorkspaceLoadResponse, {"repositories_registered": 1}),
+        (
+            RepositoryResponse,
+            {
+                "id": "repo1",
+                "name": "dags",
+                "path": "workspace/dags",
+                "policy_pack": None,
+                "airflow_profile": None,
+                "baseline_scan_id": None,
+            },
+        ),
+        (ScanTransitionResponse, {"scan_id": "scan1", "status": "queued"}),
+        (
+            ScanStatusResponse,
+            {
+                "scan_id": "scan1",
+                "repository_id": "repo1",
+                "status": "queued",
+                "created_at": now,
+                "finished_at": None,
+                "complete": None,
+                "result_fingerprint": None,
+                "error": None,
+                "gate_passed": None,
+            },
+        ),
+        (
+            ScanSummaryResponse,
+            {
+                "scan_id": "scan1",
+                "status": "queued",
+                "created_at": now,
+                "finished_at": None,
+                "result_fingerprint": None,
+                "complete": None,
+                "gate_passed": None,
+                "artifact_available": False,
+            },
+        ),
+        (BaselineResponse, {"repository_id": "repo1", "baseline_scan_id": "scan1"}),
+        (FindingResponse, finding),
+        (
+            SuppressionResponse,
+            {
+                "id": "suppression1",
+                "policy_id": "AIR-TST-001",
+                "fingerprint": "c" * 64,
+                "reason": "migration window",
+                "owner": "platform",
+                "created_at": now,
+                "expires_at": now,
+                "source": "platform",
+            },
+        ),
+        (
+            PackSummaryResponse,
+            {
+                "name": "org",
+                "path": "packs/org.yaml",
+                "id": "org-pack",
+                "version": "1.0.0",
+                "policy_count": 1,
+                "error": None,
+            },
+        ),
+        (PackValidationResponse, {"valid": True, "errors": []}),
+        (PolicyResponse, policy),
+        (GateResponse, {"id": "release", "rules": [{"type": "no-new-findings"}]}),
+        (PolicyMutationResponse, {"status": "saved", "policy_id": "AIR-TST-001"}),
+        (GateMutationResponse, {"status": "deleted", "gate_id": "release"}),
+        (
+            OverviewResponse,
+            {
+                "repository_count": 1,
+                "completed_scan_count": 1,
+                "active_scan_count": 0,
+                "current_failure_count": 1,
+                "current_error_count": 0,
+                "current_new_finding_count": 1,
+                "trends": [
+                    {
+                        "date": "2026-01-01",
+                        "completed_scan_count": 1,
+                        "fail_finding_count": 1,
+                        "error_finding_count": 0,
+                        "suppressed_finding_count": 0,
+                        "new_finding_count": 1,
+                    }
+                ],
+                "recent_scans": [
+                    {
+                        "scan_id": "scan1",
+                        "repository_id": "repo1",
+                        "repository_name": "dags",
+                        "status": "succeeded",
+                        "created_at": now,
+                        "finished_at": now,
+                        "complete": True,
+                        "gate_passed": True,
+                    }
+                ],
+            },
+        ),
+        (
+            RepositoryTrendsResponse,
+            {
+                "repository_id": "repo1",
+                "points": [
+                    {
+                        "date": "2026-01-01",
+                        "completed_scan_count": 1,
+                        "fail_finding_count": 1,
+                        "error_finding_count": 0,
+                        "suppressed_finding_count": 0,
+                        "new_finding_count": 1,
+                    }
+                ],
+            },
+        ),
+    ]
+
+    for response_model, payload in cases:
+        response = response_model.model_validate(payload)
+        assert isinstance(response.model_dump(mode="json"), dict)
+        with pytest.raises(ValidationError):
+            response_model.model_validate({**payload, "unexpected": "field"})
+
+    assert FindingResponse.model_validate(finding).model_dump(mode="json")["fix"] == finding["fix"]
+    with pytest.raises(ValidationError):
+        WorkspaceLoadResponse.model_validate({"repositories_registered": -1})
+
+
+def test_c14_openapi_has_25_operations_across_20_specific_paths(client: TestClient) -> None:
+    app = cast("FastAPI", client.app)
+    openapi = app.openapi()
+    paths = cast("dict[str, dict[str, Any]]", openapi["paths"])
+    methods = {"get", "post", "put", "patch", "delete"}
+    operations = [
+        (path, method)
+        for path, path_operations in paths.items()
+        if path.startswith("/api/v1/")
+        for method in path_operations
+        if method in methods
+    ]
+
+    assert len(operations) == 25
+    assert len({path for path, _ in operations}) == 20
+
+
+def test_c14_openapi_references_typed_success_response_models(client: TestClient) -> None:
+    app = cast("FastAPI", client.app)
+    openapi = app.openapi()
+    paths = cast("dict[str, dict[str, Any]]", openapi["paths"])
+    health = cast("dict[str, Any]", paths["/api/v1/health"]["get"])
+    response_schema = cast(
+        "dict[str, Any]",
+        health["responses"]["200"]["content"]["application/json"]["schema"],
+    )
+
+    assert response_schema == {"$ref": "#/components/schemas/HealthResponse"}
+
+
+def test_c14_openapi_request_components_are_typed_and_exclude_orm_rows(client: TestClient) -> None:
+    app = cast("FastAPI", client.app)
+    openapi = app.openapi()
+    paths = cast("dict[str, dict[str, Any]]", openapi["paths"])
+
+    for path, method, schema_name in [
+        ("/api/v1/repos", "post", "RepositoryCreate"),
+        ("/api/v1/workspace/load", "post", "WorkspaceLoadRequest"),
+        ("/api/v1/repos/{repository_id}/baseline", "put", "BaselineSetRequest"),
+        ("/api/v1/suppressions", "post", "SuppressionCreate"),
+        ("/api/v1/suppressions/{suppression_id}", "patch", "SuppressionUpdate"),
+        ("/api/v1/packs/{pack_name}/policies/{policy_id}", "put", "PolicyUpsertRequest"),
+        ("/api/v1/packs/{pack_name}/gates/{gate_id}", "put", "GateUpsertRequest"),
+    ]:
+        operation = cast("dict[str, Any]", paths[path][method])
+        request_schema = cast(
+            "dict[str, Any]",
+            operation["requestBody"]["content"]["application/json"]["schema"],
+        )
+        assert request_schema == {"$ref": f"#/components/schemas/{schema_name}"}
+
+    components = cast("dict[str, Any]", openapi["components"]["schemas"])
+    assert not {"RepositoryRow", "ScanRow", "FindingRow", "SuppressionRow"}.intersection(components)
