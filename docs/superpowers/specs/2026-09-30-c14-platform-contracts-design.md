@@ -1,8 +1,8 @@
 # C14 Platform Contract Typing Design
 
-**Status:** Design specification  
-**Baseline:** `main@f47354da12bec225d9b2ccd532d62bf1bc3a908e`  
-**Predecessor:** C13 — Split FastAPI Routes and Leave a Composition Root  
+**Status:** Design specification
+**Baseline:** `main@f47354da12bec225d9b2ccd532d62bf1bc3a908e`
+**Predecessor:** C13 — Split FastAPI Routes and Leave a Composition Root
 **Next boundary:** C15 — Centralize Security Redaction
 
 ## Objective
@@ -756,7 +756,7 @@ owns generated TypeScript consumption.
 
 Add OpenAPI inspection tests that prove:
 
-1. all 25 specific `/api/v1` paths remain present;
+1. all 25 specific `/api/v1` path/method operations remain present across the existing 20 unique specific API paths;
 2. C13 operation IDs remain unchanged;
 3. request bodies reference the intended request DTO components;
 4. successful JSON responses reference the intended response DTO components;
