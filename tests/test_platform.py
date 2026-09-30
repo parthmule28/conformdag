@@ -21,12 +21,14 @@ from typing import Any, NoReturn, cast
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.routing import Mount
 
 import conformdag.platform.packs as packs_module
 from conformdag.application import (
@@ -4689,6 +4691,160 @@ def test_unknown_api_paths_return_json_404(client: TestClient) -> None:
     response = _get(client, "/api/v1/does-not-exist")
     assert response.status_code == 404
     assert response.json()["detail"].startswith("unknown API path")
+
+
+def test_pack_route_family_registers_in_compatibility_order() -> None:
+    from conformdag.platform.routes import packs as pack_routes
+
+    app = FastAPI()
+    pack_routes.register_routes(app)
+
+    routes = [route for route in app.routes if isinstance(route, APIRoute)]
+    manifest = [(route.path, tuple(sorted(route.methods or set[str]())), route.name) for route in routes]
+    assert manifest == [
+        ("/api/v1/packs", ("GET",), "_pack_list"),
+        ("/api/v1/packs/{pack_name}/policies", ("GET",), "_pack_policies"),
+        ("/api/v1/packs/{pack_name}/policies/{policy_id}", ("PUT",), "_pack_upsert_policy"),
+        ("/api/v1/packs/{pack_name}/policies/{policy_id}", ("DELETE",), "_pack_delete_policy"),
+        ("/api/v1/packs/{pack_name}/validate", ("POST",), "_pack_validate"),
+        ("/api/v1/packs/{pack_name}/gates", ("GET",), "_pack_gates"),
+        ("/api/v1/packs/{pack_name}/gates/{gate_id}", ("PUT",), "_pack_upsert_gate"),
+        ("/api/v1/packs/{pack_name}/gates/{gate_id}", ("DELETE",), "_pack_delete_gate"),
+    ]
+
+
+def test_route_manifest_preserves_specific_and_fallback_order(client: TestClient) -> None:
+    app = cast("FastAPI", client.app)
+    api_routes = [
+        (index, route)
+        for index, route in enumerate(app.routes)
+        if isinstance(route, APIRoute) and (route.path == "/api" or route.path.startswith("/api/"))
+    ]
+    manifest = [(route.path, tuple(sorted(route.methods or set[str]())), route.name) for _, route in api_routes]
+    fallback_methods = ("DELETE", "GET", "HEAD", "PATCH", "POST", "PUT")
+    expected_manifest: list[tuple[str, tuple[str, ...], str]] = [
+        ("/api/v1/health", ("GET",), "_health"),
+        ("/api/v1/repos", ("POST",), "register_repository"),
+        ("/api/v1/workspace/load", ("POST",), "load_workspace_file"),
+        ("/api/v1/repos", ("GET",), "list_repositories"),
+        ("/api/v1/repos/{repository_id}/scans", ("POST",), "trigger_scan"),
+        ("/api/v1/scans/{scan_id}/cancel", ("POST",), "cancel_scan"),
+        ("/api/v1/scans/{scan_id}", ("GET",), "scan_status"),
+        ("/api/v1/repos/{repository_id}/scans", ("GET",), "scan_history"),
+        ("/api/v1/repos/{repository_id}/baseline", ("PUT",), "set_baseline"),
+        ("/api/v1/scans/{scan_id}/report", ("GET",), "scan_report"),
+        ("/api/v1/scans/{scan_id}/findings", ("GET",), "scan_findings"),
+        ("/api/v1/scans/{scan_id}/export/{scan_format}", ("GET",), "export_scan"),
+        ("/api/v1/suppressions", ("GET",), "list_suppressions"),
+        ("/api/v1/suppressions", ("POST",), "create_suppression"),
+        ("/api/v1/suppressions/{suppression_id}", ("PATCH",), "update_suppression"),
+        ("/api/v1/overview", ("GET",), "overview"),
+        ("/api/v1/repos/{repository_id}/trends", ("GET",), "repository_trends"),
+        ("/api/v1/packs", ("GET",), "_pack_list"),
+        ("/api/v1/packs/{pack_name}/policies", ("GET",), "_pack_policies"),
+        (
+            "/api/v1/packs/{pack_name}/policies/{policy_id}",
+            ("PUT",),
+            "_pack_upsert_policy",
+        ),
+        (
+            "/api/v1/packs/{pack_name}/policies/{policy_id}",
+            ("DELETE",),
+            "_pack_delete_policy",
+        ),
+        ("/api/v1/packs/{pack_name}/validate", ("POST",), "_pack_validate"),
+        ("/api/v1/packs/{pack_name}/gates", ("GET",), "_pack_gates"),
+        ("/api/v1/packs/{pack_name}/gates/{gate_id}", ("PUT",), "_pack_upsert_gate"),
+        ("/api/v1/packs/{pack_name}/gates/{gate_id}", ("DELETE",), "_pack_delete_gate"),
+        ("/api", fallback_methods, "_api_fallback"),
+        ("/api/{rest:path}", fallback_methods, "_api_fallback"),
+    ]
+
+    assert manifest == expected_manifest
+
+    specific_positions = [index for index, route in api_routes if route.path.startswith("/api/v1/")]
+    fallback_positions = [index for index, route in api_routes if route.path in {"/api", "/api/{rest:path}"}]
+    assert len(specific_positions) == 25
+    assert len(fallback_positions) == 2
+    assert max(specific_positions) < min(fallback_positions)
+    assert fallback_positions[0] < fallback_positions[1]
+
+    dashboard_mount_positions = [
+        index for index, route in enumerate(app.routes) if isinstance(route, Mount) and route.path == "/"
+    ]
+    if dashboard_mount_positions:
+        assert min(dashboard_mount_positions) > max(fallback_positions)
+
+
+def test_operation_id_manifest_matches_existing_api(client: TestClient) -> None:
+    app = cast("FastAPI", client.app)
+    openapi = app.openapi()
+    paths = cast("dict[str, dict[str, Any]]", openapi["paths"])
+    expected_operation_ids: dict[tuple[str, str], str] = {
+        ("GET", "/api/v1/health"): "_health_api_v1_health_get",
+        ("POST", "/api/v1/repos"): "register_repository_api_v1_repos_post",
+        ("POST", "/api/v1/workspace/load"): "load_workspace_file_api_v1_workspace_load_post",
+        ("GET", "/api/v1/repos"): "list_repositories_api_v1_repos_get",
+        ("POST", "/api/v1/repos/{repository_id}/scans"): "trigger_scan_api_v1_repos__repository_id__scans_post",
+        ("POST", "/api/v1/scans/{scan_id}/cancel"): "cancel_scan_api_v1_scans__scan_id__cancel_post",
+        ("GET", "/api/v1/scans/{scan_id}"): "scan_status_api_v1_scans__scan_id__get",
+        ("GET", "/api/v1/repos/{repository_id}/scans"): "scan_history_api_v1_repos__repository_id__scans_get",
+        ("PUT", "/api/v1/repos/{repository_id}/baseline"): "set_baseline_api_v1_repos__repository_id__baseline_put",
+        ("GET", "/api/v1/scans/{scan_id}/report"): "scan_report_api_v1_scans__scan_id__report_get",
+        ("GET", "/api/v1/scans/{scan_id}/findings"): "scan_findings_api_v1_scans__scan_id__findings_get",
+        (
+            "GET",
+            "/api/v1/scans/{scan_id}/export/{scan_format}",
+        ): "export_scan_api_v1_scans__scan_id__export__scan_format__get",
+        ("GET", "/api/v1/suppressions"): "list_suppressions_api_v1_suppressions_get",
+        ("POST", "/api/v1/suppressions"): "create_suppression_api_v1_suppressions_post",
+        (
+            "PATCH",
+            "/api/v1/suppressions/{suppression_id}",
+        ): "update_suppression_api_v1_suppressions__suppression_id__patch",
+        ("GET", "/api/v1/overview"): "overview_api_v1_overview_get",
+        (
+            "GET",
+            "/api/v1/repos/{repository_id}/trends",
+        ): "repository_trends_api_v1_repos__repository_id__trends_get",
+        ("GET", "/api/v1/packs"): "_pack_list_api_v1_packs_get",
+        ("GET", "/api/v1/packs/{pack_name}/policies"): "_pack_policies_api_v1_packs__pack_name__policies_get",
+        (
+            "PUT",
+            "/api/v1/packs/{pack_name}/policies/{policy_id}",
+        ): "_pack_upsert_policy_api_v1_packs__pack_name__policies__policy_id__put",
+        (
+            "DELETE",
+            "/api/v1/packs/{pack_name}/policies/{policy_id}",
+        ): "_pack_delete_policy_api_v1_packs__pack_name__policies__policy_id__delete",
+        (
+            "POST",
+            "/api/v1/packs/{pack_name}/validate",
+        ): "_pack_validate_api_v1_packs__pack_name__validate_post",
+        ("GET", "/api/v1/packs/{pack_name}/gates"): "_pack_gates_api_v1_packs__pack_name__gates_get",
+        (
+            "PUT",
+            "/api/v1/packs/{pack_name}/gates/{gate_id}",
+        ): "_pack_upsert_gate_api_v1_packs__pack_name__gates__gate_id__put",
+        (
+            "DELETE",
+            "/api/v1/packs/{pack_name}/gates/{gate_id}",
+        ): "_pack_delete_gate_api_v1_packs__pack_name__gates__gate_id__delete",
+    }
+    operation_methods = {"get", "post", "put", "patch", "delete"}
+    actual_operation_ids: dict[tuple[str, str], str] = {}
+    for path, operations in paths.items():
+        if not path.startswith("/api/v1/"):
+            continue
+        for method, operation in operations.items():
+            if method not in operation_methods:
+                continue
+            operation_data = cast("dict[str, Any]", operation)
+            operation_id = operation_data.get("operationId")
+            assert isinstance(operation_id, str)
+            actual_operation_ids[(method.upper(), path)] = operation_id
+
+    assert actual_operation_ids == expected_operation_ids
 
 
 def test_unknown_put_api_paths_return_json_404(client: TestClient) -> None:
