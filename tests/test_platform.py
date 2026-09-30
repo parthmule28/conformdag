@@ -7095,3 +7095,137 @@ def test_c14_openapi_request_components_are_typed_and_exclude_orm_rows(client: T
 
     components = cast("dict[str, Any]", openapi["components"]["schemas"])
     assert not {"RepositoryRow", "ScanRow", "FindingRow", "SuppressionRow"}.intersection(components)
+
+
+def test_c14_openapi_maps_all_25_operations_to_their_success_contracts(client: TestClient) -> None:
+    app = cast("FastAPI", client.app)
+    openapi = app.openapi()
+    paths = cast("dict[str, dict[str, Any]]", openapi["paths"])
+    expected: dict[tuple[str, str], tuple[str, bool] | None] = {
+        ("get", "/api/v1/health"): ("HealthResponse", False),
+        ("post", "/api/v1/repos"): ("RepositoryRegistrationResponse", False),
+        ("post", "/api/v1/workspace/load"): ("WorkspaceLoadResponse", False),
+        ("get", "/api/v1/repos"): ("RepositoryResponse", True),
+        ("post", "/api/v1/repos/{repository_id}/scans"): ("ScanTransitionResponse", False),
+        ("post", "/api/v1/scans/{scan_id}/cancel"): ("ScanTransitionResponse", False),
+        ("get", "/api/v1/scans/{scan_id}"): ("ScanStatusResponse", False),
+        ("get", "/api/v1/repos/{repository_id}/scans"): ("ScanSummaryResponse", True),
+        ("put", "/api/v1/repos/{repository_id}/baseline"): ("BaselineResponse", False),
+        ("get", "/api/v1/scans/{scan_id}/report"): ("ScanReport", False),
+        ("get", "/api/v1/scans/{scan_id}/findings"): ("FindingResponse", True),
+        ("get", "/api/v1/scans/{scan_id}/export/{scan_format}"): None,
+        ("get", "/api/v1/suppressions"): ("SuppressionResponse", True),
+        ("post", "/api/v1/suppressions"): ("SuppressionResponse", False),
+        ("patch", "/api/v1/suppressions/{suppression_id}"): ("SuppressionResponse", False),
+        ("get", "/api/v1/overview"): ("OverviewResponse", False),
+        ("get", "/api/v1/repos/{repository_id}/trends"): ("RepositoryTrendsResponse", False),
+        ("get", "/api/v1/packs"): ("PackSummaryResponse", True),
+        ("get", "/api/v1/packs/{pack_name}/policies"): ("PolicyResponse", True),
+        ("put", "/api/v1/packs/{pack_name}/policies/{policy_id}"): ("PolicyMutationResponse", False),
+        ("delete", "/api/v1/packs/{pack_name}/policies/{policy_id}"): ("PolicyMutationResponse", False),
+        ("post", "/api/v1/packs/{pack_name}/validate"): ("PackValidationResponse", False),
+        ("get", "/api/v1/packs/{pack_name}/gates"): ("GateResponse", True),
+        ("put", "/api/v1/packs/{pack_name}/gates/{gate_id}"): ("GateMutationResponse", False),
+        ("delete", "/api/v1/packs/{pack_name}/gates/{gate_id}"): ("GateMutationResponse", False),
+    }
+    actual = {
+        (method, path)
+        for path, path_operations in paths.items()
+        if path.startswith("/api/v1/")
+        for method in path_operations
+        if method in {"get", "post", "put", "patch", "delete"}
+    }
+
+    assert actual == set(expected)
+    assert len(actual) == 25
+    assert len({path for _, path in actual}) == 20
+
+    for (method, path), contract in expected.items():
+        operation = cast("dict[str, Any]", paths[path][method])
+        response = cast("dict[str, Any]", operation["responses"]["200"])
+        schema = response.get("content", {}).get("application/json", {}).get("schema")
+        if contract is None:
+            assert schema == {}
+            continue
+        component, is_array = contract
+        reference = {"$ref": f"#/components/schemas/{component}"}
+        if is_array:
+            array_schema = cast("dict[str, Any]", schema)
+            assert array_schema["type"] == "array"
+            assert array_schema["items"] == reference
+        else:
+            assert schema == reference
+
+
+def test_c14_openapi_platform_response_components_reject_extra_fields(client: TestClient) -> None:
+    app = cast("FastAPI", client.app)
+    openapi = app.openapi()
+    components = cast("dict[str, Any]", openapi["components"]["schemas"])
+    response_components = {
+        "BaselineResponse",
+        "FindingResponse",
+        "GateMutationResponse",
+        "GateResponse",
+        "HealthResponse",
+        "OverviewResponse",
+        "OverviewScan",
+        "PackSummaryResponse",
+        "PackValidationResponse",
+        "PolicyMutationResponse",
+        "PolicyResponse",
+        "RepositoryRegistrationResponse",
+        "RepositoryResponse",
+        "RepositoryTrendsResponse",
+        "ScanStatusResponse",
+        "ScanSummaryResponse",
+        "ScanTransitionResponse",
+        "SuppressionResponse",
+        "TrendPoint",
+        "WorkspaceLoadResponse",
+    }
+
+    for component in response_components:
+        schema = cast("dict[str, Any]", components[component])
+        assert schema["additionalProperties"] is False, component
+
+    repository_properties = cast("dict[str, Any]", components["RepositoryResponse"]["properties"])
+    assert "created_at" not in repository_properties
+    assert not {"RepositoryRow", "ScanRow", "FindingRow", "SuppressionRow"}.intersection(components)
+
+
+def test_c14_openapi_keeps_auth_on_mutations_only(client: TestClient) -> None:
+    app = cast("FastAPI", client.app)
+    openapi = app.openapi()
+    paths = cast("dict[str, dict[str, Any]]", openapi["paths"])
+    admin_operations = {
+        ("post", "/api/v1/repos"),
+        ("post", "/api/v1/workspace/load"),
+        ("post", "/api/v1/repos/{repository_id}/scans"),
+        ("post", "/api/v1/scans/{scan_id}/cancel"),
+        ("put", "/api/v1/repos/{repository_id}/baseline"),
+        ("post", "/api/v1/suppressions"),
+        ("patch", "/api/v1/suppressions/{suppression_id}"),
+        ("put", "/api/v1/packs/{pack_name}/policies/{policy_id}"),
+        ("delete", "/api/v1/packs/{pack_name}/policies/{policy_id}"),
+        ("post", "/api/v1/packs/{pack_name}/validate"),
+        ("put", "/api/v1/packs/{pack_name}/gates/{gate_id}"),
+        ("delete", "/api/v1/packs/{pack_name}/gates/{gate_id}"),
+    }
+
+    for path, path_operations in paths.items():
+        if not path.startswith("/api/v1/"):
+            continue
+        for method, value in path_operations.items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            operation = cast("dict[str, Any]", value)
+            authorization = [
+                parameter
+                for parameter in operation.get("parameters", [])
+                if parameter.get("name", "").lower() == "authorization"
+            ]
+            if (method, path) in admin_operations:
+                assert len(authorization) == 1
+                assert authorization[0]["in"] == "header"
+            else:
+                assert authorization == []
