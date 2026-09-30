@@ -8,9 +8,8 @@ import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, cast
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -22,10 +21,16 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
 from starlette.types import Scope
 
-from conformdag.application import coerce_platform_airflow_profile
-from conformdag.platform.contracts import (
-    PolicyVocabularyRequest,
-)
+# C14 request DTO compatibility re-exports preserve historical imports.
+# Canonical owner: platform.contracts. Removal/deprecation decision: C30.
+from conformdag.platform.contracts import BaselineSetRequest as BaselineSetRequest
+from conformdag.platform.contracts import HealthResponse  # Used by the health handler.
+from conformdag.platform.contracts import PolicyUpsertRequest as PolicyUpsertRequest
+from conformdag.platform.contracts import PolicyVocabularyRequest as PolicyVocabularyRequest
+from conformdag.platform.contracts import RepositoryCreate as RepositoryCreate
+from conformdag.platform.contracts import SuppressionCreate as SuppressionCreate
+from conformdag.platform.contracts import SuppressionUpdate as SuppressionUpdate
+from conformdag.platform.contracts import WorkspaceLoadRequest as WorkspaceLoadRequest
 from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackService
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
@@ -102,92 +107,6 @@ def load_settings() -> PlatformSettings:
     )
 
 
-class RepositoryCreate(BaseModel):
-    """Registration payload for one local DAG repository."""
-
-    name: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
-    path: str
-    policy_pack: str | None = None
-    airflow_profile: str | None = Field(default=None, max_length=32)
-
-    @field_validator("airflow_profile")
-    @classmethod
-    def validate_airflow_profile(cls, value: str | None) -> str | None:
-        coerce_platform_airflow_profile(value)
-        return value
-
-
-class WorkspaceLoadRequest(BaseModel):
-    """Optional explicit path of the workspace file to register."""
-
-    path: str | None = None
-
-
-class PolicyUpsertRequest(PolicyVocabularyRequest):
-    """Payload for creating or updating a policy in a pack.
-
-    ``deterministic_checks`` and ``configuration`` are the canonical transport
-    vocabulary. ``check_kind`` and ``check_config`` are retained as a beta
-    compatibility view: ``check_kind`` means ``configuration.kind`` and never
-    means a deterministic evaluator check.
-
-    Editable fields are required. Contract metadata fields (``source_version``,
-    ``ownership``, ``scope``, ``exceptions``, ``enforcement``, ``safe_path``)
-    are optional: an existing policy keeps its persisted value when the request
-    omits them, while a new policy must carry them completely. ``tags`` follows
-    the preserve-on-omit rule; an explicit empty list clears the tags.
-    """
-
-    title: str
-    version: str
-    status: str
-    severity: str
-    check_kind: str | None = Field(
-        default=None,
-        deprecated=True,
-        description="Compatibility alias for configuration.kind; never a deterministic check kind.",
-    )
-    check_config: dict[str, Any] | None = Field(
-        default=None,
-        deprecated=True,
-        description="Compatibility alias for the canonical configuration object.",
-    )
-    source_document: str
-    source_section: str
-    invariant: str
-    safe_path: str | None = None
-    source_version: str | None = None
-    ownership: dict[str, Any] | None = None
-    scope: dict[str, Any] | None = None
-    exceptions: dict[str, Any] | None = None
-    enforcement: dict[str, Any] | None = None
-    tags: list[str] | None = None
-
-
-class SuppressionCreate(BaseModel):
-    """Creation payload for an operational platform suppression."""
-
-    policy_id: str
-    fingerprint: str
-    reason: str = Field(min_length=1)
-    owner: str = Field(min_length=1)
-    expires_at: datetime
-
-
-class SuppressionUpdate(BaseModel):
-    """Editable fields for an existing platform suppression."""
-
-    reason: str | None = None
-    owner: str | None = None
-    expires_at: datetime | None = None
-
-
-class BaselineSetRequest(BaseModel):
-    """Selection payload marking one scan as a repository's baseline."""
-
-    scan_id: str
-
-
 def require_admin(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     """Reject mutation requests unless the single-admin bearer token matches."""
     settings: PlatformSettings = request.app.state.settings
@@ -221,9 +140,9 @@ def _register_workspace_packs(service: PackService, workspace: WorkspaceFile) ->
             service.register(f"repo/{repository.name}", repository.policy_pack)
 
 
-def _health() -> dict[str, str]:
+def _health() -> HealthResponse:
     """Return the liveness payload."""
-    return {"status": "ok"}
+    return HealthResponse(status="ok")
 
 
 def create_app(

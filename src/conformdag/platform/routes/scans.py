@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 
 import conformdag.platform.app as platform_app
-from conformdag.platform.app import API_PREFIX, BaselineSetRequest, require_admin
-from conformdag.platform.contracts import FindingResponse, ScanSummaryResponse
+from conformdag.models import ScanReport
+from conformdag.platform.app import API_PREFIX, require_admin
+from conformdag.platform.contracts import (
+    BaselineResponse,
+    BaselineSetRequest,
+    FindingResponse,
+    ScanStatusResponse,
+    ScanSummaryResponse,
+    ScanTransitionResponse,
+)
 from conformdag.platform.services import ConflictError, NotFoundError
 from conformdag.platform.services import baselines as baseline_service
 from conformdag.platform.services import scans as scan_service
@@ -18,7 +26,7 @@ from conformdag.reporting import render_html, render_sarif
 _factory = platform_app.session_factory_for
 
 
-def trigger_scan(request: Request, repository_id: str) -> dict[str, str]:
+def trigger_scan(request: Request, repository_id: str) -> ScanTransitionResponse:
     """Queue one scan for a registered repository."""
     with _factory(request)() as session:
         try:
@@ -26,27 +34,39 @@ def trigger_scan(request: Request, repository_id: str) -> dict[str, str]:
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         session.commit()
-        return result
+        return ScanTransitionResponse(scan_id=result.scan_id, status=result.status)
 
 
-def cancel_scan(request: Request, scan_id: str) -> dict[str, str]:
+def cancel_scan(request: Request, scan_id: str) -> ScanTransitionResponse:
     """Cancel one queued or running scan."""
     with _factory(request)() as session:
         try:
-            return scan_service.cancel_scan(session, scan_id)
+            result = scan_service.cancel_scan(session, scan_id)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return ScanTransitionResponse(scan_id=result.scan_id, status=result.status)
 
 
-def scan_status(request: Request, scan_id: str) -> dict[str, object]:
+def scan_status(request: Request, scan_id: str) -> ScanStatusResponse:
     """Return the current status of one scan."""
     with _factory(request)() as session:
         try:
-            return scan_service.scan_status(session, scan_id)
+            result = scan_service.scan_status(session, scan_id)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ScanStatusResponse(
+        scan_id=result.scan_id,
+        repository_id=result.repository_id,
+        status=result.status,
+        created_at=result.created_at,
+        finished_at=result.finished_at,
+        complete=result.complete,
+        result_fingerprint=result.result_fingerprint,
+        error=result.error,
+        gate_passed=result.gate_passed,
+    )
 
 
 def scan_history(
@@ -65,10 +85,22 @@ def scan_history(
     with _factory(request)() as session:
         page = scan_service.scan_history(session, repository_id, limit=limit, offset=offset)
     response.headers["X-Total-Count"] = str(page.total)
-    return page.items
+    return [
+        ScanSummaryResponse(
+            scan_id=item.scan_id,
+            status=item.status,
+            created_at=item.created_at,
+            finished_at=item.finished_at,
+            result_fingerprint=item.result_fingerprint,
+            complete=item.complete,
+            gate_passed=item.gate_passed,
+            artifact_available=item.artifact_available,
+        )
+        for item in page.items
+    ]
 
 
-def set_baseline(request: Request, repository_id: str, payload: BaselineSetRequest) -> dict[str, str]:
+def set_baseline(request: Request, repository_id: str, payload: BaselineSetRequest) -> BaselineResponse:
     """Mark one finished scan as the baseline for its repository."""
     with _factory(request)() as session:
         try:
@@ -78,14 +110,14 @@ def set_baseline(request: Request, repository_id: str, payload: BaselineSetReque
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         session.commit()
-        return result
+        return BaselineResponse(repository_id=result.repository_id, baseline_scan_id=result.baseline_scan_id)
 
 
-def scan_report(request: Request, scan_id: str) -> dict[str, Any]:
+def scan_report(request: Request, scan_id: str) -> ScanReport:
     """Return the canonical report JSON artifact for one scan."""
     with _factory(request)() as session:
         try:
-            return scan_service.load_report(session, scan_id).model_dump(mode="json")
+            return scan_service.load_report(session, scan_id)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -126,7 +158,24 @@ def scan_findings(
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
     response.headers["X-Total-Count"] = str(page.total)
-    return page.items
+    return [
+        FindingResponse(
+            policy_id=item.policy_id,
+            policy_version=item.policy_version,
+            status=item.status,
+            severity=item.severity,
+            file_path=item.file_path,
+            start_line=item.start_line,
+            end_line=item.end_line,
+            fingerprint=item.fingerprint,
+            explanation=item.explanation,
+            remediation=item.remediation,
+            fix=item.fix,
+            suppressed=item.suppressed,
+            baseline_status=item.baseline_status,
+        )
+        for item in page.items
+    ]
 
 
 def export_scan(request: Request, scan_id: str, scan_format: str) -> Response:

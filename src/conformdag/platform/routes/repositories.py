@@ -9,7 +9,14 @@ from typing import cast
 from fastapi import Depends, FastAPI, HTTPException, Request
 
 import conformdag.platform.app as platform_app
-from conformdag.platform.app import API_PREFIX, RepositoryCreate, WorkspaceLoadRequest, require_admin
+from conformdag.platform.app import API_PREFIX, require_admin
+from conformdag.platform.contracts import (
+    RepositoryCreate,
+    RepositoryRegistrationResponse,
+    RepositoryResponse,
+    WorkspaceLoadRequest,
+    WorkspaceLoadResponse,
+)
 from conformdag.platform.packs import PackService
 from conformdag.platform.services import ConflictError, InvalidOperationError
 from conformdag.platform.services import repositories as repository_service
@@ -21,7 +28,7 @@ _register_workspace_packs = cast(
 )
 
 
-def register_repository(request: Request, payload: RepositoryCreate) -> dict[str, str]:
+def register_repository(request: Request, payload: RepositoryCreate) -> RepositoryRegistrationResponse:
     """Register one existing local DAG repository."""
     factory = _factory(request)
     with factory() as session:
@@ -40,10 +47,10 @@ def register_repository(request: Request, payload: RepositoryCreate) -> dict[str
             session.rollback()
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         session.commit()
-        return result
+        return RepositoryRegistrationResponse(id=result.id, name=result.name)
 
 
-def load_workspace_file(request: Request, payload: WorkspaceLoadRequest) -> dict[str, int]:
+def load_workspace_file(request: Request, payload: WorkspaceLoadRequest) -> WorkspaceLoadResponse:
     """Register every workspace repository that is not already present."""
     workspace, _ = load_workspace(Path(payload.path).resolve() if payload.path else None)
     _register_workspace_packs(request.app.state.pack_service, workspace)
@@ -51,14 +58,25 @@ def load_workspace_file(request: Request, payload: WorkspaceLoadRequest) -> dict
     with factory() as session:
         registered = repository_service.register_workspace_repositories(session, workspace.repositories)
         session.commit()
-    return {"repositories_registered": registered}
+    return WorkspaceLoadResponse(repositories_registered=registered)
 
 
-def list_repositories(request: Request) -> list[dict[str, str | None]]:
+def list_repositories(request: Request) -> list[RepositoryResponse]:
     """List every registered DAG repository."""
     factory = _factory(request)
     with factory() as session:
-        return repository_service.list_repositories(session)
+        repositories = repository_service.list_repositories(session)
+    return [
+        RepositoryResponse(
+            id=repository.id,
+            name=repository.name,
+            path=repository.path,
+            policy_pack=repository.policy_pack,
+            airflow_profile=repository.airflow_profile,
+            baseline_scan_id=repository.baseline_scan_id,
+        )
+        for repository in repositories
+    ]
 
 
 def register_routes(app: FastAPI) -> None:

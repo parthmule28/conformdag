@@ -125,7 +125,7 @@ const REPORT_FINDING_FAIL: ReportFinding = {
   explanation: "DAG lacks an effective owner",
   remediation: "Declare owner on every DAG call",
   confidence: "deterministic",
-  fix: { fix_kind: "codemod", action: "add-owner" },
+  fix: { fix_kind: "codemod", action: "add-owner", kwarg: null, target: null, value: null, hint: null },
   audit_evidence: [],
   fingerprint: "fp-own-1",
   blocking: true,
@@ -207,7 +207,7 @@ const FINDING_FAIL: Finding = {
   fingerprint: "fp-own-1",
   explanation: "DAG lacks an effective owner",
   remediation: "Declare owner on every DAG call",
-  fix: { fix_kind: "codemod", action: "add-owner" },
+  fix: { fix_kind: "codemod", action: "add-owner", kwarg: null, target: null, value: null, hint: null },
   suppressed: false,
   baseline_status: "new",
 };

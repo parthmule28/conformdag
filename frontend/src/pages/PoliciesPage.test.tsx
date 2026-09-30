@@ -389,7 +389,7 @@ describe("PoliciesPage", () => {
 
     // An earlier test installs a persistent 422 rejection; make the save in
     // this test succeed explicitly instead of inheriting it.
-    updatePolicyMock.mockResolvedValue({ status: "ok", policy_id: "OWN-001" });
+    updatePolicyMock.mockResolvedValue({ status: "saved", policy_id: "OWN-001" });
     fireEvent.click(screen.getByRole("button", { name: "Edit policy OWN-001" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Tags"), { target: { value: "" } });
@@ -521,7 +521,7 @@ describe("PoliciesPage", () => {
         "/packs/core/gates/release failed with 409",
       ),
     );
-    deleteGateMock.mockResolvedValue({ status: "ok", gate_id: "release" });
+    deleteGateMock.mockResolvedValue({ status: "deleted", gate_id: "release" });
 
     fireEvent.click(await screen.findByRole("button", { name: "Delete gate release" }));
     const alert = await screen.findByRole("alert");

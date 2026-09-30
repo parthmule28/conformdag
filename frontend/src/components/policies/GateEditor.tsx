@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import type { Gate, GateRule, GateUpsertRequest, PackValidation } from "../../api";
+import type { Gate, GateRule, GateUpsertRequest, PackValidation, Severity } from "../../api";
 import {
   describeApiError,
   useDeleteGateMutation,
@@ -21,13 +21,17 @@ type RuleType = (typeof RULE_TYPES)[number];
 
 const SEVERITIES = ["info", "low", "medium", "high", "critical"] as const;
 
+function isSeverity(value: string): value is Severity {
+  return (SEVERITIES as readonly string[]).includes(value);
+}
+
 function isRuleType(value: string): value is RuleType {
   return (RULE_TYPES as readonly string[]).includes(value);
 }
 
 interface RuleDraft {
   type: RuleType;
-  severity: string;
+  severity: Severity | "";
   count: string;
   policyIdsText: string;
   maxPercent: string;
@@ -248,7 +252,10 @@ function GateForm({ packName, gate, onClose }: GateFormProps) {
                 <Select
                   label={`Rule ${ruleNumber} severity`}
                   value={rule.severity}
-                  onChange={(event) => patchRule(index, { severity: event.target.value })}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    patchRule(index, { severity: isSeverity(value) ? value : "" });
+                  }}
                 >
                   {SEVERITIES.map((severity) => (
                     <option key={severity} value={severity}>

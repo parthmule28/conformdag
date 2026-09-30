@@ -1,5 +1,6 @@
 """Operational suppression persistence and audit fields."""
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
@@ -10,28 +11,42 @@ from conformdag.platform.db import SuppressionRow, new_id
 from conformdag.platform.services import ConflictError, NotFoundError
 
 
-def _payload(row: SuppressionRow) -> dict[str, object]:
-    return {
-        "id": row.id,
-        "policy_id": row.policy_id,
-        "fingerprint": row.fingerprint,
-        "reason": row.reason,
-        "owner": row.owner,
-        "created_at": row.created_at,
-        "expires_at": row.expires_at,
-        "source": row.source,
-    }
+@dataclass(frozen=True)
+class SuppressionRecord:
+    """Detached suppression state with its platform audit fields."""
+
+    id: str
+    policy_id: str
+    fingerprint: str
+    reason: str
+    owner: str
+    created_at: datetime
+    expires_at: datetime
+    source: str
 
 
-def list_suppressions(session: Session) -> list[dict[str, object]]:
+def _record(row: SuppressionRow) -> SuppressionRecord:
+    return SuppressionRecord(
+        id=row.id,
+        policy_id=row.policy_id,
+        fingerprint=row.fingerprint,
+        reason=row.reason,
+        owner=row.owner,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
+        source=row.source,
+    )
+
+
+def list_suppressions(session: Session) -> list[SuppressionRecord]:
     """Return suppression audit records in creation order."""
     rows = session.scalars(select(SuppressionRow).order_by(SuppressionRow.created_at)).all()
-    return [_payload(row) for row in rows]
+    return [_record(row) for row in rows]
 
 
 def create_suppression(
     session: Session, *, policy_id: str, fingerprint: str, reason: str, owner: str, expires_at: datetime
-) -> dict[str, object]:
+) -> SuppressionRecord:
     """Create an operational suppression, surfacing identifiable unique conflicts."""
     row = SuppressionRow(
         id=new_id(),
@@ -53,12 +68,12 @@ def create_suppression(
         ):
             raise ConflictError("suppression already exists for this policy finding") from exc
         raise
-    return _payload(row)
+    return _record(row)
 
 
 def update_suppression(
     session: Session, suppression_id: str, *, reason: str | None, owner: str | None, expires_at: datetime | None
-) -> dict[str, object]:
+) -> SuppressionRecord:
     """Update only supplied non-null audit fields; the caller commits."""
     row = session.get(SuppressionRow, suppression_id)
     if row is None:
@@ -69,4 +84,4 @@ def update_suppression(
         row.owner = owner
     if expires_at is not None:
         row.expires_at = expires_at
-    return _payload(row)
+    return _record(row)
