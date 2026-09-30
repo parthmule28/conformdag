@@ -5,20 +5,36 @@ from __future__ import annotations
 from fastapi import Depends, FastAPI, HTTPException, Request
 
 import conformdag.platform.app as platform_app
-from conformdag.platform.app import API_PREFIX, SuppressionCreate, SuppressionUpdate, require_admin
+from conformdag.platform.app import API_PREFIX, require_admin
+from conformdag.platform.contracts import SuppressionCreate, SuppressionResponse, SuppressionUpdate
 from conformdag.platform.services import ConflictError, NotFoundError
 from conformdag.platform.services import suppressions as suppression_service
+from conformdag.platform.services.suppressions import SuppressionRecord
 
 _factory = platform_app.session_factory_for
 
 
-def list_suppressions(request: Request) -> list[dict[str, object]]:
+def _suppression_response(record: SuppressionRecord) -> SuppressionResponse:
+    return SuppressionResponse(
+        id=record.id,
+        policy_id=record.policy_id,
+        fingerprint=record.fingerprint,
+        reason=record.reason,
+        owner=record.owner,
+        created_at=record.created_at,
+        expires_at=record.expires_at,
+        source=record.source,
+    )
+
+
+def list_suppressions(request: Request) -> list[SuppressionResponse]:
     """List the operational suppression layer with audit fields."""
     with _factory(request)() as session:
-        return suppression_service.list_suppressions(session)
+        records = suppression_service.list_suppressions(session)
+    return [_suppression_response(record) for record in records]
 
 
-def create_suppression(request: Request, payload: SuppressionCreate) -> dict[str, object]:
+def create_suppression(request: Request, payload: SuppressionCreate) -> SuppressionResponse:
     """Create one operational suppression owned by the platform."""
     with _factory(request)() as session:
         try:
@@ -34,10 +50,10 @@ def create_suppression(request: Request, payload: SuppressionCreate) -> dict[str
         except ConflictError as exc:
             session.rollback()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return result
+        return _suppression_response(result)
 
 
-def update_suppression(request: Request, suppression_id: str, payload: SuppressionUpdate) -> dict[str, object]:
+def update_suppression(request: Request, suppression_id: str, payload: SuppressionUpdate) -> SuppressionResponse:
     """Update the editable audit fields of one platform suppression."""
     with _factory(request)() as session:
         try:
@@ -47,7 +63,7 @@ def update_suppression(request: Request, suppression_id: str, payload: Suppressi
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         session.commit()
-        return result
+        return _suppression_response(result)
 
 
 def register_routes(app: FastAPI) -> None:

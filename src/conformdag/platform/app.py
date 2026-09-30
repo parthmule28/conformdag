@@ -21,9 +21,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import PlainTextResponse
 from starlette.types import Scope
 
-# C14 compatibility re-export: Canonical owner: platform.contracts.
-# Removal/deprecation decision: C30.
+# C14 request DTO compatibility re-exports preserve historical imports.
+# Canonical owner: platform.contracts. Removal/deprecation decision: C30.
 from conformdag.platform.contracts import BaselineSetRequest as BaselineSetRequest
+from conformdag.platform.contracts import HealthResponse  # Used by the health handler.
 from conformdag.platform.contracts import PolicyUpsertRequest as PolicyUpsertRequest
 from conformdag.platform.contracts import PolicyVocabularyRequest as PolicyVocabularyRequest
 from conformdag.platform.contracts import RepositoryCreate as RepositoryCreate
@@ -139,9 +140,9 @@ def _register_workspace_packs(service: PackService, workspace: WorkspaceFile) ->
             service.register(f"repo/{repository.name}", repository.policy_pack)
 
 
-def _health() -> dict[str, str]:
+def _health() -> HealthResponse:
     """Return the liveness payload."""
-    return {"status": "ok"}
+    return HealthResponse(status="ok")
 
 
 def create_app(
