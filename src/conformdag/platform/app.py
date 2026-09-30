@@ -38,7 +38,7 @@ from conformdag.platform.db import (
 )
 from conformdag.platform.logging import install_json_logging
 from conformdag.platform.packs import PackError, PackNotFoundError, PackService
-from conformdag.platform.services import ConflictError, InvalidOperationError, NotFoundError
+from conformdag.platform.services import ConflictError, NotFoundError
 from conformdag.platform.services import baselines as baseline_service
 from conformdag.platform.services import repositories as repository_service
 from conformdag.platform.services import scans as scan_service
@@ -236,46 +236,6 @@ def _register_workspace_packs(service: PackService, workspace: WorkspaceFile) ->
 def _health() -> dict[str, str]:
     """Return the liveness payload."""
     return {"status": "ok"}
-
-
-def register_repository(request: Request, payload: RepositoryCreate) -> dict[str, str]:
-    """Register one existing local DAG repository."""
-    factory = _factory(request)
-    with factory() as session:
-        try:
-            result = repository_service.register_repository(
-                session,
-                name=payload.name,
-                path=payload.path,
-                policy_pack=payload.policy_pack,
-                airflow_profile=payload.airflow_profile,
-            )
-        except ConflictError as exc:
-            session.rollback()
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except InvalidOperationError as exc:
-            session.rollback()
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        session.commit()
-        return result
-
-
-def load_workspace_file(request: Request, payload: WorkspaceLoadRequest) -> dict[str, int]:
-    """Register every workspace repository that is not already present."""
-    workspace, _ = load_workspace(Path(payload.path).resolve() if payload.path else None)
-    _register_workspace_packs(request.app.state.pack_service, workspace)
-    factory = _factory(request)
-    with factory() as session:
-        registered = repository_service.register_workspace_repositories(session, workspace.repositories)
-        session.commit()
-    return {"repositories_registered": registered}
-
-
-def list_repositories(request: Request) -> list[dict[str, str | None]]:
-    """List every registered DAG repository."""
-    factory = _factory(request)
-    with factory() as session:
-        return repository_service.list_repositories(session)
 
 
 def trigger_scan(request: Request, repository_id: str) -> dict[str, str]:
@@ -548,9 +508,10 @@ def create_app(
     app.middleware("http")(request_logging_middleware)
 
     app.get(API_PREFIX + "/health")(_health)
-    app.post(API_PREFIX + "/repos", dependencies=[Depends(require_admin)])(register_repository)
-    app.post(API_PREFIX + "/workspace/load", dependencies=[Depends(require_admin)])(load_workspace_file)
-    app.get(API_PREFIX + "/repos")(list_repositories)
+    from conformdag.platform.routes import repositories as repository_routes
+
+    repository_routes.register_routes(app)
+
     app.post(API_PREFIX + "/repos/{repository_id}/scans", dependencies=[Depends(require_admin)])(trigger_scan)
     app.post(API_PREFIX + "/scans/{scan_id}/cancel", dependencies=[Depends(require_admin)])(cancel_scan)
     app.get(API_PREFIX + "/scans/{scan_id}")(scan_status)
