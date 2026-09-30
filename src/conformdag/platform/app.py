@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -24,14 +24,11 @@ from starlette.types import Scope
 
 from conformdag.application import coerce_platform_airflow_profile
 from conformdag.platform.contracts import (
-    GateResponse,
-    GateUpsertRequest,
     PolicyVocabularyRequest,
 )
 from conformdag.platform.logging import install_json_logging
-from conformdag.platform.packs import PackError, PackNotFoundError, PackService
+from conformdag.platform.packs import PackService
 from conformdag.platform.workspace import WorkspaceError, WorkspaceFile, load_workspace
-from conformdag.policy import PolicyValidationError
 
 API_PREFIX = "/api/v1"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -315,6 +312,7 @@ def create_app(
 
     app.get(API_PREFIX + "/health")(_health)
     from conformdag.platform.routes import overview as overview_routes
+    from conformdag.platform.routes import packs as pack_routes
     from conformdag.platform.routes import repositories as repository_routes
     from conformdag.platform.routes import scans as scan_routes
     from conformdag.platform.routes import suppressions as suppression_routes
@@ -323,113 +321,13 @@ def create_app(
     scan_routes.register_routes(app)
     suppression_routes.register_routes(app)
     overview_routes.register_routes(app)
-
-    app.get(API_PREFIX + "/packs")(_pack_list)
-    app.get(API_PREFIX + "/packs/{pack_name}/policies")(_pack_policies)
-    app.put(API_PREFIX + "/packs/{pack_name}/policies/{policy_id}", dependencies=[Depends(require_admin)])(
-        _pack_upsert_policy
-    )
-    app.delete(API_PREFIX + "/packs/{pack_name}/policies/{policy_id}", dependencies=[Depends(require_admin)])(
-        _pack_delete_policy
-    )
-    app.post(API_PREFIX + "/packs/{pack_name}/validate", dependencies=[Depends(require_admin)])(_pack_validate)
-
-    app.get(API_PREFIX + "/packs/{pack_name}/gates")(_pack_gates)
-    app.put(API_PREFIX + "/packs/{pack_name}/gates/{gate_id}", dependencies=[Depends(require_admin)])(_pack_upsert_gate)
-    app.delete(API_PREFIX + "/packs/{pack_name}/gates/{gate_id}", dependencies=[Depends(require_admin)])(
-        _pack_delete_gate
-    )
+    pack_routes.register_routes(app)
 
     app.api_route("/api", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
     app.api_route("/api/{rest:path}", methods=["GET", "HEAD", "POST", "PATCH", "PUT", "DELETE"])(_api_fallback)
     if STATIC_DIR.is_dir():
         app.mount("/", DashboardStaticFiles(directory=STATIC_DIR, html=True), name="dashboard")
     return app
-
-
-def _pack_list(request: Request) -> list[dict[str, Any]]:
-    service: PackService = request.app.state.pack_service
-    return service.list_packs()
-
-
-def _pack_policies(request: Request, pack_name: str) -> list[dict[str, Any]]:
-    service: PackService = request.app.state.pack_service
-    try:
-        return service.list_policies(pack_name)
-    except PackError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PolicyValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-def _pack_upsert_policy(
-    request: Request, pack_name: str, policy_id: str, payload: PolicyUpsertRequest
-) -> dict[str, str]:
-    service: PackService = request.app.state.pack_service
-    try:
-        service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json", exclude_none=True))
-    except PackNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (PackError, PolicyValidationError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"status": "saved", "policy_id": policy_id}
-
-
-def _pack_delete_policy(request: Request, pack_name: str, policy_id: str) -> dict[str, str]:
-    service: PackService = request.app.state.pack_service
-    try:
-        service.delete_policy(pack_name, policy_id)
-    except PackNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PackError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except PolicyValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"status": "deleted", "policy_id": policy_id}
-
-
-def _pack_validate(request: Request, pack_name: str) -> dict[str, Any]:
-    service: PackService = request.app.state.pack_service
-    try:
-        return service.validate_pack(pack_name)
-    except PackNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-def _pack_gates(request: Request, pack_name: str) -> list[GateResponse]:
-    service: PackService = request.app.state.pack_service
-    try:
-        return [GateResponse.model_validate(gate) for gate in service.list_gates(pack_name)]
-    except PackError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PolicyValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-def _pack_upsert_gate(request: Request, pack_name: str, gate_id: str, payload: GateUpsertRequest) -> dict[str, str]:
-    service: PackService = request.app.state.pack_service
-    try:
-        service.upsert_gate(pack_name, gate_id, payload.model_dump(mode="json"))
-    except PackNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PackError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except PolicyValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"status": "saved", "gate_id": gate_id}
-
-
-def _pack_delete_gate(request: Request, pack_name: str, gate_id: str) -> dict[str, str]:
-    service: PackService = request.app.state.pack_service
-    try:
-        service.delete_gate(pack_name, gate_id)
-    except PackNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PackError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except PolicyValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"status": "deleted", "gate_id": gate_id}
 
 
 def _api_fallback(rest: str = "") -> dict[str, str]:

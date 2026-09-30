@@ -4693,6 +4693,26 @@ def test_unknown_api_paths_return_json_404(client: TestClient) -> None:
     assert response.json()["detail"].startswith("unknown API path")
 
 
+def test_pack_route_family_registers_in_compatibility_order() -> None:
+    from conformdag.platform.routes import packs as pack_routes
+
+    app = FastAPI()
+    pack_routes.register_routes(app)
+
+    routes = [route for route in app.routes if isinstance(route, APIRoute)]
+    manifest = [(route.path, tuple(sorted(route.methods or set[str]())), route.name) for route in routes]
+    assert manifest == [
+        ("/api/v1/packs", ("GET",), "_pack_list"),
+        ("/api/v1/packs/{pack_name}/policies", ("GET",), "_pack_policies"),
+        ("/api/v1/packs/{pack_name}/policies/{policy_id}", ("PUT",), "_pack_upsert_policy"),
+        ("/api/v1/packs/{pack_name}/policies/{policy_id}", ("DELETE",), "_pack_delete_policy"),
+        ("/api/v1/packs/{pack_name}/validate", ("POST",), "_pack_validate"),
+        ("/api/v1/packs/{pack_name}/gates", ("GET",), "_pack_gates"),
+        ("/api/v1/packs/{pack_name}/gates/{gate_id}", ("PUT",), "_pack_upsert_gate"),
+        ("/api/v1/packs/{pack_name}/gates/{gate_id}", ("DELETE",), "_pack_delete_gate"),
+    ]
+
+
 def test_route_manifest_preserves_specific_and_fallback_order(client: TestClient) -> None:
     app = cast("FastAPI", client.app)
     api_routes = [
