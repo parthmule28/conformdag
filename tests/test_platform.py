@@ -833,6 +833,49 @@ def test_json_formatter_emits_single_line_json() -> None:
     assert payload["scan_id"] == "scan1"
 
 
+def test_json_formatter_redacts_messages_extra_values_and_exception_text() -> None:
+    from conformdag.platform import logging as platform_logging
+
+    formatter = platform_logging.JsonFormatter()
+    record = logging.LogRecord(
+        "conformdag.worker",
+        logging.ERROR,
+        "worker.py",
+        10,
+        "password=c15-test-log-message",
+        None,
+        None,
+    )
+    record.api_key = "c15-test-top-level-extra"
+    record.details = {
+        "serviceCredential": "c15-test-mapping-credential",
+        "nested": [{"message": "token=c15-test-nested-message"}],
+        "safe": "ordinary diagnostic",
+    }
+    try:
+        raise RuntimeError("clientSecret=c15-test-exception-value")
+    except RuntimeError as exc:
+        record.exc_info = (type(exc), exc, exc.__traceback__)
+
+    formatted = formatter.format(record)
+    payload = json.loads(formatted)
+
+    for secret in (
+        "c15-test-log-message",
+        "c15-test-top-level-extra",
+        "c15-test-mapping-credential",
+        "c15-test-nested-message",
+        "c15-test-exception-value",
+    ):
+        assert secret not in formatted
+    assert payload["message"] == "password=[REDACTED]"
+    assert payload["api_key"] == "[REDACTED]"
+    assert payload["details"]["serviceCredential"] == "[REDACTED]"
+    assert payload["details"]["nested"][0]["message"] == "token=[REDACTED]"
+    assert payload["details"]["safe"] == "ordinary diagnostic"
+    assert "clientSecret=[REDACTED]" in payload["exc_info"]
+
+
 def test_platform_startup_installs_json_logging(client: TestClient) -> None:
     from conformdag.platform.logging import JsonFormatter
 
@@ -2848,6 +2891,68 @@ def test_worker_does_not_put_dsn_in_runner_argv(
     assert captured["env"]["CONFORMDAG_PLATFORM_DSN"] == platform_env
 
 
+def test_worker_redacts_stderr_before_relay_log_and_database_transition(
+    platform_env: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import conformdag.platform.worker as worker_module
+
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        session.add(RepositoryRow(id="repo1", name="r", path=str(tmp_path)))
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="queued"))
+        session.commit()
+
+    credential = "c15-test-worker-stderr-credential"
+
+    class FailedProcess:
+        returncode = 1
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            _ = timeout
+            return "", f"credential={credential}\n"
+
+    def fake_popen(arguments: list[str], **kwargs: Any) -> FailedProcess:
+        _ = arguments, kwargs
+        return FailedProcess()
+
+    monkeypatch.setattr(worker_module.subprocess, "Popen", fake_popen)
+    worker_logger = logging.getLogger("conformdag.worker")
+    conformdag_logger = logging.getLogger("conformdag")
+    direct_capture = caplog.handler not in conformdag_logger.handlers
+    if direct_capture:
+        worker_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="conformdag.worker"):
+            handled = run_worker_once(factory, platform_env, settings())
+    finally:
+        if direct_capture:
+            worker_logger.removeHandler(caplog.handler)
+
+    stderr = capsys.readouterr().err
+    assert handled == "scan1"
+    assert credential not in stderr
+    assert "[REDACTED]" in stderr
+    finished = [
+        record
+        for record in caplog.records
+        if record.name == "conformdag.worker" and record.getMessage() == "scan_finished"
+    ]
+    assert len(finished) == 1
+    logged_error = _log_extra(finished[0], "error")
+    assert isinstance(logged_error, str)
+    assert credential not in logged_error
+    assert "[REDACTED]" in logged_error
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "failed"
+    assert scan.error is not None
+    assert credential not in scan.error
+    assert "[REDACTED]" in scan.error
+
+
 def test_runner_persists_scan_failure(
     platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -2883,6 +2988,64 @@ def test_runner_persists_scan_failure(
         scan = session.get(ScanRow, "scan1")
         assert scan is not None and scan.status == "failed"
         assert scan.error is not None and "cannot read" in scan.error
+
+
+def test_runner_redacts_exception_before_log_and_database_transition(
+    platform_env: str,
+    tmp_path: Path,
+    build_repository: Callable[[Path], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import conformdag.platform.runner as runner_module
+
+    root = build_repository(tmp_path / "repository")
+    factory = initialize_session_factory(platform_env)
+    with factory() as session:
+        session.add(
+            RepositoryRow(
+                id="repo1",
+                name="r",
+                path=str(root),
+                policy_pack=str(root / "policies/pack.yaml"),
+            )
+        )
+        session.add(ScanRow(id="scan1", repository_id="repo1", status="running"))
+        session.commit()
+
+    credential = "c15-test-runner-exception-credential"
+
+    def fail_scan(*_args: object, **_kwargs: object) -> NoReturn:
+        raise RuntimeError(f"credential={credential}")
+
+    monkeypatch.setattr(runner_module, "execute_application_scan", fail_scan)
+    runner_logger = logging.getLogger("conformdag.runner")
+    conformdag_logger = logging.getLogger("conformdag")
+    direct_capture = caplog.handler not in conformdag_logger.handlers
+    if direct_capture:
+        runner_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="conformdag.runner"):
+            exit_code = runner_module.execute_scan("scan1", platform_env)
+    finally:
+        if direct_capture:
+            runner_logger.removeHandler(caplog.handler)
+
+    assert exit_code == 1
+    event = next(
+        record
+        for record in caplog.records
+        if record.name == "conformdag.runner" and record.getMessage() == "scan_completed"
+    )
+    logged_error = _log_extra(event, "error")
+    assert isinstance(logged_error, str)
+    assert credential not in logged_error
+    assert "[REDACTED]" in logged_error
+    scan = load_scan(platform_env, "scan1")
+    assert scan.status == "failed"
+    assert scan.error is not None
+    assert credential not in scan.error
+    assert "[REDACTED]" in scan.error
 
 
 def test_runner_rejects_non_running_scan(platform_env: str) -> None:

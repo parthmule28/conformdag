@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +20,7 @@ from conformdag.models import (
     RemediationPayload,
     RemediationTarget,
 )
+from conformdag.security.redaction import redact_credentials, redact_evidence
 
 
 class EvaluationPhaseError(RuntimeError):
@@ -59,13 +59,6 @@ def policy_applies(policy: Policy, airflow_profile: AirflowProfile | None) -> bo
     return airflow_profile is None or not policy.airflow_profiles or airflow_profile in policy.airflow_profiles
 
 
-def redact_evidence(text: str, max_chars: int = 240) -> str:
-    """Bound evidence and mask common credential assignments before reporting."""
-    bounded = text[:max_chars]
-    pattern = re.compile(r"(?i)(password|passwd|token|secret|api[_-]?key)\s*=\s*(['\"]?)([^\s,'\"]+)\2")
-    return pattern.sub(r"\1=\2[REDACTED]\2", bounded)
-
-
 def structural_fingerprint(policy: Policy, path: str, anchor: str, status: FindingStatus) -> str:
     """Build a stable finding identity from structural evidence, not line numbers."""
     value = f"{policy.id}:{policy.version}:{path}:{anchor}:{status.value}"
@@ -90,7 +83,7 @@ def _finding(
         enforcement=EnforcementType.DETERMINISTIC,
         location=FindingLocation(file=Path(model.source.relative_path), start_line=line, end_line=line),
         evidence=FindingEvidence(text=redact_evidence(evidence), start_line=line, end_line=line),
-        explanation=evidence,
+        explanation=redact_credentials(evidence),
         remediation=remediation or policy.safe_path,
         fix=fix_payload,
         fingerprint=structural_fingerprint(policy, model.source.relative_path, anchor, status),

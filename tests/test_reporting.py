@@ -169,6 +169,51 @@ def test_sarif_and_html_render_from_the_same_canonical_finding() -> None:
     assert '<th scope="col">Policy</th>' in html
 
 
+def test_report_projections_redact_free_text_without_changing_projection_shape() -> None:
+    finding = _finding()
+    assert finding.evidence is not None
+    finding = finding.model_copy(
+        update={
+            "explanation": "password=c15-test-report-explanation",
+            "remediation": "credential=c15-test-report-remediation",
+            "evidence": finding.evidence.model_copy(update={"text": "api_key=c15-test-report-evidence"}),
+        }
+    )
+    report = ScanReport(
+        complete=True,
+        result_fingerprint="result",
+        findings=[finding],
+        run=RunMetadata(
+            tool_version="test",
+            policy_pack_id="default",
+            policy_pack_version="1",
+            timestamp=datetime(2026, 7, 30, tzinfo=UTC),
+        ),
+    )
+
+    sarif = render_sarif(report)
+    html = render_html(report)
+
+    for secret in (
+        "c15-test-report-explanation",
+        "c15-test-report-remediation",
+        "c15-test-report-evidence",
+    ):
+        assert secret not in str(sarif)
+        assert secret not in html
+    runs = cast(list[dict[str, object]], sarif["runs"])
+    run = runs[0]
+    driver = cast(dict[str, object], run["tool"])
+    driver_info = cast(dict[str, object], driver["driver"])
+    rules = cast(list[dict[str, object]], driver_info["rules"])
+    results = cast(list[dict[str, object]], run["results"])
+    message = cast(dict[str, object], results[0]["message"])
+    help_text = cast(dict[str, object], rules[0]["help"])
+    assert message["text"] == "password=[REDACTED]"
+    assert help_text["text"] == "credential=[REDACTED]"
+    assert "api_key=[REDACTED]" in html
+
+
 def test_explicitly_blocking_semantic_failure_blocks() -> None:
     finding = _finding().model_copy(update={"enforcement": EnforcementType.SEMANTIC, "blocking": True})
     report = ScanReport(

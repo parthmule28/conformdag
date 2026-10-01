@@ -24,7 +24,7 @@ from conformdag.agent import (
     triage_report,
 )
 from conformdag.agent.pr import PrError
-from conformdag.agent.verifier import VerdictError
+from conformdag.agent.verifier import VerdictError, build_verifier_evidence
 from conformdag.fixing.engine import FilePatch
 from conformdag.models import RunIssue, RunMetadata, ScanReport
 from conformdag.scan import scan_repository
@@ -253,6 +253,81 @@ def test_verifier_redacts_credentials(build_repository: Callable[[Path], Path], 
 
     assert captured and "hunter2" not in captured[0]
     assert "[REDACTED]" in captured[0]
+
+
+def test_verifier_redacts_diff_before_bounding_evidence(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    root = build_repository(tmp_path)
+    report = scan_repository(root, root / "policies/pack.yaml")
+    marker = "C15_DIFF_BOUNDARY"
+    unbounded = build_verifier_evidence(marker, report, report, max_chars=10_000)
+    diff_start = unbounded.index(marker)
+    partial_credential = 'credential="c15-test-diff-'
+    diff = 'credential="c15-test-diff-credential-value"'
+
+    evidence = build_verifier_evidence(
+        diff,
+        report,
+        report,
+        max_chars=diff_start + len(partial_credential),
+    )
+
+    assert "c15-test-diff-credential-value" not in evidence
+    assert "c15-test-diff-" not in evidence
+
+
+def test_verifier_sanitizes_provider_verdict_before_return_and_cache(
+    build_repository: Callable[[Path], Path], tmp_path: Path
+) -> None:
+    root = build_repository(tmp_path)
+    report = scan_repository(root, root / "policies/pack.yaml")
+    credential = "c15-test-verdict-credential-value"
+    provider_content = json.dumps(
+        {
+            "verdict": "approve",
+            "reason_code": "no-semantic-change",
+            "confidence": "high",
+            "reasons": [f"password={credential}"],
+            "concerns": [f"serviceCredential={credential}"],
+        }
+    )
+    diff = "diff --git a/dag.py b/dag.py\n+credential=c15-test-diff-value\n"
+    cache_path = tmp_path / "verdict-cache.json"
+    verifier = Verifier(
+        "https://verifier.test/api",
+        "key",
+        VerifierRequest(model="verifier-model"),
+        cache_path=cache_path,
+        transport=httpx.MockTransport(lambda request: _chat_response(provider_content)),
+    )
+
+    verdict = verifier.verify(diff, report, report)
+    verifier.close()
+
+    assert all(credential not in reason for reason in verdict.reasons)
+    assert all(credential not in concern for concern in verdict.concerns)
+    assert "[REDACTED]" in verdict.reasons[0]
+    assert "[REDACTED]" in verdict.concerns[0]
+    stored = cache_path.read_text(encoding="utf-8")
+    assert credential not in stored
+    assert "c15-test-diff-value" not in stored
+
+    def no_provider_call(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("sanitized verdict must be read from cache")
+
+    cached_verifier = Verifier(
+        "https://verifier.test/api",
+        "key",
+        VerifierRequest(model="verifier-model"),
+        cache_path=cache_path,
+        transport=httpx.MockTransport(no_provider_call),
+    )
+    cached = cached_verifier.verify(diff, report, report)
+    cached_verifier.close()
+
+    assert cached.reasons == verdict.reasons
+    assert cached.concerns == verdict.concerns
 
 
 def test_pipeline_opens_pr_after_approval(build_repository: Callable[[Path], Path], tmp_path: Path) -> None:

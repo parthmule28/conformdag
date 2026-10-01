@@ -26,6 +26,7 @@ from conformdag.platform.db import (
 )
 from conformdag.platform.domain import ScanStatus
 from conformdag.platform.logging import install_json_logging
+from conformdag.security.redaction import redact_credentials
 
 DEFAULT_POLL_SECONDS = 2.0
 DEFAULT_IDLE_SECONDS = 600
@@ -130,7 +131,7 @@ def _terminate_child(process: subprocess.Popen[str]) -> None:
 def _relay_stderr(stderr: str) -> None:
     """Relay captured runner stderr to the worker's stderr."""
     if stderr:
-        sys.stderr.write(stderr)
+        sys.stderr.write(redact_credentials(stderr))
         sys.stderr.flush()
 
 
@@ -166,7 +167,7 @@ def execute_claimed_scan(
             env={**os.environ, "CONFORMDAG_PLATFORM_DSN": dsn},
         )
     except OSError as exc:
-        return RunnerOutcome(error=f"worker failed to launch the runner: {exc}", retryable=True)
+        return RunnerOutcome(error=redact_credentials(f"worker failed to launch the runner: {exc}"), retryable=True)
     deadline = time.monotonic() + settings.timeout_seconds
     while True:
         remaining = deadline - time.monotonic()
@@ -190,6 +191,7 @@ def execute_claimed_scan(
                 return RunnerOutcome(error=_LOST_RUNNER_ERROR)
             continue
         break
+    stderr = redact_credentials(stderr)
     _relay_stderr(stderr)
     if process.returncode != 0:
         return RunnerOutcome(
@@ -214,6 +216,7 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
     logger.info("scan_claimed", extra={"scan_id": scan_id})
 
     outcome = execute_claimed_scan(session_factory, dsn, scan_id, settings, claim_attempt)
+    error = redact_credentials(outcome.error) if outcome.error else None
 
     with session_factory() as session:
         final = session.get(ScanRow, scan_id)
@@ -224,7 +227,7 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
                         session,
                         scan_id,
                         ScanStatus.QUEUED,
-                        outcome.error,
+                        error,
                         requeue=True,
                         expected_attempt=claim_attempt,
                     )
@@ -233,15 +236,15 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
                         session,
                         scan_id,
                         ScanStatus.FAILED,
-                        outcome.error or _LOST_RUNNER_ERROR,
+                        error or _LOST_RUNNER_ERROR,
                         expected_attempt=claim_attempt,
                     )
                     _apply_retention(session, final.repository_id, settings)
             else:
                 _apply_retention(session, final.repository_id, settings)
     finished_extra: dict[str, object] = {"scan_id": scan_id}
-    if outcome.error:
-        finished_extra["error"] = outcome.error
+    if error:
+        finished_extra["error"] = error
     if outcome.cancelled:
         finished_extra["cancelled"] = True
     logger.info("scan_finished", extra=finished_extra)

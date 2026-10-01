@@ -15,6 +15,7 @@ from conformdag.analysis import (
     discover_python_files,
     iter_module_scope_calls,
     matches_exclude,
+    secret_like,
 )
 
 
@@ -378,3 +379,13 @@ def test_taskflow_task_inside_unnamed_with_dag_has_no_dag_name() -> None:
     taskflow = [task for task in model.tasks if task.taskflow]
     assert len(taskflow) == 1
     assert taskflow[0].dag_name is None
+
+
+@pytest.mark.parametrize("name", ["db_password", "clientSecret", "apiKey", "githubCredential"])
+def test_secret_like_recognizes_credential_identifier_components(name: str) -> None:
+    assert secret_like(name)
+
+
+@pytest.mark.parametrize("name", ["secretary", "tokenizer", "passwordless", "credentials_counted"])
+def test_secret_like_does_not_match_benign_identifier_words(name: str) -> None:
+    assert not secret_like(name)

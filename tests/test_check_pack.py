@@ -306,6 +306,17 @@ def test_sensitive_logging_catches_hardcoded_secrets() -> None:
     assert "PASSWORD" in (findings[0].explanation or "")
 
 
+def test_sensitive_logging_custom_patterns_remain_policy_specific() -> None:
+    findings, _ = _evaluate(
+        SensitiveLoggingConfig(secret_patterns=["vault_marker"]),
+        "sensitive-logging",
+        'VAULT_MARKER_VALUE = "c15-test-policy-pattern-value"\n',
+    )
+
+    assert len(findings) == 1
+    assert "VAULT_MARKER_VALUE" in (findings[0].explanation or "")
+
+
 def test_dynamic_dag_factory_catches_loop_generated_dags() -> None:
     findings, _ = _evaluate(DynamicDagFactoryConfig(), "dynamic-dag-factory", DYNAMIC_DAG)
 
