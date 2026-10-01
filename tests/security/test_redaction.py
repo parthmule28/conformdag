@@ -95,6 +95,20 @@ def test_redact_credentials_preserves_already_redacted_content() -> None:
     assert redact_credentials(text) == text
 
 
+@pytest.mark.parametrize(
+    "text,secret",
+    [
+        ("password=[REDACTED]c15-test-unquoted-suffix", "c15-test-unquoted-suffix"),
+        ('password="[REDACTED]c15-test-quoted-suffix"', "c15-test-quoted-suffix"),
+    ],
+)
+def test_redact_credentials_does_not_trust_a_redaction_marker_prefix(text: str, secret: str) -> None:
+    redacted = redact_credentials(text)
+
+    assert secret not in redacted
+    assert "[REDACTED]" in redacted
+
+
 def test_redact_credentials_finds_nested_assignment_in_noncredential_value() -> None:
     text = "owner='password=c15-test-password-value'"
 

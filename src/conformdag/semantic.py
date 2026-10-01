@@ -132,14 +132,14 @@ GENERIC_REVIEWER_PROMPT = PromptTemplate(
 
 
 def redact_text(text: str, patterns: Iterable[str] = DEFAULT_SECRET_PATTERNS) -> str:
-    """Apply additive caller patterns, then enforce canonical credential protection."""
-    result = text
+    """Enforce canonical credential protection before additive caller patterns."""
+    result = redact_credentials(text)
     for pattern in patterns:
         if pattern in DEFAULT_SECRET_PATTERNS:
             continue
         compiled = re.compile(pattern)
         result = compiled.sub("[REDACTED]", result)
-    return redact_credentials(result)
+    return result
 
 
 def build_context(

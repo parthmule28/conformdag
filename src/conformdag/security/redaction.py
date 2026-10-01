@@ -16,7 +16,8 @@ CREDENTIAL_NAME_MARKERS: tuple[str, ...] = (
 
 CREDENTIAL_PATTERNS: tuple[str, ...] = (
     r"(?P<key_quote>['\"]?)(?P<name>[A-Za-z_][A-Za-z0-9_.-]*)(?P=key_quote)\s*[:=]\s*"
-    r"(?P<value>\[REDACTED\]|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,'\";}\]\)]+)",
+    r"(?P<value>\[REDACTED\][^\s,'\";}\]\)]+|\[REDACTED\]|"
+    r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,'\";}\]\)]+)",
     r"(?i)(?P<prefix>\bBearer\s+)(?P<value>[A-Za-z0-9._~+/=-]+)",
     r"(?i)(?P<prefix>\b[a-z][a-z0-9+.-]*://[^:/@\s]+:)(?P<value>[^@/\s]+)(?P<suffix>@)",
 )

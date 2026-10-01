@@ -169,7 +169,7 @@ def test_cache_identity_changes_with_policy_contract_inputs() -> None:
 
 
 def test_custom_secret_pattern_is_applied() -> None:
-    assert redact_text("credential=abc", [r"credential=\w+"]) == "[REDACTED]"
+    assert redact_text("custom_marker=abc", [r"custom_marker=\w+"]) == "[REDACTED]"
 
 
 def test_custom_secret_patterns_are_additive_to_canonical_protection() -> None:
@@ -179,6 +179,18 @@ def test_custom_secret_patterns_are_additive_to_canonical_protection() -> None:
     )
 
     assert redacted == "[REDACTED]; credential=[REDACTED]"
+
+
+def test_custom_pattern_cannot_remove_generic_credential_name_before_redaction() -> None:
+    secret = "c15-test-custom-pattern-bypass"
+    source = f"password={secret}"
+    patterns = [r"password="]
+
+    redacted = redact_text(source, patterns)
+    context = build_context("safe policy", {"dag.py": source}, secret_patterns=patterns)
+
+    assert secret not in redacted
+    assert secret not in context.text
 
 
 def test_prompt_template_is_versioned_and_hashed() -> None:
