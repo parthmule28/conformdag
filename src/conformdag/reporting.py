@@ -10,6 +10,7 @@ from jinja2 import Environment, select_autoescape
 
 from conformdag.gates import blocking_findings
 from conformdag.models import Finding, FindingStatus, RunIssue, ScanReport, Suppression
+from conformdag.security.redaction import redact_credentials
 
 
 def apply_suppressions(
@@ -142,7 +143,7 @@ def render_sarif(report: ScanReport) -> dict[str, object]:
             {
                 "id": finding.policy_id,
                 "shortDescription": {"text": finding.policy_id},
-                "help": {"text": finding.remediation or "Review the policy guidance."},
+                "help": {"text": redact_credentials(finding.remediation or "Review the policy guidance.")},
             },
         )
         if finding.status is FindingStatus.PASS:
@@ -150,7 +151,7 @@ def render_sarif(report: ScanReport) -> dict[str, object]:
         result: dict[str, object] = {
             "ruleId": finding.policy_id,
             "level": level_by_severity.get(finding.severity.value, "note"),
-            "message": {"text": finding.explanation or finding.status.value},
+            "message": {"text": redact_credentials(finding.explanation or finding.status.value)},
             "properties": {
                 "status": finding.status.value,
                 "suppressed": finding.suppressed,
@@ -219,10 +220,10 @@ th{background:#eee}.evidence{font-family:monospace;margin-top:.4rem;white-space:
 <td>{{ finding.policy_id }}</td>
 <td class="{{ finding.status.value }}">{{ finding.status.value }}</td>
 <td>{{ finding.severity.value }}</td><td>{{ finding.location.file or "" }}</td>
-<td>{{ finding.explanation or "" }}{% if include_evidence and finding.evidence %}
-<div class="evidence">{{ finding.evidence.text }}</div>{% endif %}</td>
+<td>{{ redact_credentials(finding.explanation or "") }}{% if include_evidence and finding.evidence %}
+<div class="evidence">{{ redact_credentials(finding.evidence.text) }}</div>{% endif %}</td>
 </tr>{% endfor %}
 </tbody></table></body></html>
 """
     )
-    return template.render(report=report, include_evidence=include_evidence)
+    return template.render(report=report, include_evidence=include_evidence, redact_credentials=redact_credentials)
