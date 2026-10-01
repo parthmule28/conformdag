@@ -95,6 +95,16 @@ def test_redact_credentials_preserves_already_redacted_content() -> None:
     assert redact_credentials(text) == text
 
 
+def test_redact_credentials_finds_nested_assignment_in_noncredential_value() -> None:
+    text = "owner='password=c15-test-password-value'"
+
+    redacted = redact_credentials(text)
+
+    assert redacted == "owner='password=[REDACTED]'"
+    assert "c15-test-password-value" not in redacted
+    assert "[REDACTED]" in redacted
+
+
 def test_redact_evidence_redacts_quoted_value_before_truncating() -> None:
     text = 'password="c15-test-password-value"'
     max_chars = 19

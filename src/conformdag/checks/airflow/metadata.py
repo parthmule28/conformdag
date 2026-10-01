@@ -28,6 +28,7 @@ from conformdag.models import (
     RequiredOwnerConfig,
     RequiredTagsConfig,
 )
+from conformdag.security.redaction import redact_credentials
 
 
 class OwnerEvaluator:
@@ -105,7 +106,7 @@ class OwnerEvaluator:
                 start_line=dag.line,
                 end_line=dag.line,
             ),
-            explanation=explanation,
+            explanation=redact_credentials(explanation),
             remediation=policy.safe_path,
             fix=payload,
             fingerprint=structural_fingerprint(policy, model.source.relative_path, anchor, status),

@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
-from conformdag.analysis import CallRecord, SourceModel, secret_like
+from conformdag.analysis import CallRecord, SourceModel
 from conformdag.checks.common import (
     EvaluationContext,
     finding,
@@ -35,6 +35,7 @@ from conformdag.models import (
     TopLevelIOConfig,
 )
 from conformdag.ruff_adapter import ruff_rule_matches, run_ruff
+from conformdag.security.redaction import credential_name_like, redact_credentials
 
 
 class TopLevelIOEvaluator:
@@ -208,7 +209,7 @@ class SensitiveLoggingEvaluator:
             for constant in model.constants:
                 if not isinstance(constant.value, str):
                     continue
-                looks_secret = secret_like(constant.name) or any(
+                looks_secret = credential_name_like(constant.name) or any(
                     pattern.lower() in constant.name.lower() for pattern in configuration.secret_patterns
                 )
                 if not looks_secret:
@@ -356,7 +357,7 @@ class RuffAirEvaluator:
                     enforcement=EnforcementType.DETERMINISTIC,
                     location=FindingLocation(file=Path(relative), start_line=row, end_line=row),
                     evidence=FindingEvidence(text=redact_evidence(detail), start_line=row, end_line=row),
-                    explanation=detail,
+                    explanation=redact_credentials(detail),
                     remediation=context.policy.safe_path,
                     fix=RemediationPayload(
                         fix_kind="ruff-air",
