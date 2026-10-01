@@ -1,5 +1,6 @@
 """Tests for the opt-in semantic provider boundary."""
 
+import hashlib
 import json
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +15,7 @@ from conformdag.benchmark_semantic import (
     build_generic_reviewer_request,
     run_semantic_baseline,
 )
-from conformdag.models import Confidence, SemanticRequest, SemanticResponse
+from conformdag.models import Confidence, SemanticAuditEvidence, SemanticRequest, SemanticResponse
 from conformdag.semantic import (
     DEFAULT_PROMPT_TEMPLATE,
     OpenAICompatibleProvider,
@@ -49,6 +50,26 @@ def test_context_is_redacted_bounded_and_deterministically_selected() -> None:
     assert context.included_files == ("a.py", "b.py")
     assert context.omitted_files == ("c.py",)
     assert len(context.context_hash) == 64
+
+
+def test_context_redacts_policy_source_and_runtime_with_additive_custom_patterns() -> None:
+    context = build_context(
+        "credential=c15-test-policy-credential",
+        {"dag.py": ("vault_marker=c15-test-custom-value\ncredential=c15-test-source-credential")},
+        runtime_observations=("credential=c15-test-runtime-credential",),
+        max_input_tokens=200,
+        secret_patterns=(r"vault_marker=[A-Za-z0-9_-]+",),
+    )
+
+    for secret in (
+        "c15-test-policy-credential",
+        "c15-test-custom-value",
+        "c15-test-source-credential",
+        "c15-test-runtime-credential",
+    ):
+        assert secret not in context.text
+    assert context.context_hash == hashlib.sha256(context.text.encode("utf-8")).hexdigest()
+    assert context.text.count("[REDACTED]") == 4
 
 
 def test_provider_validates_structured_output_and_sends_untrusted_boundary() -> None:
@@ -110,16 +131,32 @@ def test_cache_redacts_normalized_provider_fields(tmp_path: Path) -> None:
         "key",
         SemanticResponse(
             status="PASS",
-            evidence="api_key=do-not-store",
-            explanation="password=hunter2",
+            evidence="credential=c15-test-cache-evidence",
+            explanation="credential=c15-test-cache-explanation",
+            remediation="credential=c15-test-cache-remediation",
             confidence=Confidence.HIGH,
+            audit_evidence=[
+                SemanticAuditEvidence(
+                    criterion="summary",
+                    source_type="provider",
+                    excerpt="serviceCredential=c15-test-cache-audit",
+                )
+            ],
         ),
     )
 
     stored = (tmp_path / "semantic-cache.json").read_text(encoding="utf-8")
-    assert "do-not-store" not in stored
-    assert "hunter2" not in stored
+    for secret in (
+        "c15-test-cache-evidence",
+        "c15-test-cache-explanation",
+        "c15-test-cache-remediation",
+        "c15-test-cache-audit",
+    ):
+        assert secret not in stored
     assert "[REDACTED]" in stored
+    assert "system_prompt" not in stored
+    assert "raw_prompt" not in stored
+    assert "raw_response" not in stored
 
 
 def test_cache_identity_changes_with_policy_contract_inputs() -> None:
@@ -133,6 +170,15 @@ def test_cache_identity_changes_with_policy_contract_inputs() -> None:
 
 def test_custom_secret_pattern_is_applied() -> None:
     assert redact_text("credential=abc", [r"credential=\w+"]) == "[REDACTED]"
+
+
+def test_custom_secret_patterns_are_additive_to_canonical_protection() -> None:
+    redacted = redact_text(
+        "vault_marker=c15-test-custom-value; credential=c15-test-generic-value",
+        [r"vault_marker=[A-Za-z0-9_-]+"],
+    )
+
+    assert redacted == "[REDACTED]; credential=[REDACTED]"
 
 
 def test_prompt_template_is_versioned_and_hashed() -> None:

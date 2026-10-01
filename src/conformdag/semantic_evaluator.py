@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from conformdag.evaluator import redact_evidence
 from conformdag.models import (
     EnforcementType,
     Finding,
@@ -23,6 +22,7 @@ from conformdag.models import (
     SemanticResponse,
 )
 from conformdag.policy import policy_contract_hash, policy_enforcement_hash
+from conformdag.security.redaction import redact_credentials, redact_evidence
 from conformdag.semantic import (
     DEFAULT_PROMPT_TEMPLATE,
     SemanticContext,
@@ -129,7 +129,7 @@ def semantic_finding(
 ) -> Finding:
     """Normalize a provider decision as advisory evidence with a stable identity."""
     status = FindingStatus(response.status)
-    explanation = response.explanation
+    explanation = redact_credentials(response.explanation)
     if policy.id == "AIR-SEM-001" and not response.evidence.strip():
         status = FindingStatus.NEEDS_REVIEW
         explanation = f"{explanation} Idempotence cannot be decided without bounded evidence."
@@ -172,7 +172,7 @@ def semantic_finding(
         location=FindingLocation(file=source_path),
         evidence=FindingEvidence(text=evidence),
         explanation=explanation,
-        remediation=response.remediation or policy.safe_path,
+        remediation=redact_credentials(response.remediation) if response.remediation is not None else policy.safe_path,
         confidence=response.confidence,
         audit_evidence=audit_evidence,
         fingerprint=fingerprint,
@@ -185,7 +185,7 @@ def _normalize_audit_evidence(response: SemanticResponse, context: SemanticConte
         SemanticAuditEvidence(
             criterion="provider-summary",
             source_type="provider",
-            excerpt=response.evidence[:240],
+            excerpt=redact_evidence(response.evidence),
         )
     ]
     included = set(context.included_files)
