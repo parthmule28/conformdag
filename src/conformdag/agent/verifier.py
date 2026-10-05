@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -12,6 +11,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from conformdag.models import ScanReport
+from conformdag.security.redaction import redact_credentials
 
 VERDICT_SYSTEM_PROMPT = (
     "You are the semantic reviewer for ConformDAG, an Airflow policy fixer. "
@@ -23,8 +23,6 @@ VERDICT_SYSTEM_PROMPT = (
 
 UNTRUSTED_OPEN = "<<<UNTRUSTED_EVIDENCE>>>"
 UNTRUSTED_CLOSE = "<<<END_UNTRUSTED_EVIDENCE>>>"
-
-CREDENTIAL_PATTERN = re.compile(r"(?i)(password|passwd|token|secret|api[_-]?key)\s*=\s*(['\"]?)([^\s,'\"]+)\2")
 
 
 class VerdictError(RuntimeError):
@@ -57,9 +55,13 @@ class VerifierRequest(BaseModel):
     max_input_chars: int = Field(default=60_000, gt=0)
 
 
-def redact_text(text: str) -> str:
-    """Mask credential-like assignments before any content leaves the host."""
-    return CREDENTIAL_PATTERN.sub(r"\1=\2[REDACTED]\2", text)
+def _sanitize_verdict(verdict: Verdict) -> Verdict:
+    return verdict.model_copy(
+        update={
+            "reasons": [redact_credentials(reason) for reason in verdict.reasons],
+            "concerns": [redact_credentials(concern) for concern in verdict.concerns],
+        }
+    )
 
 
 def build_verifier_evidence(
@@ -74,7 +76,7 @@ def build_verifier_evidence(
         "FIXED FINDINGS:",
         before_report.result_fingerprint or "unknown-before-fingerprint",
         "PROPOSED PATCH (unified diff):",
-        redact_text(diff),
+        redact_credentials(diff),
         "AFTER RE-SCAN RESULT:",
         after_report.result_fingerprint or "unknown-after-fingerprint",
         f"blocking failures after re-scan: {after_blocking(after_report)}",
@@ -130,7 +132,7 @@ class Verifier:
         cache_key = self._cache_key(diff, before_report, after_report)
         cached = self._cache_read(cache_key)
         if cached is not None:
-            return cached
+            return _sanitize_verdict(cached)
         evidence = build_verifier_evidence(diff, before_report, after_report, self._limits.max_input_chars)
         messages = [
             {"role": "system", "content": VERDICT_SYSTEM_PROMPT},
@@ -154,7 +156,7 @@ class Verifier:
             except (KeyError, IndexError, TypeError) as exc:
                 raise VerdictError(f"verifier response has no message content: {exc}") from exc
             try:
-                verdict = Verdict.model_validate_json(content)
+                verdict = _sanitize_verdict(Verdict.model_validate_json(content))
             except ValueError:
                 continue
             self._cache_write(cache_key, verdict)

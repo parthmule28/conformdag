@@ -324,3 +324,52 @@ def test_privacy_check_reports_each_unredacted_occurrence(tmp_path: Path) -> Non
 
     assert len(issues) == 2
     assert all("possible credential material" in issue for issue in issues)
+
+
+@pytest.mark.parametrize(
+    "artifact_text",
+    [
+        "credential=c15-test-credential-value",
+        '{"password": "c15-test-json-password"}',
+        "Authorization: Bearer c15-test-bearer-credential",
+        "postgresql://user:c15-test-dsn-password@database.example/db",
+    ],
+)
+def test_privacy_check_detects_canonical_credential_forms(tmp_path: Path, artifact_text: str) -> None:
+    artifact = tmp_path / "report.json"
+    artifact.write_text(artifact_text, encoding="utf-8")
+    inspect_file = cast(
+        "Callable[[Path], list[str]]",
+        runpy.run_path("scripts/verify_artifact_privacy.py")["inspect_file"],
+    )
+
+    issues = inspect_file(artifact)
+
+    assert len(issues) == 1
+    assert "possible credential material" in issues[0]
+
+
+def test_privacy_check_accepts_already_redacted_credential_values(tmp_path: Path) -> None:
+    artifact = tmp_path / "report.json"
+    artifact.write_text('{"credential": "[REDACTED]", "password": "[REDACTED]"}', encoding="utf-8")
+    inspect_file = cast(
+        "Callable[[Path], list[str]]",
+        runpy.run_path("scripts/verify_artifact_privacy.py")["inspect_file"],
+    )
+
+    assert inspect_file(artifact) == []
+
+
+@pytest.mark.parametrize("field", ["system_prompt", "raw_prompt", "raw_response"])
+def test_privacy_check_keeps_rejecting_raw_semantic_fields(tmp_path: Path, field: str) -> None:
+    artifact = tmp_path / "report.json"
+    artifact.write_text(f'{{"{field}": "ordinary text"}}', encoding="utf-8")
+    inspect_file = cast(
+        "Callable[[Path], list[str]]",
+        runpy.run_path("scripts/verify_artifact_privacy.py")["inspect_file"],
+    )
+
+    issues = inspect_file(artifact)
+
+    assert len(issues) == 1
+    assert field in issues[0]

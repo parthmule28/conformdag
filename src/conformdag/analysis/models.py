@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+from conformdag.security.redaction import credential_name_like
+
 
 class ParseIssueCode(StrEnum):
     """Stable categories for source-discovery and parsing failures."""
@@ -131,10 +133,9 @@ class SecretAssignment:
 
 
 def secret_like(name: str) -> bool:
-    lowered = name.lower()
-    return any(
-        marker in lowered for marker in ("password", "passwd", "token", "secret", "api_key", "apikey", "credential")
-    )
+    """Preserve the analysis import while delegating to the canonical security owner."""
+    # C15 compatibility seam: canonical owner is conformdag.security.redaction; remove at C30.
+    return credential_name_like(name)
 
 
 def _empty_imports() -> list[ImportRecord]:

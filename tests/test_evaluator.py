@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from conformdag.analysis import SourceFile, analyze_source
+from conformdag.checks.common import finding as deterministic_finding
 from conformdag.evaluator import (
     CHECK_EVALUATORS,
     EvaluationContext,
@@ -387,6 +388,71 @@ def test_evidence_is_bounded_and_redacted() -> None:
     assert len(evidence) <= 80
     assert "secret-value" not in evidence
     assert "[REDACTED]" in evidence
+
+
+def test_evaluator_redact_evidence_compatibility_surface_handles_colon_values() -> None:
+    evidence = redact_evidence("password: c15-test-password-value", max_chars=80)
+
+    assert evidence == "password: [REDACTED]"
+    assert "c15-test-password-value" not in evidence
+
+
+def test_generic_deterministic_finding_redacts_explanation_without_changing_fingerprint() -> None:
+    policy = _ruff_policy()
+    model = _model("from airflow import DAG\ndag = DAG(dag_id='x')\n")
+    evidence = "password: c15-test-password-value"
+
+    finding = deterministic_finding(policy, model, 2, FindingStatus.FAIL, evidence, "stable-anchor")
+
+    assert finding.evidence is not None
+    assert "c15-test-password-value" not in finding.evidence.text
+    assert finding.explanation == "password: [REDACTED]"
+    assert finding.fingerprint == structural_fingerprint(policy, "dag.py", "stable-anchor", FindingStatus.FAIL)
+
+
+def test_owner_finding_redacts_source_controlled_explanation_text() -> None:
+    pack = load_policy_pack(Path("policies/pack.yaml"), Path.cwd())
+    policy = next(item for item in pack.policies if item.id == "AIR-DET-001")
+    model = _model("from airflow import DAG\ndag = DAG(dag_id='x', owner='password=c15-test-password-value')\n")
+
+    findings = OwnerEvaluator().evaluate(EvaluationContext(policy, [model]))
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.evidence is not None
+    assert "c15-test-password-value" not in finding.evidence.text
+    assert finding.explanation is not None
+    assert "c15-test-password-value" not in finding.explanation
+    assert "[REDACTED]" in finding.explanation
+
+
+def test_ruff_finding_redacts_tool_text_in_evidence_and_explanation(tmp_path: Path) -> None:
+    model = _model("from airflow import DAG\ndag = DAG(dag_id='x')\n", "dags/dag.py")
+    policy = _ruff_policy()
+    context = EvaluationContext(
+        policy,
+        [model],
+        repository_root=tmp_path,
+        ruff_violations=[
+            {
+                "filename": str(tmp_path / "dags/dag.py"),
+                "location": {"row": 2, "column": 7},
+                "code": "AIR002",
+                "message": "password: c15-test-password-value",
+            }
+        ],
+    )
+
+    findings = CHECK_EVALUATORS["ruff-air"].evaluate(context)
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding.evidence is not None
+    assert "c15-test-password-value" not in finding.evidence.text
+    assert finding.explanation is not None
+    assert "c15-test-password-value" not in finding.explanation
+    assert "[REDACTED]" in finding.explanation
+    assert finding.fingerprint == structural_fingerprint(policy, "dags/dag.py", "ruff:AIR002:2", FindingStatus.FAIL)
 
 
 def test_structural_fingerprint_does_not_depend_on_line_number() -> None:

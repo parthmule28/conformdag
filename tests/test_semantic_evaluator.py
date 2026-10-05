@@ -95,6 +95,77 @@ def test_sensitive_logging_request_redacts_before_provider_boundary() -> None:
     assert "logging" in request.system_prompt
 
 
+def test_semantic_request_defensively_redacts_untrusted_context() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-003")
+    context = SemanticContext(
+        "[SOURCE dag.py]\ncredential=c15-test-request-credential",
+        "provided-context-hash",
+        ("dag.py",),
+        (),
+    )
+
+    request = build_semantic_request(policy, context)
+
+    assert "c15-test-request-credential" not in request.evidence
+    assert "[REDACTED]" in request.evidence
+    assert "c15-test-request-credential" not in request.system_prompt
+
+
+def test_semantic_finding_redacts_provider_text_without_changing_fingerprint() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    response = SemanticResponse(
+        status="FAIL",
+        evidence="credential=c15-test-finding-evidence",
+        explanation="credential=c15-test-finding-explanation",
+        remediation="credential=c15-test-finding-remediation",
+        confidence=Confidence.HIGH,
+    )
+    safe_response = response.model_copy(
+        update={
+            "evidence": "credential=[REDACTED]",
+            "explanation": "credential=[REDACTED]",
+            "remediation": "credential=[REDACTED]",
+        }
+    )
+
+    finding = semantic_finding(policy, response, _context(), Path("dag.py"))
+    safe_finding = semantic_finding(policy, safe_response, _context(), Path("dag.py"))
+
+    assert finding.explanation is not None
+    assert finding.remediation is not None
+    assert finding.evidence is not None
+    rendered = [
+        finding.explanation,
+        finding.remediation,
+        finding.evidence.text,
+        *(item.excerpt for item in finding.audit_evidence),
+    ]
+    for secret in (
+        "c15-test-finding-evidence",
+        "c15-test-finding-explanation",
+        "c15-test-finding-remediation",
+    ):
+        assert all(secret not in text for text in rendered)
+    assert all("[REDACTED]" in text for text in rendered)
+    assert finding.fingerprint == safe_finding.fingerprint
+
+
+def test_fallback_audit_excerpt_is_redacted_before_bounding() -> None:
+    policy = next(item for item in _policies() if item.id == "AIR-SEM-001")
+    response = SemanticResponse(
+        status="NEEDS_REVIEW",
+        evidence="x" * 210 + ' credential="c15-test-partial-excerpt-value" trailing text',
+        explanation="bounded response",
+        confidence=Confidence.LOW,
+    )
+
+    finding = semantic_finding(policy, response, _context())
+
+    assert len(finding.audit_evidence[0].excerpt) <= 240
+    assert "c15-test-partial-excerpt-value" not in finding.audit_evidence[0].excerpt
+    assert "c15-test-partial" not in finding.audit_evidence[0].excerpt
+
+
 def test_abstraction_request_uses_declared_registry_and_abstains_when_uncertain() -> None:
     policy = next(item for item in _policies() if item.id == "AIR-SEM-004")
     request = build_semantic_request(policy, _context())

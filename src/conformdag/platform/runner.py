@@ -36,6 +36,7 @@ from conformdag.platform.db import (
 )
 from conformdag.platform.domain import ScanStatus
 from conformdag.platform.logging import install_json_logging
+from conformdag.security.redaction import redact_credentials
 
 PERSISTENT_FAILURES = (ValueError, OSError, RuntimeError)
 
@@ -178,10 +179,9 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
                 parse_cache=worker_parse_cache(),
             )
         except PERSISTENT_FAILURES as exc:
-            logger.info("scan_completed", extra={"scan_id": scan_id, "error": str(exc)})
-            if not transition_running_scan(
-                session, scan_id, ScanStatus.FAILED, str(exc), expected_attempt=claim_attempt
-            ):
+            error = redact_credentials(str(exc))
+            logger.info("scan_completed", extra={"scan_id": scan_id, "error": error})
+            if not transition_running_scan(session, scan_id, ScanStatus.FAILED, error, expected_attempt=claim_attempt):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             return 1
@@ -192,11 +192,12 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             _ingest(session, scan, report)
+            error = redact_credentials(_incomplete_error(report))
             if not transition_running_scan(
                 session,
                 scan_id,
                 ScanStatus.FAILED,
-                _incomplete_error(report),
+                error,
                 expected_attempt=claim_attempt,
             ):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)

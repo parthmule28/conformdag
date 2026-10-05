@@ -6,10 +6,8 @@ import re
 import sys
 from pathlib import Path
 
-SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(?:password|passwd|secret|token|api[_-]?key)['\"]?\s*[:=]\s*['\"]?[^<'\"\s]+"),
-    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._-]{12,}"),
-)
+from conformdag.security.redaction import redact_credentials
+
 RAW_SEMANTIC_FIELDS = ("system_prompt", "raw_prompt", "raw_response")
 RAW_SEMANTIC_FIELD_PATTERN = re.compile(r"""["'](?:system_prompt|raw_prompt|raw_response)["']\s*:""")
 DEFAULT_PATHS = (Path("benchmarks"), Path(".conformdag"), Path("reports"), Path("logs"))
@@ -31,11 +29,24 @@ def inspect_file(path: Path) -> list[str]:
     except (OSError, UnicodeDecodeError):
         return []
     issues: list[str] = []
-    for pattern in SECRET_PATTERNS:
-        for match in pattern.finditer(text):
-            if "[REDACTED]" not in match.group(0):
-                line = text.count("\n", 0, match.start()) + 1
-                issues.append(f"{path}:{line}: possible credential material")
+    redacted = redact_credentials(text)
+    if redacted != text:
+        remaining = max(redacted.count("[REDACTED]") - text.count("[REDACTED]"), 0)
+        for line_number, line_text in enumerate(text.splitlines(), start=1):
+            if remaining == 0:
+                break
+            redacted_line = redact_credentials(line_text)
+            occurrences = max(redacted_line.count("[REDACTED]") - line_text.count("[REDACTED]"), 0)
+            for _ in range(min(occurrences, remaining)):
+                issues.append(f"{path}:{line_number}: possible credential material")
+                remaining -= 1
+        if remaining:
+            first_difference = next(
+                (index for index, (original, safe) in enumerate(zip(text, redacted, strict=False)) if original != safe),
+                min(len(text), len(redacted)),
+            )
+            line_number = text.count("\n", 0, first_difference) + 1
+            issues.extend(f"{path}:{line_number}: possible credential material" for _ in range(remaining))
     for match in RAW_SEMANTIC_FIELD_PATTERN.finditer(text):
         field = next(field for field in RAW_SEMANTIC_FIELDS if field in match.group(0))
         line = text.count("\n", 0, match.start()) + 1

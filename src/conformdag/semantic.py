@@ -21,6 +21,7 @@ from typing import Any, cast
 import httpx
 
 from conformdag.models import SemanticRequest, SemanticResponse
+from conformdag.security.redaction import CREDENTIAL_PATTERNS, redact_credentials
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,10 +64,7 @@ def strict_semantic_response_schema() -> dict[str, Any]:
     return schema
 
 
-DEFAULT_SECRET_PATTERNS = (
-    r"(?i)(password|passwd|token|secret|api[_-]?key)\s*[:=]\s*(['\"]?)([^\s,'\"]+)\2",
-    r"(?i)bearer\s+[A-Za-z0-9._-]+",
-)
+DEFAULT_SECRET_PATTERNS = CREDENTIAL_PATTERNS
 
 
 @dataclass(frozen=True)
@@ -134,14 +132,13 @@ GENERIC_REVIEWER_PROMPT = PromptTemplate(
 
 
 def redact_text(text: str, patterns: Iterable[str] = DEFAULT_SECRET_PATTERNS) -> str:
-    """Mask configured credential-like values before any downstream operation."""
-    result = text
+    """Enforce canonical credential protection before additive caller patterns."""
+    result = redact_credentials(text)
     for pattern in patterns:
+        if pattern in DEFAULT_SECRET_PATTERNS:
+            continue
         compiled = re.compile(pattern)
-        if "\\2" in pattern:
-            result = compiled.sub(lambda match: f"{match.group(1)}={match.group(2)}[REDACTED]", result)
-        else:
-            result = compiled.sub("[REDACTED]", result)
+        result = compiled.sub("[REDACTED]", result)
     return result
 
 
