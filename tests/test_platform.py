@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.routing import Mount
 
 import conformdag.platform.packs as packs_module
+import conformdag.policy.editing as editing_module
 from conformdag.application import (
     BaselineInput,
     ScanOptions,
@@ -138,7 +139,7 @@ def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
         YAML(typ="safe").dump(payload, handle)  # pyright: ignore[reportUnknownMemberType]
 
 
-_write_pack = cast("Callable[[PolicyPack, Path], None]", packs_module.__dict__["_write_pack"])
+_write_pack = cast("Callable[[PolicyPack, Path], None]", editing_module.__dict__["_write_pack"])
 
 
 @pytest.fixture(name="platform_env")
@@ -5265,7 +5266,7 @@ def test_write_pack_is_atomic_on_replace_failure(tmp_path: Path, monkeypatch: py
     def boom(source: Path, target: Path) -> None:
         raise OSError("simulated crash mid-write")
 
-    monkeypatch.setattr(packs_module.os, "replace", boom)
+    monkeypatch.setattr(editing_module.os, "replace", boom)
 
     with pytest.raises(OSError):
         _write_pack(pack, pack_path)
@@ -5316,7 +5317,7 @@ def test_write_pack_uses_unique_same_directory_temp_files(tmp_path: Path, monkey
         seen.append(Path(src))
         real_replace(src, dst)
 
-    monkeypatch.setattr(packs_module.os, "replace", spy_replace)
+    monkeypatch.setattr(editing_module.os, "replace", spy_replace)
 
     _write_pack(pack, pack_path)
     _write_pack(pack, pack_path)
@@ -5332,7 +5333,7 @@ def test_write_pack_cleans_temp_when_temp_write_fails(tmp_path: Path, monkeypatc
     pack_path.write_text("original content\n", encoding="utf-8")
     pack = PolicyPack.model_validate({"schema_version": "1", "id": "x", "version": "1", "policies": []})
     created: list[Path] = []
-    real_temp_file = cast("Callable[..., Any]", packs_module.tempfile.NamedTemporaryFile)
+    real_temp_file = cast("Callable[..., Any]", editing_module.tempfile.NamedTemporaryFile)
 
     def failing_temp_file(*args: Any, **kwargs: Any) -> Any:
         handle = real_temp_file(*args, **kwargs)
@@ -5344,7 +5345,7 @@ def test_write_pack_cleans_temp_when_temp_write_fails(tmp_path: Path, monkeypatc
         handle.write = broken_write
         return handle
 
-    monkeypatch.setattr(packs_module.tempfile, "NamedTemporaryFile", failing_temp_file)
+    monkeypatch.setattr(editing_module.tempfile, "NamedTemporaryFile", failing_temp_file)
 
     with pytest.raises(OSError, match="simulated temporary write failure"):
         _write_pack(pack, pack_path)
@@ -5370,7 +5371,7 @@ def test_pack_service_serializes_snapshot_reads_with_writes(tmp_path: Path, monk
         assert release.wait(timeout=5)
         real_write(pack, path)
 
-    monkeypatch.setattr(packs_module, "_write_pack", blocked_write)
+    monkeypatch.setattr(editing_module, "_write_pack", blocked_write)
 
     writer = threading.Thread(
         target=service.upsert_gate,
@@ -5393,6 +5394,112 @@ def test_pack_service_serializes_snapshot_reads_with_writes(tmp_path: Path, monk
     assert not writer.is_alive()
     assert not reader.is_alive()
     assert read_done.is_set()
+
+
+def test_pack_service_delegates_mutations_and_maps_editing_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from conformdag.models import NoNewFindingsRule
+    from conformdag.platform.packs import PackError, PackNotFoundError, PackService
+    from conformdag.policy import editing
+    from conformdag.policy.editing import (
+        GateMutation,
+        PolicyEditingError,
+        PolicyMemberNotFoundError,
+        PolicyMutation,
+    )
+
+    standards = tmp_path / "standards"
+    policies = tmp_path / "policies"
+    standards.mkdir()
+    policies.mkdir()
+    pack_path = policies / "pack.yaml"
+    copyfile("policies/pack.yaml", pack_path)
+    copyfile("standards/dag-authoring.md", standards / "dag-authoring.md")
+    raw_pack = YAML(typ="safe").load(pack_path.read_text(encoding="utf-8"))  # pyright: ignore[reportUnknownMemberType]
+    pack_data = cast("dict[str, Any]", raw_pack)
+    pack_data["quality_gates"] = [{"id": "release", "rules": [{"type": "no-new-findings"}]}]
+    _write_yaml(pack_path, pack_data)
+
+    service = PackService({"test": pack_path})
+    returned_pack = PolicyPack(id="adapter-test", version="1", policies=[])
+    calls: list[str] = []
+
+    def upsert_policy(pack: Path, policy_id: str, mutation: PolicyMutation) -> PolicyPack:
+        assert pack == pack_path
+        assert policy_id == "AIR-DET-001"
+        assert mutation["title"] == "Updated policy"
+        calls.append("upsert_policy")
+        return returned_pack
+
+    def delete_policy(pack: Path, policy_id: str) -> PolicyPack:
+        assert pack == pack_path
+        assert policy_id == "AIR-DET-001"
+        calls.append("delete_policy")
+        return returned_pack
+
+    def upsert_gate(pack: Path, gate_id: str, mutation: GateMutation) -> PolicyPack:
+        assert pack == pack_path
+        assert gate_id == "release"
+        assert mutation["rules"] == [NoNewFindingsRule()]
+        calls.append("upsert_gate")
+        return returned_pack
+
+    def delete_gate(pack: Path, gate_id: str) -> PolicyPack:
+        assert pack == pack_path
+        assert gate_id == "release"
+        calls.append("delete_gate")
+        return returned_pack
+
+    monkeypatch.setattr(editing, "upsert_policy", upsert_policy)
+    monkeypatch.setattr(editing, "delete_policy", delete_policy)
+    monkeypatch.setattr(editing, "upsert_gate", upsert_gate)
+    monkeypatch.setattr(editing, "delete_gate", delete_gate)
+
+    service.upsert_policy(
+        "test",
+        "AIR-DET-001",
+        {
+            "title": "Updated policy",
+            "version": "2.0.0",
+            "status": "ACTIVE",
+            "severity": "high",
+            "source_document": "standards/dag-authoring.md",
+            "source_section": "Ownership and metadata",
+            "invariant": "Every DAG declares an approved owner.",
+        },
+    )
+    service.delete_policy("test", "AIR-DET-001")
+    service.upsert_gate("test", "release", {"rules": [NoNewFindingsRule()]})
+    service.delete_gate("test", "release")
+
+    assert calls == ["upsert_policy", "delete_policy", "upsert_gate", "delete_gate"]
+
+    def invalid_policy(pack: Path, policy_id: str, mutation: PolicyMutation) -> PolicyPack:
+        raise PolicyEditingError("invalid policy edit")
+
+    monkeypatch.setattr(editing, "upsert_policy", invalid_policy)
+    with pytest.raises(PackError, match="invalid policy edit"):
+        service.upsert_policy(
+            "test",
+            "AIR-DET-001",
+            {
+                "title": "Updated policy",
+                "version": "2.0.0",
+                "status": "ACTIVE",
+                "severity": "high",
+                "source_document": "standards/dag-authoring.md",
+                "source_section": "Ownership and metadata",
+                "invariant": "Every DAG declares an approved owner.",
+            },
+        )
+
+    def missing_policy(pack: Path, policy_id: str) -> PolicyPack:
+        raise PolicyMemberNotFoundError("policy missing")
+
+    monkeypatch.setattr(editing, "delete_policy", missing_policy)
+    with pytest.raises(PackNotFoundError, match="policy AIR-NOPE-001 not found in test"):
+        service.delete_policy("test", "AIR-NOPE-001")
 
 
 def test_pack_service_upsert_and_delete(tmp_path: Path) -> None:
@@ -6167,6 +6274,7 @@ def test_policy_upsert_rejects_invalid_tags_and_preserves_bytes(
 
 def test_concurrent_policy_updates_do_not_lose_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from conformdag.platform.packs import PackService
+    from conformdag.policy.editing import PolicyMutation
 
     (tmp_path / "standards").mkdir()
     pack_path = tmp_path / "pack.yaml"
@@ -6182,7 +6290,7 @@ def test_concurrent_policy_updates_do_not_lose_changes(tmp_path: Path, monkeypat
         release_write.wait(timeout=10)
         real_write(pack, path)
 
-    monkeypatch.setattr(packs_module, "_write_pack", slow_write)
+    monkeypatch.setattr(editing_module, "_write_pack", slow_write)
     payloads: dict[str, dict[str, Any]] = {
         "AIR-DET-001": {
             "title": "Updated owner policy",
@@ -6212,7 +6320,8 @@ def test_concurrent_policy_updates_do_not_lose_changes(tmp_path: Path, monkeypat
     invariants = {"AIR-DET-001": "Owner invariant updated", "AIR-DET-002": "Tags invariant updated"}
 
     def apply_distinct_update(policy_id: str) -> None:
-        service.upsert_policy("test", policy_id, {**payloads[policy_id], "invariant": invariants[policy_id]})
+        mutation = cast("PolicyMutation", {**payloads[policy_id], "invariant": invariants[policy_id]})
+        service.upsert_policy("test", policy_id, mutation)
 
     first = threading.Thread(target=apply_distinct_update, args=("AIR-DET-001",))
     second = threading.Thread(target=apply_distinct_update, args=("AIR-DET-002",))
