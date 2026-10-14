@@ -1,10 +1,13 @@
 """Distribution tests: pack pull from git and the composite action definition."""
 
+import os
 import re
 import runpy
 import subprocess
 import sys
+import tarfile
 import tomllib
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from shutil import copyfile
@@ -201,6 +204,122 @@ def test_package_build_requires_the_frontend_build() -> None:
     config = tomllib.loads(Path("mise.toml").read_text(encoding="utf-8"))
 
     assert "ui-build" in config["tasks"]["build"]["depends"]
+
+
+def test_built_distributions_include_importable_policy_package(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    dist_dir = tmp_path / "dist"
+    child_env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("COV_CORE_") and key != "COVERAGE_PROCESS_START"
+    }
+    build = subprocess.run(
+        ["uv", "build", "--offline", "--sdist", "--wheel", "--out-dir", str(dist_dir)],
+        cwd=project_root,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert build.returncode == 0, build.stdout + build.stderr
+
+    wheels = list(dist_dir.glob("conformdag-*.whl"))
+    sdists = list(dist_dir.glob("conformdag-*.tar.gz"))
+    assert len(wheels) == 1
+    assert len(sdists) == 1
+    expected_wheel_files = {
+        f"conformdag/policy/{module}.py" for module in ("__init__", "loading", "provenance", "validation", "hashes")
+    }
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        assert expected_wheel_files <= set(wheel.namelist())
+
+    expected_source_files = {
+        f"src/conformdag/policy/{module}.py" for module in ("__init__", "loading", "provenance", "validation", "hashes")
+    }
+    with tarfile.open(sdists[0], "r:gz") as source_distribution:
+        source_members = {member.name for member in source_distribution.getmembers()}
+    assert all(any(member.endswith(f"/{expected}") for member in source_members) for expected in expected_source_files)
+
+    installed = tmp_path / "installed-wheel"
+    install = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-deps",
+            "--no-index",
+            "--target",
+            str(installed),
+            str(wheels[0]),
+        ],
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert install.returncode == 0, install.stdout + install.stderr
+
+    smoke = """
+import importlib
+import sys
+from pathlib import Path
+
+installed = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(installed))
+import conformdag
+import conformdag.policy
+from conformdag.policy import (
+    PolicyValidationError,
+    active_policies,
+    load_policy_pack,
+    load_suppressions,
+    policy_contract_hash,
+    policy_enforcement_hash,
+    resolve_configured_policy_pack,
+    resolve_policy_pack_path,
+    resolve_source_document,
+    select_policy_pack,
+    validate_policy_pack,
+    validate_policy_provenance,
+)
+
+assert Path(conformdag.__file__).resolve().is_relative_to(installed)
+for module in (
+    "conformdag.policy.loading",
+    "conformdag.policy.provenance",
+    "conformdag.policy.validation",
+    "conformdag.policy.hashes",
+):
+    importlib.import_module(module)
+assert all((
+    PolicyValidationError,
+    active_policies,
+    load_policy_pack,
+    load_suppressions,
+    policy_contract_hash,
+    policy_enforcement_hash,
+    resolve_configured_policy_pack,
+    resolve_policy_pack_path,
+    resolve_source_document,
+    select_policy_pack,
+    validate_policy_pack,
+    validate_policy_provenance,
+))
+print("installed wheel policy package imports passed")
+"""
+    imported = subprocess.run(
+        [sys.executable, "-c", smoke, str(installed)],
+        cwd=tmp_path,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert imported.returncode == 0, imported.stdout + imported.stderr
+    assert "installed wheel policy package imports passed" in imported.stdout
 
 
 def test_runtime_dockerfile_excludes_overridden_airflow_constraints() -> None:
