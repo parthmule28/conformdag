@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 
 from conformdag.models import Policy, QualityGate
@@ -18,6 +20,7 @@ from conformdag.platform.contracts import (
 )
 from conformdag.platform.packs import PackError, PackNotFoundError, PackService, PackSummaryData, PackValidationResult
 from conformdag.policy import PolicyValidationError
+from conformdag.policy.editing import GateMutation, PolicyMutation
 
 
 def _pack_summary_response(data: PackSummaryData) -> PackSummaryResponse:
@@ -80,7 +83,8 @@ def _pack_upsert_policy(
 ) -> PolicyMutationResponse:
     service: PackService = request.app.state.pack_service
     try:
-        service.upsert_policy(pack_name, policy_id, payload.model_dump(mode="json", exclude_none=True))
+        mutation = cast("PolicyMutation", payload.model_dump(mode="json", exclude_none=True))
+        service.upsert_policy(pack_name, policy_id, mutation)
     except PackNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (PackError, PolicyValidationError) as exc:
@@ -125,7 +129,8 @@ def _pack_upsert_gate(
 ) -> GateMutationResponse:
     service: PackService = request.app.state.pack_service
     try:
-        service.upsert_gate(pack_name, gate_id, payload.model_dump(mode="json"))
+        mutation = cast("GateMutation", {"rules": payload.rules})
+        service.upsert_gate(pack_name, gate_id, mutation)
     except PackNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PackError as exc:
