@@ -85,7 +85,7 @@ def test_suppression_without_explicit_now_uses_utc_clock(monkeypatch: pytest.Mon
         return current
 
     fixed_clock = SimpleNamespace(now=fixed_now)
-    monkeypatch.setattr("conformdag.reporting.datetime", fixed_clock)
+    monkeypatch.setattr("conformdag.reporting.suppressions.datetime", fixed_clock)
 
     result, issues = apply_suppressions([finding], [_suppression(finding, expires_at=current + timedelta(seconds=1))])
 
