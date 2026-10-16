@@ -845,7 +845,7 @@ def test_execute_scan_ignores_operational_suppression_expired_before_application
 
     fixed_clock = SimpleNamespace(now=fixed_now)
     monkeypatch.setattr("conformdag.application.scan.datetime", fixed_clock, raising=False)
-    monkeypatch.setattr("conformdag.reporting.datetime", fixed_clock)
+    monkeypatch.setattr("conformdag.reporting.suppressions.datetime", fixed_clock)
 
     result = execute_scan(
         ScanOptions(tmp_path / "repo"),
