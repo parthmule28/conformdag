@@ -1,0 +1,1 @@
+"""Reporting contract characterization tests."""

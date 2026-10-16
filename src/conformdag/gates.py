@@ -39,6 +39,11 @@ def blocking_findings(report: ScanReport) -> list[Finding]:
     ]
 
 
+def has_blocking_failures(report: ScanReport) -> bool:
+    """Return whether the report contains an unsuppressed blocking failure."""
+    return bool(blocking_findings(report))
+
+
 def _evaluate_rule(
     rule: GateRule,
     report: ScanReport,
