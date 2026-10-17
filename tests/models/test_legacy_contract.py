@@ -111,7 +111,8 @@ LEGACY_MODEL_PICKLE = bytes.fromhex(
 
 
 def test_legacy_public_surface_and_star_bindings() -> None:
-    assert [name for name in vars(models) if not name.startswith("_")] == EXPORTS
+    assert models.__all__ == EXPORTS
+    assert all(name in vars(models) for name in EXPORTS)
     namespace: dict[str, Any] = {}
     exec("from conformdag.models import *", namespace)  # noqa: S102 - exercise legacy import syntax
     assert list(namespace)[1:] == EXPORTS

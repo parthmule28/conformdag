@@ -10,6 +10,19 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, PositiveInt, field_validator
 
+from .common import AirflowProfile, Confidence, ConformModel, EnforcementType, FindingStatus, LifecycleStatus, Severity
+from .gates import (
+    AlwaysBlockRule,
+    FailureRateRule,
+    GateResult,
+    GateRule,
+    GateRuleResult,
+    MaxFindingsRule,
+    MaxSeverityRule,
+    NoNewFindingsRule,
+    QualityGate,
+)
+
 _POLICY_TAG_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?")
 
 
@@ -39,52 +52,6 @@ def _empty_runtime_observations() -> list[RuntimeObservation]:
 
 def _empty_semantic_runs() -> list[SemanticRunMetadata]:
     return []
-
-
-class ConformModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-
-class LifecycleStatus(StrEnum):
-    DRAFT = "DRAFT"
-    APPROVED = "APPROVED"
-    ACTIVE = "ACTIVE"
-    CONFLICTED = "CONFLICTED"
-    DEPRECATED = "DEPRECATED"
-    REJECTED = "REJECTED"
-
-
-class Severity(StrEnum):
-    INFO = "info"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
-
-class EnforcementType(StrEnum):
-    DETERMINISTIC = "deterministic"
-    SEMANTIC = "semantic"
-    HYBRID = "hybrid"
-
-
-class FindingStatus(StrEnum):
-    PASS = "PASS"
-    FAIL = "FAIL"
-    NEEDS_REVIEW = "NEEDS_REVIEW"
-    NOT_APPLICABLE = "NOT_APPLICABLE"
-    SKIPPED = "SKIPPED"
-    ERROR = "ERROR"
-
-
-class AirflowProfile(StrEnum):
-    AIRFLOW_3_3_0 = "3.3.0"
-
-
-class Confidence(StrEnum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
 
 
 class PolicySource(ConformModel):
@@ -237,70 +204,6 @@ PolicyConfiguration = Annotated[
 
 def _empty_quality_gates() -> list[QualityGate]:
     return []
-
-
-class NoNewFindingsRule(ConformModel):
-    """Rule: no failing findings that are absent from the baseline scan."""
-
-    type: Literal["no-new-findings"] = "no-new-findings"
-
-
-class MaxSeverityRule(ConformModel):
-    """Rule: no failing findings at or above the given severity."""
-
-    type: Literal["max-severity"] = "max-severity"
-    severity: Severity
-
-
-class MaxFindingsRule(ConformModel):
-    """Rule: fewer than ``count`` failing findings (a report with none always passes)."""
-
-    type: Literal["max-findings"] = "max-findings"
-    count: NonNegativeInt
-
-
-class AlwaysBlockRule(ConformModel):
-    """Rule: the listed policy ids always block, even when otherwise gated out."""
-
-    type: Literal["always-block"] = "always-block"
-    policy_ids: list[str] = Field(min_length=1)
-
-
-class FailureRateRule(ConformModel):
-    """Rule: failing findings below ``max_percent`` percent of all findings."""
-
-    type: Literal["failure-rate"] = "failure-rate"
-    max_percent: float = Field(ge=0.0, le=100.0)
-
-
-GateRule = Annotated[
-    NoNewFindingsRule | MaxSeverityRule | MaxFindingsRule | AlwaysBlockRule | FailureRateRule,
-    Field(discriminator="type"),
-]
-
-
-class QualityGate(ConformModel):
-    """One org-defined pass/fail decision over a scan's findings."""
-
-    id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9._-]*$")
-    rules: list[GateRule] = Field(min_length=1)
-
-
-class GateRuleResult(ConformModel):
-    """The outcome of one rule during gate evaluation."""
-
-    rule_type: str
-    passed: bool
-    detail: str
-    matching_findings: NonNegativeInt = 0
-
-
-class GateResult(ConformModel):
-    """The outcome of one gate: every rule must pass for the gate to pass."""
-
-    gate_id: str
-    passed: bool
-    rules: list[GateRuleResult]
 
 
 class Policy(ConformModel):
@@ -564,3 +467,82 @@ class ProjectConfig(ConformModel):
     scan: ProjectScanConfig = Field(default_factory=ProjectScanConfig)
     semantic: ProjectSemanticConfig = Field(default_factory=ProjectSemanticConfig)
     runtime: ProjectRuntimeConfig = Field(default_factory=ProjectRuntimeConfig)
+
+
+# Preserve the pre-package wildcard-import surface, including incidental imports.
+__all__ = [
+    "annotations",
+    "re",
+    "datetime",
+    "StrEnum",
+    "Path",
+    "Annotated",
+    "Any",
+    "Literal",
+    "BaseModel",
+    "ConfigDict",
+    "Field",
+    "NonNegativeInt",
+    "PositiveInt",
+    "field_validator",
+    "ConformModel",
+    "LifecycleStatus",
+    "Severity",
+    "EnforcementType",
+    "FindingStatus",
+    "AirflowProfile",
+    "Confidence",
+    "PolicySource",
+    "Ownership",
+    "PolicyScope",
+    "ExceptionPolicy",
+    "EnforcementConfig",
+    "RequiredOwnerConfig",
+    "RequiredTagsConfig",
+    "ExecutionTimeoutConfig",
+    "RetryBoundsConfig",
+    "TopLevelIOConfig",
+    "OperatorRule",
+    "ForbiddenOperatorsConfig",
+    "IdempotenceConfig",
+    "OrchestrationBoundaryConfig",
+    "SensitiveLoggingConfig",
+    "StartDateFreshnessConfig",
+    "CatchupPolicyConfig",
+    "ModuleScopeVariablesConfig",
+    "DynamicDagFactoryConfig",
+    "RuffAirConfig",
+    "ApprovedAbstractionsConfig",
+    "PolicyConfiguration",
+    "NoNewFindingsRule",
+    "MaxSeverityRule",
+    "MaxFindingsRule",
+    "AlwaysBlockRule",
+    "FailureRateRule",
+    "GateRule",
+    "QualityGate",
+    "GateRuleResult",
+    "GateResult",
+    "Policy",
+    "PolicyPack",
+    "FindingEvidence",
+    "FindingLocation",
+    "RemediationAction",
+    "RemediationTarget",
+    "RemediationPayload",
+    "Suppression",
+    "SemanticAuditEvidence",
+    "Finding",
+    "RunIssue",
+    "RuntimeObservation",
+    "SemanticRunMetadata",
+    "RunMetadata",
+    "ScanReport",
+    "RuntimeManifest",
+    "SemanticRequest",
+    "SemanticResponse",
+    "ProjectScanConfig",
+    "ProjectSemanticConfig",
+    "ProjectRuntimeConfig",
+    "ProjectConfig",
+]
