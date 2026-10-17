@@ -23,6 +23,10 @@ import conformdag.models as facade
             "PolicySource Ownership PolicyScope ExceptionPolicy EnforcementConfig RequiredOwnerConfig RequiredTagsConfig ExecutionTimeoutConfig RetryBoundsConfig TopLevelIOConfig OperatorRule ForbiddenOperatorsConfig IdempotenceConfig OrchestrationBoundaryConfig SensitiveLoggingConfig StartDateFreshnessConfig CatchupPolicyConfig ModuleScopeVariablesConfig DynamicDagFactoryConfig RuffAirConfig ApprovedAbstractionsConfig PolicyConfiguration Policy PolicyPack",
         ),
         ("semantic", "SemanticAuditEvidence SemanticRunMetadata SemanticRequest SemanticResponse"),
+        (
+            "findings",
+            "FindingEvidence FindingLocation RemediationAction RemediationTarget RemediationPayload Suppression Finding",
+        ),
     ],
 )
 def test_model_owner_identity(owner: str, names: str) -> None:
@@ -88,3 +92,47 @@ def test_semantic_validation_and_evidence_defaults() -> None:
         facade.SemanticResponse.model_validate(
             {"status": "ERROR", "evidence": "x", "explanation": "x", "confidence": "high"}
         )
+
+
+def test_finding_composes_remediation_suppression_and_semantic_evidence() -> None:
+    payload = {
+        "policy_id": "AIR-DET-001",
+        "policy_version": "1",
+        "status": "FAIL",
+        "severity": "high",
+        "enforcement": "deterministic",
+        "fingerprint": "frozen-identity",
+        "location": {"file": "dags/a.py", "start_line": 1},
+        "audit_evidence": [{"criterion": "owner", "source_type": "source", "excerpt": "missing"}],
+        "fix": {"fix_kind": "owner", "action": "add-owner", "target": {"line": 1}},
+        "suppressed": True,
+        "suppression": {
+            "fingerprint": "frozen-identity",
+            "policy_id": "AIR-DET-001",
+            "reason": "approved",
+            "owner": "team",
+            "created_at": "2026-01-01T00:00:00Z",
+            "expires_at": "2027-01-01T00:00:00Z",
+        },
+    }
+    finding = facade.Finding.model_validate(payload)
+    serialized = finding.model_dump(mode="json")
+    assert serialized["location"]["file"] == "dags/a.py"
+    assert serialized["fix"]["action"] == "add-owner"
+    assert serialized["suppression"]["created_at"] == "2026-01-01T00:00:00Z"
+    assert finding.audit_evidence[0].source_type == "source"
+    assert facade.Finding.model_validate(serialized) == finding
+    assert (
+        facade.Finding.model_fields["audit_evidence"].default_factory
+        is facade.SemanticResponse.model_fields["audit_evidence"].default_factory
+    )
+    first = facade.Finding.model_validate(
+        {key: value for key, value in payload.items() if key not in {"audit_evidence", "location"}}
+    )
+    second = facade.Finding.model_validate(
+        {key: value for key, value in payload.items() if key not in {"audit_evidence", "location"}}
+    )
+    first.audit_evidence.append(finding.audit_evidence[0])
+    first.location.start_line = 3
+    assert second.audit_evidence == []
+    assert second.location.start_line is None
