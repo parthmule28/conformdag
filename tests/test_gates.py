@@ -79,6 +79,18 @@ def test_no_new_findings_rule_compares_fingerprints_against_baseline() -> None:
     assert evaluate_gate(gate, only_known, baseline).passed
 
 
+def test_legacy_baseline_report_wins_over_fingerprints_for_positional_and_keyword_calls() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "no-new-findings"}]})
+    baseline = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    current = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+
+    positional = evaluate_gate(gate, current, baseline, baseline_fingerprints={"other"})
+    keyword = evaluate_gate(gate, current, baseline_report=baseline, baseline_fingerprints={"other"})
+
+    assert positional.passed
+    assert keyword.passed
+
+
 def test_max_severity_blocks_at_or_above_threshold() -> None:
     gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "max-severity", "severity": "high"}]})
     critical = _finding("A", FindingStatus.FAIL, "f1").model_copy(update={"severity": Severity.CRITICAL})

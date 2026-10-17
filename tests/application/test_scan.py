@@ -18,6 +18,7 @@ from conformdag.application import (
     ScanOptions,
     execute_scan,
 )
+from conformdag.application.scan import BaselineInput as ScanBaselineInput
 from conformdag.config import load_project_config
 from conformdag.gates import evaluate_pack_gates as _evaluate_pack_gates
 from conformdag.models import (
@@ -274,6 +275,7 @@ def test_scan_options_has_only_repository_context() -> None:
 
 
 def test_baseline_input_defaults_to_no_baseline() -> None:
+    assert BaselineInput is ScanBaselineInput
     assert [item.name for item in fields(BaselineInput)] == ["report", "fingerprints"]
     baseline = BaselineInput()
     assert baseline.report is None
