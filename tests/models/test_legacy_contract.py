@@ -101,7 +101,8 @@ SCHEMA_HASHES = {
     "suppression": "0ef3eb979cb76d384db1407edca057485069031dc6a8d2086244b17166bdd529",
 }
 
-# Generated with Python 3.12 pickle protocol 4 from the unmodified legacy module.
+# Generated with Python 3.12/protocol 4 from the legacy module, byte-identical at
+# Stage A reference 02f6d3b539bd7b1c6f8060b447ae800228e4ff50 and the Stage B base.
 LEGACY_SEVERITY_PICKLE = bytes.fromhex(
     "8004952d000000000000008c11636f6e666f726d6461672e6d6f64656c73948c0853657665726974799493948c046869676894859452942e"
 )

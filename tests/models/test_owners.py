@@ -36,6 +36,8 @@ def test_model_owner_identity(owner: str, names: str) -> None:
     module = importlib.import_module(f"conformdag.models.{owner}")
     for name in names.split():
         assert getattr(module, name) is getattr(facade, name)
+        if name not in {"GateRule", "PolicyConfiguration"}:
+            assert getattr(module, name).__module__ == module.__name__
 
 
 def test_gate_discriminator_keeps_tags_and_errors() -> None:
