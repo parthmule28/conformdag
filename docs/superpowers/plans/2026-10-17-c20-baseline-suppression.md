@@ -1,6 +1,6 @@
 # C20 — Baseline and Suppression Semantics Implementation Plan
 
-> **For future agentic workers:** Use `superpowers:executing-plans` and work sequentially, one task at a time. Do not delegate to subagents. This plan is Stage B material only; implementation must wait until the Stage A documentation PR is merged and the user explicitly authorizes Stage B.
+> **For future agentic workers:** Use `superpowers:executing-plans` and work sequentially, one task at a time. Do not delegate to subagents. This plan is Stage B material only; implementation must wait until the Stage A documentation PR is explicitly authorized, merged, and its post-merge CI passes, and the user separately authorizes Stage B. Review approval or pre-merge CI alone does not complete Stage A.
 
 **Goal:** Introduce one immutable, layer-neutral Baseline while preserving current gate, suppression, CLI, platform, fingerprint, and compatibility behavior.
 
@@ -12,14 +12,14 @@
 
 ## Global Constraints
 
-- Do not begin Stage B before Stage A merges and the user explicitly authorizes implementation.
+- Do not begin Stage B until the Stage A documentation PR is explicitly authorized and merged, its post-merge CI passes, and the user explicitly authorizes implementation.
 - Own `Baseline` in `src/conformdag/baselines.py`; do not import application code from core.
 - Preserve `BaselineInput` at both `conformdag.application` and `conformdag.application.scan` import paths, with `report` and `fingerprints` fields through C30.
 - Preserve legacy gate positional/keyword forms through C30; if both legacy report and fingerprint sources are given, the report wins.
 - Preserve `None` (no baseline) versus an eligible empty `Baseline(frozenset())`, including when an eligible report artifact is pruned and no finding rows remain.
 - Preserve current same-repository/succeeded/complete eligibility and application rejection of incomplete or dual-form `BaselineInput`.
 - Apply operational suppressions after core/local suppression and before normalization, gates, and outcome classification.
-- Do not change C19 fingerprint algorithms/values, the frozen C18 digest, report/schema JSON, database schema, retention, migrations, frontend logic, or the progress ledger.
+- Do not change C19 fingerprint algorithms/values, the frozen C18 digest, report/schema JSON, database schema, retention, migrations, or frontend logic. Keep the C20 ledger `planned` throughout Stage A; move it to `review` when the completed Stage B implementation is submitted for independent review; mark it `accepted` only through a separate post-implementation acceptance PR after implementation merge and successful post-merge CI.
 - Use mise tasks and focused tests; no parallel implementation tasks or subagents.
 
 ## Review Focus
@@ -195,7 +195,8 @@ Expected: PASS, including report/pruned parity and suppression timing.
 **Files:**
 
 - Inspect all C20 implementation changes.
-- Do not change the progress ledger to accepted.
+- In the implementation PR, transition the C20 ledger from `planned` to `review` when the implementation is complete and ready for independent review; do not mark it `accepted` here.
+- Reserve `review` → `accepted` for a separate post-implementation acceptance PR, after the implementation PR is merged and its post-merge CI passes.
 - Open an unmerged implementation PR only after explicit authorization for Stage B.
 
 **Interfaces:**
@@ -221,7 +222,7 @@ Expected: checked-in schemas are unchanged and valid.
 
 - [ ] **Step 3: Inspect compatibility and scope.** Confirm both legacy BaselineInput import paths and fields remain; report-wins is tested; no-baseline and empty-eligible-baseline remain distinct after pruning; the C18 digest is unchanged; no fingerprint, report/schema, migration, retention, or frontend change occurred.
 
-- [ ] **Step 4: Inspect Git diff and commit scope.** Run `git diff --check`, `git status --short`, and inspect all source/test diffs. Keep the progress ledger out of the acceptance state until post-merge CI and a separate acceptance step.
+- [ ] **Step 4: Inspect Git diff and commit scope.** Run `git diff --check`, `git status --short`, and inspect all source/test diffs. The implementation PR may set the C20 ledger to `review`, but must not set it to `accepted`. Acceptance requires a separate post-implementation acceptance PR after implementation merge and successful post-merge CI.
 
 - [ ] **Step 5: Report exact verification evidence and known limitations.** Include test totals, coverage, Pyright, schema, round-trip, final head, and required GitHub CI. Leave the implementation PR open for independent review; do not merge.
 
@@ -231,7 +232,14 @@ Stage A consists only of the C20 design and this sequential plan as Markdown
 under `docs/superpowers/`. Stage A does not implement or test production
 changes and does not modify `docs/consolidation/progress.md`.
 
-This plan describes future Stage B only. The executor must wait for the Stage A
-documentation PR to merge and for explicit user authorization. Then execute
-the tasks above in order, with a test-first red/green cycle and a reviewable
-commit at each task boundary. Do not merge the implementation PR.
+Stage A completes only after its documentation PR is explicitly authorized,
+merged, and its post-merge CI passes; review approval or pre-merge CI alone is
+insufficient. The C20 ledger remains `planned` throughout Stage A. This plan
+describes future Stage B only. The executor must wait for Stage A completion
+and explicit user authorization before implementation. Then execute the tasks
+above in order, with a test-first red/green cycle and a reviewable commit at
+each task boundary. Set the ledger to `review` when the completed implementation
+is submitted for independent review. Do not mark C20 `accepted` in the
+implementation PR: acceptance belongs in a separate post-implementation
+acceptance PR after implementation merge and successful post-merge CI. Do not
+merge the implementation PR without explicit authorization.

@@ -15,8 +15,12 @@ change.
 
 This document is Stage A design material. The current PR contains Markdown
 planning documents only. It does not authorize Stage B implementation. Do not
-start implementation until Stage A has merged and the user explicitly
-authorizes it. Keep the C20 progress-ledger entry unchanged in Stage A.
+start implementation until Stage A has merged, its post-merge CI has passed,
+and the user explicitly authorizes it. Keep the C20 progress-ledger entry at
+`planned` throughout Stage A. For Stage B, move it to `review` when the
+implementation is complete and submitted for independent review. Record
+`accepted` only in a separate post-implementation acceptance PR, after the
+implementation PR is merged and its post-merge CI passes.
 
 The design follows the [C20 handoff prompt](../../consolidation/prompts/C20-baseline-suppression.md),
 [C19 fingerprint contract](../../architecture/fingerprints.md), and
@@ -216,8 +220,14 @@ stability guarantee.
 
 ## 8. Stage A completion
 
-Stage A is complete when this design and the sequential TDD plan are reviewed
-in an unmerged, documentation-only PR. The PR must not change Python, tests,
-schemas, migrations, frontend, or `docs/consolidation/progress.md`. Stage B
-requires a later explicit user authorization. No implementation or merge is
-part of this design.
+Stage A completes only after the documentation-only PR containing this design
+and the sequential TDD plan is explicitly authorized for merge, merged, and
+its post-merge CI passes. Review approval or passing pre-merge CI alone does
+not complete Stage A. The PR must not change Python, tests, schemas,
+migrations, frontend, or `docs/consolidation/progress.md`; the C20 ledger
+therefore remains `planned` throughout Stage A. Stage B requires a later
+explicit user authorization. During Stage B, set C20 to `review` when the
+implementation PR is ready for independent review. Set it to `accepted` only
+through a separate post-implementation acceptance PR after implementation
+merge and successful post-merge CI. No implementation or merge is part of
+this design.
