@@ -11,6 +11,12 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, PositiveInt, field_validator
 
 from .common import AirflowProfile, Confidence, ConformModel, EnforcementType, FindingStatus, LifecycleStatus, Severity
+from .config import (
+    ProjectConfig,
+    ProjectRuntimeConfig,
+    ProjectScanConfig,
+    ProjectSemanticConfig,
+)
 from .findings import (
     Finding,
     FindingEvidence,
@@ -57,130 +63,21 @@ from .policy import (
     StartDateFreshnessConfig,
     TopLevelIOConfig,
 )
+from .report import (
+    RunIssue,
+    RunMetadata,
+    ScanReport,
+)
+from .runtime import (
+    RuntimeManifest,
+    RuntimeObservation,
+)
 from .semantic import (
     SemanticAuditEvidence,
     SemanticRequest,
     SemanticResponse,
     SemanticRunMetadata,
 )
-
-
-def _empty_paths() -> list[Path]:
-    return []
-
-
-def _empty_findings() -> list[Finding]:
-    return []
-
-
-def _empty_issues() -> list[RunIssue]:
-    return []
-
-
-def _empty_runtime_observations() -> list[RuntimeObservation]:
-    return []
-
-
-def _empty_semantic_runs() -> list[SemanticRunMetadata]:
-    return []
-
-
-class RunIssue(ConformModel):
-    code: str
-    message: str
-    path: Path | None = None
-    phase: str
-    fatal: bool = False
-
-
-class RuntimeObservation(ConformModel):
-    schema_version: Literal["1"] = "1"
-    status: FindingStatus
-    policy_id: str
-    message: str | None = None
-    payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class RunMetadata(ConformModel):
-    tool_version: str
-    repository_revision: str | None = None
-    input_hashes: dict[str, str] = Field(default_factory=dict)
-    policy_pack_id: str
-    policy_pack_version: str
-    runtime_profile: AirflowProfile | None = None
-    runtime_image_digest: str | None = None
-    semantic_provider: str | None = None
-    semantic_model: str | None = None
-    prompt_hashes: dict[str, str] = Field(default_factory=dict)
-    semantic_runs: list[SemanticRunMetadata] = Field(default_factory=_empty_semantic_runs)
-    resolved_configuration: dict[str, Any] = Field(default_factory=dict)
-    environment: dict[str, str] = Field(default_factory=dict)
-    timestamp: datetime
-
-
-class ScanReport(ConformModel):
-    report_version: Literal["1", "2"] = "2"
-    complete: bool
-    result_fingerprint: str
-    files_scanned: list[Path] = Field(default_factory=_empty_paths)
-    policies_evaluated: list[str] = Field(default_factory=list)
-    policies_skipped: list[str] = Field(default_factory=list)
-    findings: list[Finding] = Field(default_factory=_empty_findings)
-    runtime_observations: list[RuntimeObservation] = Field(default_factory=_empty_runtime_observations)
-    issues: list[RunIssue] = Field(default_factory=_empty_issues)
-    gate_result: GateResult | None = None
-    run: RunMetadata
-
-
-class RuntimeManifest(ConformModel):
-    schema_version: Literal["1"] = "1"
-    repository_root: Path
-    include: list[str]
-    exclude: list[str]
-    policy_ids: list[str]
-    airflow_profile: AirflowProfile | None = None
-    image: str | None = None
-    provider_versions: dict[str, str] = Field(default_factory=dict)
-    supported_profile: bool = False
-    network_enabled: bool = False
-    timeout_seconds: PositiveInt = 300
-
-
-class ProjectScanConfig(ConformModel):
-    policy_pack: Path = Path("policies/pack.yaml")
-    suppressions: Path = Path(".conformdag/suppressions.yaml")
-    include: list[str] = Field(default_factory=lambda: ["dags/**/*.py"])
-    exclude: list[str] = Field(default_factory=lambda: ["**/.venv/**", "**/.git/**", "**/vendor/**", "**/generated/**"])
-    follow_internal_symlinks: bool = False
-
-
-class ProjectSemanticConfig(ConformModel):
-    enabled: bool = False
-    base_url: str | None = None
-    model: str | None = None
-    api_key_env: str = "CONFORMDAG_MODEL_API_KEY"
-    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-    max_input_tokens: PositiveInt = 32000
-    max_output_tokens: PositiveInt = 4000
-    max_concurrency: PositiveInt = Field(default=4, le=4)
-    native_structured_output: bool = False
-    cache_path: Path = Path(".conformdag/semantic-cache.json")
-
-
-class ProjectRuntimeConfig(ConformModel):
-    enabled: bool = False
-    airflow_version: AirflowProfile | None = None
-    image: str | None = None
-    network_enabled: bool = False
-    timeout_seconds: PositiveInt = 300
-
-
-class ProjectConfig(ConformModel):
-    config_version: Literal["1"] = "1"
-    scan: ProjectScanConfig = Field(default_factory=ProjectScanConfig)
-    semantic: ProjectSemanticConfig = Field(default_factory=ProjectSemanticConfig)
-    runtime: ProjectRuntimeConfig = Field(default_factory=ProjectRuntimeConfig)
-
 
 # Preserve the pre-package wildcard-import surface, including incidental imports.
 __all__ = [

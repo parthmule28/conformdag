@@ -27,6 +27,9 @@ import conformdag.models as facade
             "findings",
             "FindingEvidence FindingLocation RemediationAction RemediationTarget RemediationPayload Suppression Finding",
         ),
+        ("runtime", "RuntimeObservation RuntimeManifest"),
+        ("report", "RunIssue RunMetadata ScanReport"),
+        ("config", "ProjectScanConfig ProjectSemanticConfig ProjectRuntimeConfig ProjectConfig"),
     ],
 )
 def test_model_owner_identity(owner: str, names: str) -> None:
