@@ -2,8 +2,9 @@
 
 **Date:** 2026-10-17
 **Design:** [C21 domain models package design](../specs/2026-10-17-c21-models-package-design.md)
-**Stage:** A documentation plan; Stage B requires its own authorization after Stage A is reviewed, merged, and post-merge CI passes.
-**Implementation base:** `main@02f6d3b539bd7b1c6f8060b447ae800228e4ff50`
+**Stage:** A documentation plan; Stage B requires separate implementation authorization, an authorized merge of PR #77, and successful post-merge CI on that exact merge commit.
+**Stage A characterization reference:** `main@02f6d3b539bd7b1c6f8060b447ae800228e4ff50`
+**Stage B implementation base:** the actual merge commit of PR #77 on `main`; resolve and record its full SHA only after merge and successful post-merge CI.
 **C21 status:** remains `planned` during Stage A; Stage B implementation PR may move it to `review`; a separate acceptance PR moves it to `accepted`.
 
 ## Goal and hard scope
@@ -12,9 +13,13 @@ Split `src/conformdag/models.py` into the ownership modules in the design, retai
 
 Do not change field declarations, model semantics, fingerprints, report JSON, any checked-in schema, schema exporter, migrations, APIs, CLI behavior, frontend, or policy/gate behavior. Do not edit this plan’s ownership decisions during implementation; a conflict with the repository or a failed compatibility invariant is a stop-and-review condition. No task authorizes merge.
 
-## Baseline preparation
+## Stage B base and baseline preparation
 
-Run these before the first implementation edit on the clean base worktree and record exact output in the implementation PR:
+The Stage A characterization reference above identifies where the design's compatibility evidence and schema hashes were captured. It is not the Stage B coding base. Do not create the Stage B branch/worktree or begin implementation until PR #77 has been merged with authorization, post-merge `main` CI has passed for its exact merge commit, and separate implementation authorization has been received.
+
+At that point, resolve the actual PR #77 merge commit SHA from GitHub, confirm it is the `main` merge commit with successful post-merge CI, and record the full SHA in the implementation PR. Create the isolated Stage B worktree and branch directly from that SHA. Do not substitute the Stage A characterization reference or another `main` revision.
+
+From that clean worktree, before the first implementation edit, run these commands and record their exact output in the implementation PR:
 
 ```bash
 mise run setup
@@ -27,15 +32,15 @@ sha256sum schemas/policy-pack.json schemas/project-config.json \
 git diff --check
 ```
 
-Expected: setup succeeds; the full current gate passes; schema verification passes; the seven hashes equal the design table; and the worktree is clean. If baseline `mise run check` or `mise run schema` fails, stop and report it before changing files. Record the C18 fingerprint and current C19/C20 focused-test results as compatibility oracles, not values to recompute or update.
+Expected: the worktree is at the recorded PR #77 merge SHA; setup succeeds; the full current gate passes; schema verification passes; the seven hashes equal the design table; and the worktree is otherwise clean. If baseline `mise run check` or `mise run schema` fails, stop and report it before changing files. The schemas should remain byte-identical because Stage A is documentation-only. Record the C18 fingerprint and current C19/C20 focused-test results as compatibility oracles, not values to recompute or update.
 
-Use one isolated implementation worktree and one branch from the exact approved base. Make the commits below in order. For every test-first task, commit or stage the new assertion, run its focused test and confirm the described RED, implement only that task, rerun to GREEN, then run its stated regressions. Never leave a commit with a broken facade or duplicate module/package path.
+Use one isolated implementation worktree and one branch rooted at the exact PR #77 merge SHA after the gates and authorization above are satisfied. Make the commits below in order. For every test-first task, commit or stage the new assertion, run its focused test and confirm the described RED, implement only that task, rerun to GREEN, then run its stated regressions. Never leave a commit with a broken facade or duplicate module/package path.
 
 ## Task 1 — Characterize the existing public model contract
 
 **Reviewable commit:** `test: characterize legacy model package contract`
 
-Add focused tests under `tests/models/` and a trusted legacy pickle fixture generated from the unchanged base. Do not change production files.
+Add focused tests under `tests/models/` and a trusted legacy pickle fixture generated from the Stage A characterization reference (`02f6d3b539bd7b1c6f8060b447ae800228e4ff50`). Do not change production files.
 
 Add assertions for:
 
@@ -46,7 +51,7 @@ Add assertions for:
 - Legacy pickle fixture bytes whose globals name `conformdag.models` for a representative model/enum, so the later package facade can prove old references still load.
 - Existing frozen C18/C19 fingerprint assertions and C20 baseline behavior as regression anchors; do not add replacement expected values.
 
-**RED/GREEN checkpoint:** characterization tests must pass on the untouched monolithic baseline (GREEN). Any mismatch against the design’s baseline export/schema manifest means stop and amend the design before the move; do not “fix” current behavior in this task.
+**RED/GREEN checkpoint:** characterization tests must pass on the untouched monolithic source represented by the Stage A characterization reference (GREEN). Any mismatch against the design’s baseline export/schema manifest means stop and amend the design before the move; do not “fix” current behavior in this task.
 
 ```bash
 mise exec -- uv run pytest tests/models tests/test_models.py -q
@@ -63,7 +68,7 @@ mise run schema
 
 First add a structural assertion that `importlib.util.find_spec("conformdag.models")` resolves to `src/conformdag/models/__init__.py`, has package search locations, and has no sibling `src/conformdag/models.py`.
 
-**Expected RED:** the test fails because the baseline resolves `models.py` as a module. Then create the package directory and perform one Git rename of the unchanged module to `models/__init__.py`. Keep the complete old implementation in the package initializer for this bootstrap commit; do not create a second module or an empty shadow package.
+**Expected RED:** the test fails because the Stage A characterization reference resolves `models.py` as a module. Then create the package directory and perform one Git rename of the unchanged module to `models/__init__.py`. Keep the complete old implementation in the package initializer for this bootstrap commit; do not create a second module or an empty shadow package.
 
 **Expected GREEN:** the structural test and Task 1 characterization tests pass; old imports and model behavior remain unchanged.
 
