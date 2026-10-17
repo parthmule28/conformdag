@@ -11,6 +11,7 @@ from typing import Protocol
 from conformdag.analysis import ParseCache
 from conformdag.application.configuration import EffectiveScanConfiguration
 from conformdag.application.errors import RuntimeExecutionError, ScanInputError
+from conformdag.baselines import Baseline, baseline_from_fingerprints, baseline_from_report
 from conformdag.gates import evaluate_pack_gates
 from conformdag.models import (
     FindingStatus,
@@ -69,7 +70,7 @@ def execute_scan(
     semantic_provider: SemanticProvider | None = None,
     semantic_provider_name: str | None = None,
     runtime_executor: RuntimeExecutor | None = None,
-    baseline: BaselineInput | None = None,
+    baseline: BaselineInput | Baseline | None = None,
     operational_suppressions: Sequence[Suppression] = (),
     parse_cache: ParseCache | None = None,
 ) -> ScanExecutionResult:
@@ -78,11 +79,18 @@ def execute_scan(
     config = configuration.project
     pack = select_policy_pack(configuration.resolved_policy_pack, root)
 
-    if baseline is not None:
+    resolved_baseline: Baseline | None = None
+    if isinstance(baseline, Baseline):
+        resolved_baseline = baseline
+    elif baseline is not None:
         if baseline.report is not None and baseline.fingerprints is not None:
             raise ScanInputError("baseline cannot contain both report and fingerprints")
         if baseline.report is not None and not baseline.report.complete:
             raise ScanInputError("baseline report is incomplete and cannot be used")
+        if baseline.report is not None:
+            resolved_baseline = baseline_from_report(baseline.report)
+        elif baseline.fingerprints is not None:
+            resolved_baseline = baseline_from_fingerprints(baseline.fingerprints)
 
     if semantic_provider is not None and not configuration.semantic.enabled:
         raise ScanInputError("semantic provider supplied while semantic evaluation is disabled")
@@ -220,10 +228,7 @@ def execute_scan(
         gate_result = evaluate_pack_gates(
             pack,
             final_report,
-            baseline.report if baseline is not None else None,
-            baseline_fingerprints=(
-                set(baseline.fingerprints) if baseline is not None and baseline.fingerprints is not None else None
-            ),
+            resolved_baseline,
         )
     if gate_result is not None:
         final_report = final_report.model_copy(update={"gate_result": gate_result})

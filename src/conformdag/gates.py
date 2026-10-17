@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from conformdag.baselines import Baseline, baseline_from_fingerprints, baseline_from_report
 from conformdag.models import (
     AlwaysBlockRule,
     FailureRateRule,
@@ -47,15 +48,10 @@ def has_blocking_failures(report: ScanReport) -> bool:
 def _evaluate_rule(
     rule: GateRule,
     report: ScanReport,
-    baseline_report: ScanReport | None,
-    baseline_fingerprints: set[str] | None,
+    baseline: Baseline | None,
 ) -> GateRuleResult:
     if isinstance(rule, NoNewFindingsRule):
-        fingerprints = (
-            {finding.fingerprint for finding in baseline_report.findings}
-            if baseline_report is not None
-            else baseline_fingerprints or set()
-        )
+        fingerprints: frozenset[str] = baseline.fingerprints if baseline is not None else frozenset()
         new = [finding for finding in blocking_findings(report) if finding.fingerprint not in fingerprints]
         return GateRuleResult(
             rule_type=rule.type,
@@ -104,35 +100,76 @@ def _evaluate_rule(
     )
 
 
+def _resolve_baseline(
+    baseline: Baseline | ScanReport | None,
+    *,
+    baseline_report: ScanReport | None,
+    baseline_fingerprints: set[str] | None,
+) -> Baseline | None:
+    """Adapt canonical and legacy baseline inputs to one immutable value."""
+    if isinstance(baseline, Baseline):
+        if baseline_report is not None or baseline_fingerprints is not None:
+            raise ValueError("canonical baseline cannot be combined with legacy baseline inputs")
+        return baseline
+
+    if isinstance(baseline, ScanReport):
+        if baseline_report is not None:
+            raise ValueError("baseline report cannot be supplied both positionally and by keyword")
+        baseline_report = baseline
+
+    if baseline_report is not None:
+        return baseline_from_report(baseline_report)
+    if baseline_fingerprints is not None:
+        return baseline_from_fingerprints(baseline_fingerprints)
+    return None
+
+
+def _evaluate_gate_with_baseline(
+    gate: QualityGate,
+    report: ScanReport,
+    baseline: Baseline | None,
+) -> GateResult:
+    results = [_evaluate_rule(rule, report, baseline) for rule in gate.rules]
+    return GateResult(gate_id=gate.id, passed=all(result.passed for result in results), rules=results)
+
+
 def evaluate_gate(
     gate: QualityGate,
     report: ScanReport,
-    baseline_report: ScanReport | None,
+    baseline: Baseline | ScanReport | None = None,
     *,
+    baseline_report: ScanReport | None = None,
     baseline_fingerprints: set[str] | None = None,
 ) -> GateResult:
     """Evaluate one gate; the gate passes only when every rule passes."""
-    results = [_evaluate_rule(rule, report, baseline_report, baseline_fingerprints) for rule in gate.rules]
-    return GateResult(gate_id=gate.id, passed=all(result.passed for result in results), rules=results)
+    resolved_baseline = _resolve_baseline(
+        baseline,
+        baseline_report=baseline_report,
+        baseline_fingerprints=baseline_fingerprints,
+    )
+    return _evaluate_gate_with_baseline(gate, report, resolved_baseline)
 
 
 def evaluate_pack_gates(
     pack: PolicyPack,
     report: ScanReport,
-    baseline_report: ScanReport | None,
+    baseline: Baseline | ScanReport | None = None,
     *,
+    baseline_report: ScanReport | None = None,
     baseline_fingerprints: set[str] | None = None,
 ) -> GateResult | None:
     """Evaluate all gates; return the first failing gate or the first gate overall.
 
     Returns None when the pack defines no gates (legacy behavior applies).
     """
+    resolved_baseline = _resolve_baseline(
+        baseline,
+        baseline_report=baseline_report,
+        baseline_fingerprints=baseline_fingerprints,
+    )
     if not pack.quality_gates:
         return None
-    results = [
-        evaluate_gate(gate, report, baseline_report, baseline_fingerprints=baseline_fingerprints)
-        for gate in pack.quality_gates
-    ]
+    results = [_evaluate_gate_with_baseline(gate, report, resolved_baseline) for gate in pack.quality_gates]
     failing = next((result for result in results if not result.passed), None)
     return failing if failing is not None else results[0]
 

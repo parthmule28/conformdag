@@ -18,6 +18,8 @@ from conformdag.application import (
     ScanOptions,
     execute_scan,
 )
+from conformdag.application.scan import BaselineInput as ScanBaselineInput
+from conformdag.baselines import Baseline
 from conformdag.config import load_project_config
 from conformdag.gates import evaluate_pack_gates as _evaluate_pack_gates
 from conformdag.models import (
@@ -274,10 +276,16 @@ def test_scan_options_has_only_repository_context() -> None:
 
 
 def test_baseline_input_defaults_to_no_baseline() -> None:
+    assert BaselineInput is ScanBaselineInput
     assert [item.name for item in fields(BaselineInput)] == ["report", "fingerprints"]
+    assert [item.default for item in fields(BaselineInput)] == [None, None]
     baseline = BaselineInput()
     assert baseline.report is None
     assert baseline.fingerprints is None
+    report_baseline = BaselineInput(report=_complete_report())
+    fingerprint_baseline = BaselineInput(fingerprints=frozenset({"known"}))
+    assert report_baseline == ScanBaselineInput(report=_complete_report())
+    assert fingerprint_baseline == ScanBaselineInput(fingerprints=frozenset({"known"}))
     frozen_field = "report"
     with pytest.raises(FrozenInstanceError):
         setattr(baseline, frozen_field, _complete_report())
@@ -961,12 +969,12 @@ def test_execute_scan_normalizes_runtime_and_suppressions_before_baseline_report
     _install_core_stub(monkeypatch, events, core_report)
     observation = RuntimeObservation(policy_id="AIR-RUN-001", status=FindingStatus.PASS)
     executor = _FakeRuntimeExecutor(events, observations=[observation])
-    baseline_report = _complete_report()
+    baseline_report = _complete_report().model_copy(update={"findings": [finding]})
     baseline = BaselineInput(report=baseline_report)
     normalized_reports: list[ScanReport] = []
     normalization_inputs: list[ScanReport] = []
     gate_result = GateResult(gate_id="application-test", passed=True, rules=[])
-    gate_inputs: list[tuple[PolicyPack, ScanReport, ScanReport | None, set[str] | None]] = []
+    gate_inputs: list[tuple[PolicyPack, ScanReport, Baseline | None]] = []
 
     def normalize(report: ScanReport) -> ScanReport:
         events.append("normalize")
@@ -980,13 +988,11 @@ def test_execute_scan_normalizes_runtime_and_suppressions_before_baseline_report
     def evaluate_gates(
         pack: PolicyPack,
         report: ScanReport,
-        baseline_arg: ScanReport | None,
-        *,
-        baseline_fingerprints: set[str] | None = None,
+        baseline_arg: Baseline | None,
     ) -> GateResult:
         events.append("gates")
         assert normalized_reports == [report]
-        gate_inputs.append((pack, report, baseline_arg, baseline_fingerprints))
+        gate_inputs.append((pack, report, baseline_arg))
         return gate_result
 
     monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
@@ -1006,8 +1012,7 @@ def test_execute_scan_normalizes_runtime_and_suppressions_before_baseline_report
     assert len(normalization_inputs) == 1
     assert len(gate_inputs) == 1
     assert gate_inputs[0][1] is normalized_reports[0]
-    assert gate_inputs[0][2] is baseline_report
-    assert gate_inputs[0][3] is None
+    assert gate_inputs[0][2] == Baseline(fingerprints=frozenset({finding.fingerprint}))
     assert result.report.result_fingerprint == normalized_reports[0].result_fingerprint
     assert result.gate_result is gate_result
     assert result.report.gate_result is gate_result
@@ -1027,7 +1032,7 @@ def test_execute_scan_normalizes_once_and_passes_baseline_fingerprints_to_gates(
     normalized_reports: list[ScanReport] = []
     normalization_count = 0
     gate_result = GateResult(gate_id="application-test", passed=True, rules=[])
-    gate_inputs: list[tuple[PolicyPack, ScanReport, ScanReport | None, set[str] | None]] = []
+    gate_inputs: list[tuple[PolicyPack, ScanReport, Baseline | None]] = []
 
     def normalize(report: ScanReport) -> ScanReport:
         nonlocal normalization_count
@@ -1040,12 +1045,10 @@ def test_execute_scan_normalizes_once_and_passes_baseline_fingerprints_to_gates(
     def evaluate_gates(
         actual_pack: PolicyPack,
         report: ScanReport,
-        baseline_report: ScanReport | None,
-        *,
-        baseline_fingerprints: set[str] | None = None,
+        baseline_value: Baseline | None,
     ) -> GateResult:
         events.append("gates")
-        gate_inputs.append((actual_pack, report, baseline_report, baseline_fingerprints))
+        gate_inputs.append((actual_pack, report, baseline_value))
         return gate_result
 
     monkeypatch.setattr("conformdag.application.scan.normalize_report", normalize, raising=False)
@@ -1055,8 +1058,35 @@ def test_execute_scan_normalizes_once_and_passes_baseline_fingerprints_to_gates(
 
     assert events == ["core", "normalize", "gates"]
     assert normalization_count == 1
-    assert gate_inputs == [(pack, normalized_reports[0], None, {"known-a", "known-b"})]
+    assert gate_inputs == [(pack, normalized_reports[0], Baseline(fingerprints=baseline_fingerprints))]
     assert result.report.gate_result is result.gate_result is gate_result
+
+
+@pytest.mark.parametrize("baseline", [None, BaselineInput()])
+def test_execute_scan_keeps_absent_legacy_baseline_as_none_for_gates(
+    build_repository: Callable[[Path], Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    baseline: BaselineInput | None,
+) -> None:
+    root = build_repository(tmp_path / "repo")
+    _install_application_pack(monkeypatch, root)
+    _install_core_stub(monkeypatch, [], _complete_report())
+    gate_baselines: list[Baseline | None] = []
+
+    def evaluate_gates(
+        _pack: PolicyPack,
+        _report: ScanReport,
+        baseline_value: Baseline | None,
+    ) -> GateResult:
+        gate_baselines.append(baseline_value)
+        return GateResult(gate_id="application-test", passed=True, rules=[])
+
+    monkeypatch.setattr("conformdag.application.scan.evaluate_pack_gates", evaluate_gates, raising=False)
+
+    execute_scan(ScanOptions(root), _effective_configuration(root), baseline=baseline)
+
+    assert gate_baselines == [None]
 
 
 def test_execute_scan_normalizes_incomplete_report_without_evaluating_or_retaining_gate(

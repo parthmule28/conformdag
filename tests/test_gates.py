@@ -3,6 +3,9 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
+from conformdag.baselines import baseline_from_fingerprints, baseline_from_report
 from conformdag.gates import blocking_findings, evaluate_gate, evaluate_pack_gates, validate_quality_gates
 from conformdag.models import (
     EnforcementConfig,
@@ -77,6 +80,85 @@ def test_no_new_findings_rule_compares_fingerprints_against_baseline() -> None:
 
     only_known = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
     assert evaluate_gate(gate, only_known, baseline).passed
+
+
+def test_legacy_baseline_report_wins_over_fingerprints_for_positional_and_keyword_calls() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "no-new-findings"}]})
+    baseline = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    current = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+
+    positional = evaluate_gate(gate, current, baseline, baseline_fingerprints={"other"})
+    keyword = evaluate_gate(gate, current, baseline_report=baseline, baseline_fingerprints={"other"})
+
+    assert positional.passed
+    assert keyword.passed
+
+
+def test_canonical_report_and_fingerprint_baselines_have_equivalent_gate_results() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "no-new-findings"}]})
+    baseline_report = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    current = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    report_baseline = baseline_from_report(baseline_report)
+    fingerprint_baseline = baseline_from_fingerprints(["known"])
+
+    gate_from_report = evaluate_gate(gate, current, report_baseline)
+    gate_from_fingerprints = evaluate_gate(gate, current, fingerprint_baseline)
+    pack_from_report = evaluate_pack_gates(_pack(gate), current, report_baseline)
+    pack_from_fingerprints = evaluate_pack_gates(_pack(gate), current, fingerprint_baseline)
+
+    assert gate_from_report == gate_from_fingerprints
+    assert pack_from_report == pack_from_fingerprints
+
+
+def test_none_and_empty_canonical_baselines_both_compare_against_no_fingerprints() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "no-new-findings"}]})
+    current = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "new"))
+    empty_baseline = baseline_from_fingerprints(())
+
+    no_baseline = evaluate_gate(gate, current, None)
+    empty_baseline_result = evaluate_gate(gate, current, empty_baseline)
+
+    assert not no_baseline.passed
+    assert not empty_baseline_result.passed
+    assert no_baseline.rules[0].matching_findings == 1
+    assert empty_baseline_result.rules[0].matching_findings == 1
+
+
+def test_legacy_baseline_report_and_fingerprint_keyword_forms_remain_supported() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "no-new-findings"}]})
+    baseline = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    current = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+
+    report_result = evaluate_gate(gate, current, baseline_report=baseline)
+    fingerprints_result = evaluate_gate(gate, current, None, baseline_fingerprints={"known"})
+
+    assert report_result.passed
+    assert fingerprints_result.passed
+
+
+def test_legacy_report_wins_for_both_gate_helpers() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "no-new-findings"}]})
+    baseline = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    current = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    pack = _pack(gate)
+
+    positional = evaluate_pack_gates(pack, current, baseline, baseline_fingerprints={"other"})
+    keyword = evaluate_pack_gates(pack, current, baseline_report=baseline, baseline_fingerprints={"other"})
+
+    assert positional is not None and positional.passed
+    assert keyword is not None and keyword.passed
+
+
+def test_canonical_baseline_cannot_be_mixed_with_legacy_gate_sources() -> None:
+    gate = QualityGate.model_validate({"id": "g", "rules": [{"type": "no-new-findings"}]})
+    baseline_report = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    current = _report(_finding("AIR-DET-001", FindingStatus.FAIL, "known"))
+    canonical = baseline_from_report(baseline_report)
+
+    with pytest.raises(ValueError):
+        evaluate_gate(gate, current, canonical, baseline_fingerprints={"known"})
+    with pytest.raises(ValueError):
+        evaluate_pack_gates(_pack(gate), current, canonical, baseline_report=baseline_report)
 
 
 def test_max_severity_blocks_at_or_above_threshold() -> None:
