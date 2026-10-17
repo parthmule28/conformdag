@@ -70,7 +70,7 @@ def execute_scan(
     semantic_provider: SemanticProvider | None = None,
     semantic_provider_name: str | None = None,
     runtime_executor: RuntimeExecutor | None = None,
-    baseline: BaselineInput | None = None,
+    baseline: BaselineInput | Baseline | None = None,
     operational_suppressions: Sequence[Suppression] = (),
     parse_cache: ParseCache | None = None,
 ) -> ScanExecutionResult:
@@ -79,14 +79,14 @@ def execute_scan(
     config = configuration.project
     pack = select_policy_pack(configuration.resolved_policy_pack, root)
 
-    if baseline is not None:
+    resolved_baseline: Baseline | None = None
+    if isinstance(baseline, Baseline):
+        resolved_baseline = baseline
+    elif baseline is not None:
         if baseline.report is not None and baseline.fingerprints is not None:
             raise ScanInputError("baseline cannot contain both report and fingerprints")
         if baseline.report is not None and not baseline.report.complete:
             raise ScanInputError("baseline report is incomplete and cannot be used")
-
-    resolved_baseline: Baseline | None = None
-    if baseline is not None:
         if baseline.report is not None:
             resolved_baseline = baseline_from_report(baseline.report)
         elif baseline.fingerprints is not None:

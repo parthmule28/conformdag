@@ -39,6 +39,7 @@ from conformdag.application import (
     resolve_effective_configuration,
 )
 from conformdag.application import execute_scan as execute_application_scan
+from conformdag.baselines import Baseline
 from conformdag.evaluator import CHECK_EVALUATORS
 from conformdag.models import (
     AirflowProfile,
@@ -247,7 +248,7 @@ def _application_report(
     repository_root: Path,
     *,
     policy_pack: Path | None = None,
-    baseline: BaselineInput | None = None,
+    baseline: Baseline | BaselineInput | None = None,
     operational_suppressions: Sequence[Suppression] = (),
 ) -> ScanReport:
     """Execute the application workflow with the platform runner's effective inputs."""
@@ -3134,7 +3135,7 @@ def test_runner_application_report_parity_with_baseline(
         baseline = BaselineInput(fingerprints=baseline_fingerprints)
         assert load_scan(platform_env, "baseline").report_json is None
     else:
-        baseline = BaselineInput(report=original_report)
+        baseline = Baseline(fingerprints=frozenset(finding.fingerprint for finding in original_report.findings))
 
     with factory(platform_env)() as session:
         repository = session.get(RepositoryRow, "repo1")
@@ -3499,13 +3500,15 @@ def test_runner_passes_application_inputs(
         session.commit()
 
     if baseline_mode == "report":
-        expected_baseline = BaselineInput(report=baseline_report)
+        expected_baseline = Baseline(
+            fingerprints=frozenset(finding.fingerprint for finding in baseline_report.findings)
+        )
     elif baseline_mode == "fingerprints":
         with factory(platform_env)() as session:
             fingerprints = frozenset(
                 session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == "baseline")).all()
             )
-        expected_baseline = BaselineInput(fingerprints=fingerprints)
+        expected_baseline = Baseline(fingerprints=fingerprints)
         assert fingerprints
     else:
         expected_baseline = None
@@ -3520,7 +3523,7 @@ def test_runner_passes_application_inputs(
         created_at=created_at,
         expires_at=expires_at,
     )
-    captured: list[tuple[ScanOptions, EffectiveScanConfiguration, BaselineInput | None, tuple[Suppression, ...]]] = []
+    captured: list[tuple[ScanOptions, EffectiveScanConfiguration, Baseline | None, tuple[Suppression, ...]]] = []
 
     def spy_application_execution(
         options: ScanOptions,
@@ -3547,6 +3550,68 @@ def test_runner_passes_application_inputs(
     assert configuration.resolved_policy_pack == (repository_root / "policies/pack.yaml").resolve()
     assert actual_baseline == expected_baseline
     assert actual_suppressions == (expected_suppression,)
+
+
+def test_runner_keeps_empty_eligible_pruned_baseline_distinct_from_absence(
+    platform_env: str,
+    tmp_path: Path,
+    build_repository: Callable[[Path], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import conformdag.platform.runner as runner_module
+    from conformdag.platform.runner import execute_scan as execute_platform_scan
+
+    repository_root = build_repository(tmp_path / "repository")
+    _set_quality_gates(repository_root, [{"id": "baseline", "rules": [{"type": "no-new-findings"}]}])
+    empty_report = ScanReport(
+        complete=True,
+        result_fingerprint="0" * 64,
+        run=RunMetadata(
+            tool_version="test",
+            policy_pack_id="test-pack",
+            policy_pack_version="1",
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        ),
+    )
+    with factory(platform_env)() as session:
+        session.add(RepositoryRow(id="repo1", name="empty-baseline", path=str(repository_root)))
+        session.add(
+            ScanRow(
+                id="empty-baseline",
+                repository_id="repo1",
+                status=ScanStatus.SUCCEEDED.value,
+                complete=True,
+                report_json=None,
+            )
+        )
+        session.add(ScanRow(id="current", repository_id="repo1", status=ScanStatus.RUNNING.value))
+        repository = session.get(RepositoryRow, "repo1")
+        assert repository is not None
+        repository.baseline_scan_id = "empty-baseline"
+        assert session.scalars(select(FindingRow).where(FindingRow.scan_id == "empty-baseline")).all() == []
+        session.commit()
+
+    captured_baselines: list[Baseline | None] = []
+    execute_application = runner_module.execute_application_scan
+
+    def spy_application_execution(
+        options: ScanOptions,
+        configuration: Any,
+        **kwargs: Any,
+    ) -> Any:
+        captured_baselines.append(kwargs.get("baseline"))
+        return execute_application(options, configuration, **kwargs)
+
+    monkeypatch.setattr(runner_module, "execute_application_scan", spy_application_execution, raising=False)
+    assert execute_platform_scan("current", platform_env) == 0
+
+    assert captured_baselines == [Baseline(fingerprints=frozenset())]
+    persisted = load_scan(platform_env, "current")
+    assert persisted.report_json is not None
+    persisted_gate = persisted.report_json.get("gate_result")
+    application_report = _application_report(repository_root, baseline=BaselineInput(report=empty_report))
+    assert application_report.gate_result is not None
+    assert persisted_gate == application_report.gate_result.model_dump(mode="json")
 
 
 @pytest.mark.parametrize(

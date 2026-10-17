@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from conformdag.analysis import ParseCache
 from conformdag.application import (
-    BaselineInput,
     ExecutionOutcome,
     ScanOptions,
     ScanOverrides,
@@ -23,6 +22,7 @@ from conformdag.application import (
     resolve_effective_configuration,
 )
 from conformdag.application import execute_scan as execute_application_scan
+from conformdag.baselines import Baseline, baseline_from_fingerprints, baseline_from_report
 from conformdag.models import ScanReport, Suppression
 from conformdag.platform.db import (
     FindingRow,
@@ -85,23 +85,23 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _baseline_input(
+def _baseline(
     session: Session,
     repository_id: str,
     baseline_scan_id: str | None,
-) -> BaselineInput | None:
-    """Convert an eligible platform baseline into the application's canonical input."""
+) -> Baseline | None:
+    """Resolve an eligible platform baseline into the canonical identity value."""
     if baseline_scan_id is None:
         return None
     baseline_scan = eligible_baseline(session, repository_id, baseline_scan_id)
     if baseline_scan is None:
         return None
     if baseline_scan.report_json is not None:
-        return BaselineInput(report=ScanReport.model_validate(baseline_scan.report_json))
+        return baseline_from_report(ScanReport.model_validate(baseline_scan.report_json))
     fingerprints = frozenset(
         session.scalars(select(FindingRow.fingerprint).where(FindingRow.scan_id == baseline_scan.id)).all()
     )
-    return BaselineInput(fingerprints=fingerprints)
+    return baseline_from_fingerprints(fingerprints)
 
 
 def _operational_suppressions(session: Session) -> list[Suppression]:
@@ -169,7 +169,7 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
                     airflow_profile=airflow_profile,
                 ),
             )
-            baseline = _baseline_input(session, scan.repository_id, repository.baseline_scan_id)
+            baseline = _baseline(session, scan.repository_id, repository.baseline_scan_id)
             operational_suppressions = _operational_suppressions(session)
             result = execute_application_scan(
                 ScanOptions(repository_root),
