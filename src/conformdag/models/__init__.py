@@ -48,6 +48,15 @@ from .policy import (
     StartDateFreshnessConfig,
     TopLevelIOConfig,
 )
+from .semantic import (
+    SemanticAuditEvidence,
+    SemanticRequest,
+    SemanticResponse,
+    SemanticRunMetadata,
+)
+from .semantic import (
+    empty_audit_evidence as _empty_audit_evidence,
+)
 
 
 def _empty_paths() -> list[Path]:
@@ -55,10 +64,6 @@ def _empty_paths() -> list[Path]:
 
 
 def _empty_findings() -> list[Finding]:
-    return []
-
-
-def _empty_audit_evidence() -> list[SemanticAuditEvidence]:
     return []
 
 
@@ -121,14 +126,6 @@ class Suppression(ConformModel):
     expires_at: datetime
 
 
-class SemanticAuditEvidence(ConformModel):
-    criterion: str
-    source_type: Literal["source", "runtime", "policy", "provider"]
-    location: str | None = None
-    excerpt: str = Field(max_length=240)
-    unresolved: bool = False
-
-
 class Finding(ConformModel):
     policy_id: str
     policy_version: str
@@ -162,20 +159,6 @@ class RuntimeObservation(ConformModel):
     policy_id: str
     message: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-
-
-class SemanticRunMetadata(ConformModel):
-    policy_id: str
-    requested_model: str
-    served_model: str | None = None
-    context_hash: str
-    prompt_hash: str
-    usage: dict[str, NonNegativeInt] = Field(default_factory=dict)
-    retries: NonNegativeInt = 0
-    latency_ms: NonNegativeInt = 0
-    cache_hit: bool = False
-    repeatability: Literal["not-measured", "repeatable", "varied"] = "not-measured"
-    pricing_provenance: str | None = None
 
 
 class RunMetadata(ConformModel):
@@ -221,36 +204,6 @@ class RuntimeManifest(ConformModel):
     supported_profile: bool = False
     network_enabled: bool = False
     timeout_seconds: PositiveInt = 300
-
-
-class SemanticRequest(ConformModel):
-    schema_version: Literal["1"] = "1"
-    policy_id: str
-    policy_version: str = "unknown"
-    policy_contract_hash: str = ""
-    enforcement_hash: str = ""
-    prompt_version: str
-    context_hash: str
-    system_prompt: str
-    evidence: str
-    max_output_tokens: PositiveInt = 4000
-    temperature: float = 0.0
-
-
-class SemanticResponse(ConformModel):
-    status: Literal["PASS", "FAIL", "NEEDS_REVIEW", "NOT_APPLICABLE"]
-    evidence: str
-    explanation: str
-    remediation: str | None = None
-    confidence: Confidence
-    audit_evidence: list[SemanticAuditEvidence] = Field(default_factory=_empty_audit_evidence)
-    served_model: str | None = None
-    usage: dict[str, NonNegativeInt] = Field(default_factory=dict)
-    retries: NonNegativeInt = 0
-    latency_ms: NonNegativeInt = 0
-    cache_hit: bool = False
-    repeatability: Literal["not-measured", "repeatable", "varied"] = "not-measured"
-    pricing_provenance: str | None = None
 
 
 class ProjectScanConfig(ConformModel):

@@ -22,6 +22,7 @@ import conformdag.models as facade
             "policy",
             "PolicySource Ownership PolicyScope ExceptionPolicy EnforcementConfig RequiredOwnerConfig RequiredTagsConfig ExecutionTimeoutConfig RetryBoundsConfig TopLevelIOConfig OperatorRule ForbiddenOperatorsConfig IdempotenceConfig OrchestrationBoundaryConfig SensitiveLoggingConfig StartDateFreshnessConfig CatchupPolicyConfig ModuleScopeVariablesConfig DynamicDagFactoryConfig RuffAirConfig ApprovedAbstractionsConfig PolicyConfiguration Policy PolicyPack",
         ),
+        ("semantic", "SemanticAuditEvidence SemanticRunMetadata SemanticRequest SemanticResponse"),
     ],
 )
 def test_model_owner_identity(owner: str, names: str) -> None:
@@ -64,3 +65,26 @@ def test_policy_union_order_and_validator_bindings() -> None:
     ]
     with pytest.raises(ValidationError, match="union_tag_invalid"):
         TypeAdapter(facade.PolicyConfiguration).validate_python({"kind": "unknown"})
+
+
+def test_semantic_validation_and_evidence_defaults() -> None:
+    first = facade.SemanticResponse(
+        status="PASS", evidence=" evidence ", explanation=" ok ", confidence=facade.Confidence.HIGH
+    )
+    second = facade.SemanticResponse(
+        status="PASS", evidence="evidence", explanation="ok", confidence=facade.Confidence.HIGH
+    )
+    evidence = facade.SemanticAuditEvidence(criterion="owner", source_type="source", excerpt="x" * 240)
+    first.audit_evidence.append(evidence)
+    first.usage["input"] = 1
+    assert second.audit_evidence == []
+    assert second.usage == {}
+    assert first.model_dump(mode="json")["confidence"] == "high"
+    assert first.evidence == "evidence"
+    assert first.repeatability == "not-measured"
+    with pytest.raises(ValidationError, match="string_too_long"):
+        facade.SemanticAuditEvidence(criterion="owner", source_type="source", excerpt="x" * 241)
+    with pytest.raises(ValidationError, match="literal_error"):
+        facade.SemanticResponse.model_validate(
+            {"status": "ERROR", "evidence": "x", "explanation": "x", "confidence": "high"}
+        )
