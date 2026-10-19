@@ -206,7 +206,7 @@ def test_package_build_requires_the_frontend_build() -> None:
     assert "ui-build" in config["tasks"]["build"]["depends"]
 
 
-def test_built_distributions_include_importable_policy_package(tmp_path: Path) -> None:
+def test_built_distributions_include_importable_policy_and_models_packages(tmp_path: Path) -> None:
     project_root = Path(__file__).resolve().parents[1]
     dist_dir = tmp_path / "dist"
     child_env = {
@@ -231,15 +231,20 @@ def test_built_distributions_include_importable_policy_package(tmp_path: Path) -
     expected_wheel_files = {
         f"conformdag/policy/{module}.py" for module in ("__init__", "loading", "provenance", "validation", "hashes")
     }
+    model_modules = ("__init__", "common", "gates", "policy", "semantic", "findings", "runtime", "report", "config")
+    expected_wheel_files.update(f"conformdag/models/{module}.py" for module in model_modules)
     with zipfile.ZipFile(wheels[0]) as wheel:
         assert expected_wheel_files <= set(wheel.namelist())
+        assert "conformdag/models.py" not in wheel.namelist()
 
     expected_source_files = {
         f"src/conformdag/policy/{module}.py" for module in ("__init__", "loading", "provenance", "validation", "hashes")
     }
+    expected_source_files.update(f"src/conformdag/models/{module}.py" for module in model_modules)
     with tarfile.open(sdists[0], "r:gz") as source_distribution:
         source_members = {member.name for member in source_distribution.getmembers()}
     assert all(any(member.endswith(f"/{expected}") for member in source_members) for expected in expected_source_files)
+    assert not any(member.endswith("/src/conformdag/models.py") for member in source_members)
 
     installed = tmp_path / "installed-wheel"
     install = subprocess.run(
@@ -264,12 +269,14 @@ def test_built_distributions_include_importable_policy_package(tmp_path: Path) -
 
     smoke = """
 import importlib
+import pickle
 import sys
 from pathlib import Path
 
 installed = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(installed))
 import conformdag
+import conformdag.models as models
 import conformdag.policy
 from conformdag.policy import (
     PolicyValidationError,
@@ -309,6 +316,28 @@ assert all((
     validate_policy_provenance,
 ))
 print("installed wheel policy package imports passed")
+assert Path(models.__file__).resolve().is_relative_to(installed)
+for owner in ("common", "gates", "policy", "semantic", "findings", "runtime", "report", "config"):
+    module = importlib.import_module("conformdag.models." + owner)
+    assert Path(module.__file__).resolve().is_relative_to(installed)
+namespace = {}
+exec("from conformdag.models import *", namespace)
+assert list(namespace)[1:] == models.__all__
+assert len(models.__all__) == 74
+classes = 0
+for name in models.__all__:
+    value = getattr(models, name)
+    assert namespace[name] is value
+    if isinstance(value, type) and value.__module__.startswith("conformdag.models."):
+        classes += 1
+        assert getattr(importlib.import_module(value.__module__), name) is value
+assert classes == 58
+assert models.ProjectConfig().scan.policy_pack.as_posix() == "policies/pack.yaml"
+assert pickle.loads(b"cconformdag.models\\nProjectConfig\\n.") is models.ProjectConfig
+restored = pickle.loads(pickle.dumps(models.ProjectConfig()))
+assert type(restored) is models.ProjectConfig
+assert restored.model_dump(mode="json") == models.ProjectConfig().model_dump(mode="json")
+print("installed wheel models package imports passed")
 """
     imported = subprocess.run(
         [sys.executable, "-c", smoke, str(installed)],
@@ -320,6 +349,7 @@ print("installed wheel policy package imports passed")
     )
     assert imported.returncode == 0, imported.stdout + imported.stderr
     assert "installed wheel policy package imports passed" in imported.stdout
+    assert "installed wheel models package imports passed" in imported.stdout
 
 
 def test_runtime_dockerfile_excludes_overridden_airflow_constraints() -> None:
