@@ -1,4 +1,10 @@
-"""Privacy-preserving semantic provider, context, and normalized cache primitives."""
+"""Backward-compatible facade for the semantic service package.
+
+Implementations live in focused owner modules (``context``, ``prompts``,
+``provider``, ``cache`` and ``evaluator``). This module only re-exports the
+historical public names, including the incidental non-underscore imports that
+``from conformdag.semantic import *`` exposed before the C22 decomposition.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +37,8 @@ from conformdag.semantic.provider import (
     strict_semantic_response_schema,
 )
 
+# Explicit ordered exports freeze the pre-C22 wildcard surface, including the
+# incidental imported symbols that legacy star-import callers could observe.
 __all__ = [
     "annotations",
     "fcntl",
