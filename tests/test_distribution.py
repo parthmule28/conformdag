@@ -233,18 +233,25 @@ def test_built_distributions_include_importable_policy_and_models_packages(tmp_p
     }
     model_modules = ("__init__", "common", "gates", "policy", "semantic", "findings", "runtime", "report", "config")
     expected_wheel_files.update(f"conformdag/models/{module}.py" for module in model_modules)
+    semantic_modules = ("__init__", "context", "prompts", "provider", "cache", "evaluator")
+    expected_wheel_files.update(f"conformdag/semantic/{module}.py" for module in semantic_modules)
+    expected_wheel_files.add("conformdag/semantic_evaluator.py")
     with zipfile.ZipFile(wheels[0]) as wheel:
         assert expected_wheel_files <= set(wheel.namelist())
         assert "conformdag/models.py" not in wheel.namelist()
+        assert "conformdag/semantic.py" not in wheel.namelist()
 
     expected_source_files = {
         f"src/conformdag/policy/{module}.py" for module in ("__init__", "loading", "provenance", "validation", "hashes")
     }
     expected_source_files.update(f"src/conformdag/models/{module}.py" for module in model_modules)
+    expected_source_files.update(f"src/conformdag/semantic/{module}.py" for module in semantic_modules)
+    expected_source_files.add("src/conformdag/semantic_evaluator.py")
     with tarfile.open(sdists[0], "r:gz") as source_distribution:
         source_members = {member.name for member in source_distribution.getmembers()}
     assert all(any(member.endswith(f"/{expected}") for member in source_members) for expected in expected_source_files)
     assert not any(member.endswith("/src/conformdag/models.py") for member in source_members)
+    assert not any(member.endswith("/src/conformdag/semantic.py") for member in source_members)
 
     installed = tmp_path / "installed-wheel"
     install = subprocess.run(
@@ -338,6 +345,22 @@ restored = pickle.loads(pickle.dumps(models.ProjectConfig()))
 assert type(restored) is models.ProjectConfig
 assert restored.model_dump(mode="json") == models.ProjectConfig().model_dump(mode="json")
 print("installed wheel models package imports passed")
+import conformdag.semantic as semantic
+import conformdag.semantic_evaluator as semantic_evaluator
+for owner in ("context", "prompts", "provider", "cache", "evaluator"):
+    module = importlib.import_module("conformdag.semantic." + owner)
+    assert Path(module.__file__).resolve().is_relative_to(installed)
+semantic_context = importlib.import_module("conformdag.semantic.context")
+semantic_evaluator_owner = importlib.import_module("conformdag.semantic.evaluator")
+assert semantic.SemanticContext is semantic_context.SemanticContext
+assert semantic_evaluator.semantic_finding is semantic_evaluator_owner.semantic_finding
+assert pickle.loads(b"cconformdag.semantic\\nSemanticContext\\n.") is semantic.SemanticContext
+assert (
+    pickle.loads(b"cconformdag.semantic_evaluator\\nSemanticEvaluationResult\\n.")
+    is semantic_evaluator.SemanticEvaluationResult
+)
+assert Path(semantic.__file__).resolve().is_relative_to(installed)
+print("installed wheel semantic package imports passed")
 """
     imported = subprocess.run(
         [sys.executable, "-c", smoke, str(installed)],
@@ -350,6 +373,7 @@ print("installed wheel models package imports passed")
     assert imported.returncode == 0, imported.stdout + imported.stderr
     assert "installed wheel policy package imports passed" in imported.stdout
     assert "installed wheel models package imports passed" in imported.stdout
+    assert "installed wheel semantic package imports passed" in imported.stdout
 
 
 def test_runtime_dockerfile_excludes_overridden_airflow_constraints() -> None:
