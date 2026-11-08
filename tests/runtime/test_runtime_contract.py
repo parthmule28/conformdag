@@ -126,6 +126,14 @@ def _custom_manifest(root: Path) -> RuntimeManifest:
     )
 
 
+def test_runtime_is_a_package_after_the_atomic_bootstrap() -> None:
+    module_path = Path(runtime.__file__)
+
+    assert module_path.name == "__init__.py"
+    assert module_path.parent.name == "runtime"
+    assert hasattr(runtime, "__path__")
+
+
 def test_legacy_wildcard_bindings_and_order_are_frozen() -> None:
     assert _star_import() == RUNTIME_WILDCARD
 
