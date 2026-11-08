@@ -22,8 +22,53 @@ import httpx
 
 from conformdag.models import SemanticRequest, SemanticResponse
 from conformdag.security.redaction import CREDENTIAL_PATTERNS, redact_credentials
+from conformdag.semantic.context import DEFAULT_SECRET_PATTERNS, SemanticContext, build_context, redact_text
 
 LOGGER = logging.getLogger(__name__)
+
+__all__ = [
+    "annotations",
+    "fcntl",
+    "hashlib",
+    "json",
+    "logging",
+    "os",
+    "re",
+    "tempfile",
+    "Iterable",
+    "Iterator",
+    "Mapping",
+    "Sequence",
+    "ThreadPoolExecutor",
+    "contextmanager",
+    "suppress",
+    "deepcopy",
+    "dataclass",
+    "Path",
+    "monotonic",
+    "sleep",
+    "Any",
+    "cast",
+    "httpx",
+    "SemanticRequest",
+    "SemanticResponse",
+    "CREDENTIAL_PATTERNS",
+    "redact_credentials",
+    "LOGGER",
+    "SemanticProviderError",
+    "strict_semantic_response_schema",
+    "DEFAULT_SECRET_PATTERNS",
+    "SemanticContext",
+    "PromptTemplate",
+    "DEFAULT_PROMPT_TEMPLATE",
+    "GENERIC_REVIEWER_PROMPT",
+    "redact_text",
+    "build_context",
+    "OpenAICompatibleProvider",
+    "semantic_cache_key",
+    "SemanticCache",
+    "CachedSemanticProvider",
+]
 
 
 class SemanticProviderError(RuntimeError):
@@ -62,17 +107,6 @@ def strict_semantic_response_schema() -> dict[str, Any]:
     close_objects(schema)
     schema["required"] = list(provider_fields)
     return schema
-
-
-DEFAULT_SECRET_PATTERNS = CREDENTIAL_PATTERNS
-
-
-@dataclass(frozen=True)
-class SemanticContext:
-    text: str
-    context_hash: str
-    included_files: tuple[str, ...]
-    omitted_files: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -129,51 +163,6 @@ GENERIC_REVIEWER_PROMPT = PromptTemplate(
         "Do not invent citations, secrets, or missing context.\n\nPolicy:\n{{ policy }}"
     ),
 )
-
-
-def redact_text(text: str, patterns: Iterable[str] = DEFAULT_SECRET_PATTERNS) -> str:
-    """Enforce canonical credential protection before additive caller patterns."""
-    result = redact_credentials(text)
-    for pattern in patterns:
-        if pattern in DEFAULT_SECRET_PATTERNS:
-            continue
-        compiled = re.compile(pattern)
-        result = compiled.sub("[REDACTED]", result)
-    return result
-
-
-def build_context(
-    policy_text: str,
-    source_slices: Mapping[str, str],
-    runtime_observations: Sequence[str] = (),
-    max_input_tokens: int = 32_000,
-    secret_patterns: Iterable[str] = DEFAULT_SECRET_PATTERNS,
-) -> SemanticContext:
-    """Select deterministic, redacted evidence under an approximate token budget."""
-    budget = max_input_tokens * 4
-    sections = ["[POLICY]\n" + redact_text(policy_text, secret_patterns)]
-    included: list[str] = []
-    omitted: list[str] = []
-    for path in sorted(source_slices):
-        section = f"[SOURCE {path}]\n{redact_text(source_slices[path], secret_patterns)}"
-        if sum(len(item) + 1 for item in sections) + len(section) <= budget:
-            sections.append(section)
-            included.append(path)
-        else:
-            omitted.append(path)
-    if runtime_observations:
-        runtime = "[RUNTIME]\n" + "\n".join(redact_text(item, secret_patterns) for item in runtime_observations)
-        if sum(len(item) + 1 for item in sections) + len(runtime) <= budget:
-            sections.append(runtime)
-        else:
-            omitted.append("<runtime-observations>")
-    text = "\n\n".join(sections)
-    return SemanticContext(
-        text=text,
-        context_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        included_files=tuple(included),
-        omitted_files=tuple(omitted),
-    )
 
 
 class OpenAICompatibleProvider:
