@@ -32,7 +32,7 @@ and then publishes PyPI, the GHCR runtime image, and the new GHCR platform image
 - [x] Record the maintained Airflow 3.3.0 runtime identity for the current release:
   the `v1.0.0-beta.1` OCI index is pinned to
   `sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b` in
-  `src/conformdag/runtime.py` and is checked against this evidence by the test suite.
+  `src/conformdag/runtime/profiles.py` and is checked against this evidence by the test suite.
 - [x] Confirm the `Run the composite action against the sample repository` self-test
   passed on the release commit, covering the community pack path and the
   `pack pull` git path.
