@@ -10,7 +10,8 @@ This directory is the execution backlog for the C01–C64 consolidation program.
 4. `baseline.md` — measured starting state and evidence commands.
 5. `backlog.md` — program index, dependencies, risk, and phase gates.
 6. `progress.md` — execution ledger.
-7. `prompts/CNN-*.md` — the ready-to-paste Build prompt for one PR.
+7. `prompts/CNN-*.md` — backlog Build prompts; a canonical GitHub issue, when present, supplies the exact approved implementation contract.
+8. [`c24-persistence-architecture.md`](c24-persistence-architecture.md) — C24 architecture decision and trade-offs; [Issue #88](https://github.com/parthmule28/conformdag/issues/88) owns the implementation sequence.
 
 ## How to execute one slice
 
