@@ -206,7 +206,7 @@ def test_package_build_requires_the_frontend_build() -> None:
     assert "ui-build" in config["tasks"]["build"]["depends"]
 
 
-def test_built_distributions_include_importable_policy_and_models_packages(tmp_path: Path) -> None:
+def test_built_distributions_include_importable_packages(tmp_path: Path) -> None:
     project_root = Path(__file__).resolve().parents[1]
     dist_dir = tmp_path / "dist"
     child_env = {
@@ -236,10 +236,14 @@ def test_built_distributions_include_importable_policy_and_models_packages(tmp_p
     semantic_modules = ("__init__", "context", "prompts", "provider", "cache", "evaluator")
     expected_wheel_files.update(f"conformdag/semantic/{module}.py" for module in semantic_modules)
     expected_wheel_files.add("conformdag/semantic_evaluator.py")
+    runtime_modules = ("__init__", "profiles", "manifest", "docker")
+    expected_wheel_files.update(f"conformdag/runtime/{module}.py" for module in runtime_modules)
     with zipfile.ZipFile(wheels[0]) as wheel:
-        assert expected_wheel_files <= set(wheel.namelist())
-        assert "conformdag/models.py" not in wheel.namelist()
-        assert "conformdag/semantic.py" not in wheel.namelist()
+        wheel_files = set(wheel.namelist())
+        assert expected_wheel_files <= wheel_files
+        assert "conformdag/models.py" not in wheel_files
+        assert "conformdag/semantic.py" not in wheel_files
+        assert "conformdag/runtime.py" not in wheel_files
 
     expected_source_files = {
         f"src/conformdag/policy/{module}.py" for module in ("__init__", "loading", "provenance", "validation", "hashes")
@@ -247,11 +251,13 @@ def test_built_distributions_include_importable_policy_and_models_packages(tmp_p
     expected_source_files.update(f"src/conformdag/models/{module}.py" for module in model_modules)
     expected_source_files.update(f"src/conformdag/semantic/{module}.py" for module in semantic_modules)
     expected_source_files.add("src/conformdag/semantic_evaluator.py")
+    expected_source_files.update(f"src/conformdag/runtime/{module}.py" for module in runtime_modules)
     with tarfile.open(sdists[0], "r:gz") as source_distribution:
         source_members = {member.name for member in source_distribution.getmembers()}
     assert all(any(member.endswith(f"/{expected}") for member in source_members) for expected in expected_source_files)
     assert not any(member.endswith("/src/conformdag/models.py") for member in source_members)
     assert not any(member.endswith("/src/conformdag/semantic.py") for member in source_members)
+    assert not any(member.endswith("/src/conformdag/runtime.py") for member in source_members)
 
     installed = tmp_path / "installed-wheel"
     install = subprocess.run(
@@ -361,6 +367,25 @@ assert (
 )
 assert Path(semantic.__file__).resolve().is_relative_to(installed)
 print("installed wheel semantic package imports passed")
+import conformdag.runtime as runtime
+runtime_profiles = importlib.import_module("conformdag.runtime.profiles")
+runtime_manifest = importlib.import_module("conformdag.runtime.manifest")
+runtime_docker = importlib.import_module("conformdag.runtime.docker")
+assert Path(runtime.__file__).resolve().is_relative_to(installed)
+for module in (runtime_profiles, runtime_manifest, runtime_docker):
+    assert Path(module.__file__).resolve().is_relative_to(installed)
+assert runtime.RuntimeProfile is runtime_profiles.RuntimeProfile
+assert runtime.RuntimePhaseError is runtime_manifest.RuntimePhaseError
+assert runtime.DockerRunner is runtime_docker.DockerRunner
+assert pickle.loads(b"cconformdag.runtime\\nRuntimeProfile\\n.") is runtime.RuntimeProfile
+assert pickle.loads(b"cconformdag.runtime\\nRuntimePhaseError\\n.") is runtime.RuntimePhaseError
+assert pickle.loads(b"cconformdag.runtime\\nDockerResult\\n.") is runtime.DockerResult
+assert runtime.RuntimeProfile.__module__ == "conformdag.runtime.profiles"
+assert runtime.RuntimePhaseError.__module__ == "conformdag.runtime.manifest"
+assert runtime.DockerRunner.__module__ == "conformdag.runtime.docker"
+import conformdag.cli as cli
+assert cli.app is not None
+print("installed wheel runtime owners and CLI entrypoint imports passed")
 """
     imported = subprocess.run(
         [sys.executable, "-c", smoke, str(installed)],
@@ -374,6 +399,7 @@ print("installed wheel semantic package imports passed")
     assert "installed wheel policy package imports passed" in imported.stdout
     assert "installed wheel models package imports passed" in imported.stdout
     assert "installed wheel semantic package imports passed" in imported.stdout
+    assert "installed wheel runtime owners and CLI entrypoint imports passed" in imported.stdout
 
 
 def test_runtime_dockerfile_excludes_overridden_airflow_constraints() -> None:

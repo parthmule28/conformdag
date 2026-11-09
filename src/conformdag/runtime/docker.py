@@ -1,9 +1,8 @@
-"""Validated Docker CLI boundary for optional runtime inspection."""
+"""Docker CLI boundary and runtime execution orchestration."""
 
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import tempfile
 from collections.abc import Sequence
@@ -11,73 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from conformdag.models import (
-    AirflowProfile,
-    ProjectRuntimeConfig,
-    RuntimeManifest,
-    RuntimeObservation,
+from conformdag.models import ProjectRuntimeConfig, RuntimeManifest, RuntimeObservation
+from conformdag.runtime.manifest import (
+    RuntimePhaseError,
+    build_runtime_manifest,
+    normalize_runtime_observations,
 )
-
-_IMMUTABLE_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
-
-
-@dataclass(frozen=True)
-class RuntimeProfile:
-    """Published metadata for a supported Airflow runtime image."""
-
-    airflow_profile: AirflowProfile
-    image: str
-    provider_versions: dict[str, str]
-    # Release tag/ref whose review approved the pinned image identity. Release
-    # publishing validates this against the pushed tag, so a new release cannot
-    # publish a runtime profile that has not been explicitly re-reviewed.
-    reviewed_release: str
-
-
-RUNTIME_PROFILES: dict[AirflowProfile, RuntimeProfile] = {
-    AirflowProfile.AIRFLOW_3_3_0: RuntimeProfile(
-        airflow_profile=AirflowProfile.AIRFLOW_3_3_0,
-        image=(
-            "ghcr.io/parthmule28/conformdag/airflow-3.3.0@"
-            "sha256:7d61c78df9dda06265997793d8ee3a38e03245073c937d0e5fca1c2835ed350b"
-        ),
-        provider_versions={
-            "apache-airflow-providers-standard": "1.15.0",
-            "apache-airflow-providers-postgres": "6.8.0",
-            "apache-airflow-providers-http": "6.0.4",
-            "apache-airflow-providers-google": "22.2.2",
-        },
-        reviewed_release="v1.0.0-beta.1",
-    ),
-}
-
-
-def runtime_profile(profile: AirflowProfile) -> RuntimeProfile:
-    """Return the immutable profile definition for a supported Airflow version."""
-    return RUNTIME_PROFILES[profile]
-
-
-class RuntimeReleaseError(RuntimeError):
-    """Raised when a release ref was not reconciled with the reviewed runtime profiles."""
-
-
-def validate_runtime_release(release_ref: str) -> None:
-    """Fail unless every published runtime profile was reviewed for ``release_ref``."""
-    for profile in RUNTIME_PROFILES.values():
-        name = profile.airflow_profile.value
-        if _IMMUTABLE_DIGEST.search(profile.image) is None:
-            raise RuntimeReleaseError(
-                f"runtime profile {name} must pin an immutable sha256 digest, got {profile.image}"
-            )
-        if profile.reviewed_release != release_ref:
-            raise RuntimeReleaseError(
-                f"runtime profile {name} was last reviewed for release {profile.reviewed_release}; "
-                f"refusing unreviewed release {release_ref} until RUNTIME_PROFILES records its review"
-            )
-
-
-class RuntimePhaseError(RuntimeError):
-    """Raised when the runtime boundary cannot complete safely."""
 
 
 @dataclass(frozen=True)
@@ -179,47 +117,6 @@ class DockerRunner:
                 return [RuntimeObservation.model_validate(item) for item in raw_observations]
             except (KeyError, TypeError, ValueError) as exc:
                 raise RuntimePhaseError(f"invalid runtime observation output: {exc}") from exc
-
-
-def build_runtime_manifest(
-    root: Path,
-    config: ProjectRuntimeConfig,
-    policy_ids: list[str],
-    include: list[str],
-    exclude: list[str],
-) -> RuntimeManifest:
-    """Validate explicit runtime activation and create the host/container contract."""
-    if not config.enabled:
-        raise RuntimePhaseError("runtime analysis is not enabled")
-    if config.airflow_version is None and not config.image:
-        raise RuntimePhaseError("runtime requires an Airflow profile or custom image")
-    if config.airflow_version is not None and config.image:
-        raise RuntimePhaseError("runtime cannot select both an Airflow profile and custom image")
-    if config.image and "@sha256:" not in config.image:
-        raise RuntimePhaseError("custom runtime image must include an immutable sha256 digest")
-    if config.network_enabled and config.airflow_version is not None:
-        raise RuntimePhaseError("network-enabled runtime execution is not supported for Airflow profiles")
-    profile = runtime_profile(config.airflow_version) if config.airflow_version else None
-    image = config.image or (profile.image if profile else None)
-    return RuntimeManifest(
-        repository_root=root.resolve(),
-        include=include,
-        exclude=exclude,
-        policy_ids=policy_ids,
-        airflow_profile=config.airflow_version,
-        image=image,
-        provider_versions=profile.provider_versions if profile else {},
-        supported_profile=profile is not None,
-        network_enabled=config.network_enabled,
-        timeout_seconds=config.timeout_seconds,
-    )
-
-
-def normalize_runtime_observations(
-    observations: list[RuntimeObservation],
-) -> list[RuntimeObservation]:
-    """Return stable observation order and reject invalid non-outcome statuses."""
-    return sorted(observations, key=lambda item: (item.policy_id, item.status.value, item.message or ""))
 
 
 def execute_runtime(

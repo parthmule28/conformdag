@@ -546,6 +546,7 @@ def test_runtime_execution_failure_is_a_structured_incomplete_report() -> None:
     payload = json.loads(result.stdout)
     assert payload["complete"] is False
     assert payload["issues"][-1]["code"] == "RUNTIME_EXECUTION_ERROR"
+    assert payload["issues"][-1]["message"] == "Docker daemon is unavailable"
 
 
 def test_agent_run_preserves_blocked_verifier_as_cli_failure(tmp_path: Path) -> None:
