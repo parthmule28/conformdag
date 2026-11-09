@@ -14,7 +14,7 @@ C23 was formally accepted: documentation PR #87 merged at `09be237cce57583bea803
 - `src/conformdag/platform/migrations/env.py` imports `Base` from `platform.db`, and revisions 0001–0004 supply the schema. Migrations must remain the sole schema-creation path.
 - `create_session_factory(url)` is a **bind-only** factory; `initialize_session_factory(url)` executes `run_migrations(url)` before binding. The original C24 backlog sentence claiming that `create_session_factory()` runs Alembic is obsolete and is corrected in this planning PR.
 - `platform/worker.py` owns commit after a successful claim, while the existing three conditional transition helpers commit on success and roll back on losing the conditional update. Moving those transactions would be a behavior change reserved for C25.
-- `tests/test_platform.py::test_postgres_migration_lock_uses_database_advisory_lock` patches `platform.db.create_engine`. The extracted implementation will look up `create_engine` in its owner module; the test must intentionally patch the owner, not rely on an ineffective facade patch.
+- `tests/test_platform.py::test_postgres_migration_lock_uses_database_advisory_lock` patches `platform.db.create_engine`, and `test_runner_does_not_run_migrations` patches `platform.db.run_migrations`. Both owner-function lookups move to `persistence.migrations` and these tests must intentionally retarget the active owner. Otherwise they can pass while no longer intercepting the code path.
 
 ## Selected boundary (five implementation owners)
 
@@ -42,7 +42,7 @@ C23 was formally accepted: documentation PR #87 merged at `09be237cce57583bea803
 
 ## Explicit patch-seam decision
 
-Existing internal tests that monkeypatch `platform.db.create_engine` for migration locking must instead patch `platform.persistence.migrations.create_engine`, because the function's global lookup moves. Keep read/import compatibility of intentional facade exports; do **not** add a dynamic dispatch layer solely to preserve this incidental test patch target. Add an exact facade alias assertion. If T0 discovers actual supported external monkeypatch integration on `platform.db.create_engine` or other incidental imports, **stop for architecture review** rather than changing observable behavior without permission.
+Existing internal tests that monkeypatch `platform.db.create_engine` for migration locking **and** `platform.db.run_migrations` to prove runner bind-only behavior must instead patch `platform.persistence.migrations.create_engine` and `platform.persistence.migrations.run_migrations`, respectively, because both functions' global lookups move. Keep read/import compatibility of intentional facade exports; do **not** add a dynamic dispatch layer solely to preserve this incidental test patch target. Add an exact facade alias assertion. If T0 discovers actual supported external monkeypatch integration on `platform.db.create_engine` or other incidental imports, **stop for architecture review** rather than changing observable behavior without permission.
 
 ## Alternatives evaluated
 
