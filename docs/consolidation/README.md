@@ -19,13 +19,13 @@ Use a dedicated feature worktree and start from the branch state named by the ow
 
 1. Read `AGENTS.md`, `architecture-rules.md`, `progress.md`, the slice prompt, and every dependency prompt listed in `backlog.md`.
 2. Inspect the current symbols, callers, tests, generated artifacts, and Git status before editing.
-3. Record any mismatch between the prompt and the current tree in the progress ledger before changing scope.
+3. Report any mismatch between the prompt and the current tree to ChatGPT; scope changes and planning-document updates require ChatGPT's architecture decision.
 4. Add a focused regression or characterization test before implementation whenever the behavior is testable.
 5. Implement the smallest ownership-preserving change described by the prompt.
 6. Run the focused test repeatedly, then the affected subsystem suite.
 7. Run format, lint, Pyright, pack/schema checks, and any conditional integration gates named by the prompt.
 8. Inspect `git diff --check`, `git diff`, and `git status`; preserve unrelated user work.
-9. Update only the slice's progress row with commands, results, compatibility notes, and remaining risks.
+9. Return commands, results, compatibility notes, and remaining risks as implementation evidence; **ChatGPT alone** updates the progress ledger and acceptance documentation.
 10. Commit the slice with a Conventional Commit message and open a PR; do not merge it.
 
 ## Status vocabulary
