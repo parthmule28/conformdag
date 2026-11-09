@@ -48,7 +48,7 @@ Preserve `Base`, all `*Row` classes, `create_session_factory()`, transition func
 
 - Existing migration/state/baseline/retention suites.
 - Alembic upgrade-from-empty and downgrade/upgrade compatibility where supported.
-- `mise run check`, coverage, and Postgres gate.
+- `mise run check`, coverage, and the existing mocked PostgreSQL advisory-lock regression. Real PostgreSQL concurrency tests are optional in C24 if available; C26 owns the mandatory dedicated PostgreSQL gate.
 - Independent review verifies ORM, migration, scan-transition, baseline, identifier and retention ownership without changing transaction or Alembic semantics.
 - Retarget the existing internal advisory-lock test patch from `platform.db.create_engine` to `platform.persistence.migrations.create_engine`, **and** the runner bind-only guard patch from `platform.db.run_migrations` to `platform.persistence.migrations.run_migrations`; retain assertions, prove both injected failures are exercised, and add facade parity assertions.
 - Preserve legacy `platform.db` symbols and identity, the migration ini path after movement, wheel/sdist imports, and startup-versus-bind-only factory behavior.
