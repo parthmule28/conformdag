@@ -1,14 +1,23 @@
 # C24 — Platform persistence ownership decision
 
-**Status:** Stage A design selected on 2026-11-09; documentation PR awaiting review. **Not implemented.**
+**Status:** Stage A decision implemented in Stage B; implementation merged and verified on 2026-11-12. **Formal C24 acceptance remains conditional on the Stage C documentation PR merge and its own exact-SHA post-merge CI.**
 
 **Canonical implementation contract:** [Issue #88](https://github.com/parthmule28/conformdag/issues/88). This decision note records architecture and alternatives; the issue owns task sequencing, test gates and OpenCode instructions.
 
 ## Entry condition
 
-C23 was formally accepted: documentation PR #87 merged at `09be237cce57583bea80331eda81d5df34b99a50`; exact-SHA push CI [42613125669](https://github.com/parthmule28/conformdag/actions/runs/42613125669) passed all six mandatory jobs. C23 issue #85 is closed. C24 code has not begun.
+C23 was formally accepted: documentation PR #87 merged at `09be237cce57583bea80331eda81d5df34b99a50`; exact-SHA push CI [42613125669](https://github.com/parthmule28/conformdag/actions/runs/42613125669) passed all six mandatory jobs. C23 issue #85 is closed. At Stage A, C24 implementation had not begun.
 
-## Source evidence and problem
+## Stage B outcome and acceptance evidence
+
+- Stage A design [PR #89](https://github.com/parthmule28/conformdag/pull/89) merged as `55a5b0fa87f485b870d91d0702e14ac6631b7643`, then passed six required push CI jobs.
+- Stage B implementation [PR #90](https://github.com/parthmule28/conformdag/pull/90) at reviewed exact head `3e88061cb0ccc56e9f1ceaf63cb3a52f952ccbd0` merged under user authorization as `1c3167ecb912777d48a9baeea4488215fc7c6970`.
+- [PR-head CI #43217228272](https://github.com/parthmule28/conformdag/actions/runs/43217228272) and [post-merge push CI #43218962417](https://github.com/parthmule28/conformdag/actions/runs/43218962417) each passed all six required jobs on exact respective SHAs. Opt-in semantic smoke skipped as configured.
+- Post-merge hosted Release validation: 1,142 passed, 2 skipped, 19 deselected, 93.06% coverage; wheel and source distribution built; pip-audit no known vulnerabilities; Gitleaks found no leaks. Hosted Airflow 3.3.0 runtime: 19 tests passed and real Docker smoke passed.
+- The independent exact-diff review compared all 24 original top-level class/function declarations: 22 text-identical, one necessary Alembic ini-path adjustment and one unchanged migration-lock body plus an additive compatibility alias. Five owner modules are sole implementations; facade re-exports original classes/functions; migration revisions 0001–0004, seven JSON schemas, scan state/fencing and transaction semantics remain unchanged. Tests cover object identity, metadata snapshots, migration replay, both internal monkeypatch seams, wheel and sdist content and installed distribution migration behavior.
+- Residual limits: real PostgreSQL concurrency/`SKIP LOCKED` behavior was not proven by SQLite, SQL compilation or mocks (deferred to C26); transaction redesign remains C25. Existing retention behavior protects the newest **scan row**, which need not have a report artifact. No alteration to that selection policy was made during C24.
+
+## Source evidence and problem (pre-C24 baseline)
 
 - `src/conformdag/platform/db.py` mixes ORM table definitions, JSON/JSONB metadata, UTC/ID helpers, Alembic orchestration and locks, SQLAlchemy session factories, conditional scan state transitions, baseline selection and retention.
 - `src/conformdag/platform/migrations/env.py` imports `Base` from `platform.db`, and revisions 0001–0004 supply the schema. Migrations must remain the sole schema-creation path.
