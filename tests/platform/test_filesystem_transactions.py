@@ -103,6 +103,7 @@ def test_one_pack_replace_failure_preserves_yaml_provenance_and_releases_service
     assert hashlib.sha256(source_path.read_bytes()).hexdigest() == after_failure.source.content_hash
 
     completed = threading.Event()
+    succeeded = threading.Event()
     # PackService wraps expected editing failures as PackError; filesystem writes may raise OSError.
     # AssertionError is also captured because the injected replace hook checks its target/path.
     errors: list[PackError | OSError | AssertionError] = []
@@ -110,6 +111,7 @@ def test_one_pack_replace_failure_preserves_yaml_provenance_and_releases_service
     def mutate_after_failure() -> None:
         try:
             service.upsert_policy("org", "AIR-DET-001", _policy_mutation("Edit after replacement failure"))
+            succeeded.set()
         except (PackError, OSError, AssertionError) as exc:
             errors.append(exc)
         finally:
@@ -121,6 +123,7 @@ def test_one_pack_replace_failure_preserves_yaml_provenance_and_releases_service
     writer.join(timeout=5)
 
     assert not writer.is_alive()
+    assert succeeded.is_set(), "the follow-up policy edit did not return normally"
     assert errors == []
     assert len(replace_attempts) == 2
     assert temporary_files_existed == [True, True]
