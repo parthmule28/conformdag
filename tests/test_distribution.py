@@ -238,6 +238,26 @@ def test_built_distributions_include_importable_packages(tmp_path: Path) -> None
     expected_wheel_files.add("conformdag/semantic_evaluator.py")
     runtime_modules = ("__init__", "profiles", "manifest", "docker")
     expected_wheel_files.update(f"conformdag/runtime/{module}.py" for module in runtime_modules)
+    persistence_modules = ("__init__", "baselines", "migrations", "models", "retention", "scans")
+    expected_wheel_files.update(f"conformdag/platform/persistence/{module}.py" for module in persistence_modules)
+    expected_wheel_files.update(
+        {
+            "conformdag/platform/__init__.py",
+            "conformdag/platform/db.py",
+            "conformdag/platform/alembic.ini",
+            "conformdag/platform/migrations/env.py",
+            "conformdag/platform/migrations/script.py.mako",
+            *(
+                f"conformdag/platform/migrations/versions/{revision}.py"
+                for revision in (
+                    "0001_platform_baseline",
+                    "0002_repository_baseline",
+                    "0003_finding_end_line",
+                    "0004_platform_concurrency_indexes",
+                )
+            ),
+        }
+    )
     with zipfile.ZipFile(wheels[0]) as wheel:
         wheel_files = set(wheel.namelist())
         assert expected_wheel_files <= wheel_files
@@ -252,6 +272,25 @@ def test_built_distributions_include_importable_packages(tmp_path: Path) -> None
     expected_source_files.update(f"src/conformdag/semantic/{module}.py" for module in semantic_modules)
     expected_source_files.add("src/conformdag/semantic_evaluator.py")
     expected_source_files.update(f"src/conformdag/runtime/{module}.py" for module in runtime_modules)
+    expected_source_files.update(f"src/conformdag/platform/persistence/{module}.py" for module in persistence_modules)
+    expected_source_files.update(
+        {
+            "src/conformdag/platform/__init__.py",
+            "src/conformdag/platform/db.py",
+            "src/conformdag/platform/alembic.ini",
+            "src/conformdag/platform/migrations/env.py",
+            "src/conformdag/platform/migrations/script.py.mako",
+            *(
+                f"src/conformdag/platform/migrations/versions/{revision}.py"
+                for revision in (
+                    "0001_platform_baseline",
+                    "0002_repository_baseline",
+                    "0003_finding_end_line",
+                    "0004_platform_concurrency_indexes",
+                )
+            ),
+        }
+    )
     with tarfile.open(sdists[0], "r:gz") as source_distribution:
         source_members = {member.name for member in source_distribution.getmembers()}
     assert all(any(member.endswith(f"/{expected}") for member in source_members) for expected in expected_source_files)
@@ -386,9 +425,53 @@ assert runtime.DockerRunner.__module__ == "conformdag.runtime.docker"
 import conformdag.cli as cli
 assert cli.app is not None
 print("installed wheel runtime owners and CLI entrypoint imports passed")
+import conformdag.platform as platform
+from conformdag.platform import db
+from conformdag.platform.persistence import baselines, migrations, models, retention, scans
+from sqlalchemy import inspect
+
+platform_modules = (platform, db, baselines, migrations, models, retention, scans)
+assert all(Path(module.__file__).resolve().is_relative_to(installed) for module in platform_modules)
+for owner in ("baselines", "migrations", "models", "retention", "scans"):
+    module = importlib.import_module("conformdag.platform.persistence." + owner)
+    assert Path(module.__file__).resolve().is_relative_to(installed)
+assert db.Base is models.Base
+assert db.RepositoryRow is models.RepositoryRow
+assert db.ScanRow is models.ScanRow
+assert db.FindingRow is models.FindingRow
+assert db.SuppressionRow is models.SuppressionRow
+assert db.PlatformError is migrations.PlatformError
+assert db._migration_lock is migrations._migration_lock
+assert db._migration_lock is migrations.migration_lock
+assert db.eligible_baseline is baselines.eligible_baseline
+assert db.create_session_factory is migrations.create_session_factory
+assert db.initialize_session_factory is migrations.initialize_session_factory
+assert db.migration_lock_path is migrations.migration_lock_path
+assert db.run_migrations is migrations.run_migrations
+assert db.stale_running_cutoff is scans.stale_running_cutoff
+assert db.claim_queued_scan is scans.claim_queued_scan
+assert db.transition_running_scan is scans.transition_running_scan
+assert db.transition_scan_to_cancelled is scans.transition_scan_to_cancelled
+assert db.heartbeat_running_scan is scans.heartbeat_running_scan
+assert db.count_scans is retention.count_scans
+assert db.retention_target_scan_ids is retention.retention_target_scan_ids
+assert db.prune_scan_artifact is retention.prune_scan_artifact
+for name in ("Base", "RepositoryRow", "ScanRow", "FindingRow", "SuppressionRow", "PlatformError"):
+    assert pickle.loads(("cconformdag.platform.db\\n" + name + "\\n.").encode()) is getattr(db, name)
+database = Path(sys.argv[2]).resolve()
+dsn = "sqlite:///" + database.as_posix()
+binding = db.create_session_factory(dsn)
+with binding() as session:
+    assert inspect(session.get_bind()).get_table_names() == []
+initialized = db.initialize_session_factory(dsn)
+with initialized() as session:
+    assert set(inspect(session.get_bind()).get_table_names()) == {
+        "repos", "scans", "findings", "suppressions", "alembic_version"
+    }
+print("installed wheel platform facade, owners, and migrations passed")
 """
     imported = subprocess.run(
-        [sys.executable, "-c", smoke, str(installed)],
+        [sys.executable, "-c", smoke, str(installed), str(tmp_path / "platform-first-boot.db")],
         cwd=tmp_path,
         env=child_env,
         capture_output=True,
@@ -400,6 +483,7 @@ print("installed wheel runtime owners and CLI entrypoint imports passed")
     assert "installed wheel models package imports passed" in imported.stdout
     assert "installed wheel semantic package imports passed" in imported.stdout
     assert "installed wheel runtime owners and CLI entrypoint imports passed" in imported.stdout
+    assert "installed wheel platform facade, owners, and migrations passed" in imported.stdout
 
 
 def test_runtime_dockerfile_excludes_overridden_airflow_constraints() -> None:

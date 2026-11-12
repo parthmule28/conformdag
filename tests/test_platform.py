@@ -1128,9 +1128,16 @@ def test_sqlite_migration_lock_is_shared_with_the_database_volume(tmp_path: Path
 
 
 def test_postgres_migration_lock_uses_database_advisory_lock(monkeypatch: pytest.MonkeyPatch) -> None:
-    from conformdag.platform import db
+    from sqlalchemy.pool import NullPool
 
+    from conformdag.platform.persistence import migrations
+
+    dsn = "postgresql+psycopg://platform@db/conformdag"
     statements: list[str] = []
+    parameters: list[object] = []
+    engine_options: list[object] = []
+    commit_calls = 0
+    dispose_calls = 0
 
     class FakeConnection:
         def __enter__(self) -> "FakeConnection":
@@ -1139,10 +1146,13 @@ def test_postgres_migration_lock_uses_database_advisory_lock(monkeypatch: pytest
         def __exit__(self, *_args: object) -> None:
             return None
 
-        def execute(self, statement: object, _parameters: object) -> None:
+        def execute(self, statement: object, params: object) -> None:
             statements.append(str(statement))
+            parameters.append(params)
 
         def commit(self) -> None:
+            nonlocal commit_calls
+            commit_calls += 1
             return None
 
     class FakeEngine:
@@ -1150,21 +1160,86 @@ def test_postgres_migration_lock_uses_database_advisory_lock(monkeypatch: pytest
             return FakeConnection()
 
         def dispose(self) -> None:
+            nonlocal dispose_calls
+            dispose_calls += 1
             return None
 
     def fake_create_engine(*_args: object, **_kwargs: object) -> FakeEngine:
+        engine_options.append(_kwargs.get("poolclass"))
         return FakeEngine()
 
     def fake_upgrade(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(db, "create_engine", fake_create_engine)
+    monkeypatch.setattr(migrations, "create_engine", fake_create_engine)
     monkeypatch.setattr("alembic.command.upgrade", fake_upgrade)
 
-    db.run_migrations("postgresql+psycopg://platform@db/conformdag")
+    migrations.run_migrations(dsn)
 
-    assert any("pg_advisory_lock" in statement for statement in statements)
-    assert any("pg_advisory_unlock" in statement for statement in statements)
+    assert len(statements) == 2
+    assert "pg_advisory_lock" in statements[0]
+    assert "pg_advisory_unlock" in statements[1]
+    assert parameters == [{"lock_key": dsn}, {"lock_key": dsn}]
+    assert engine_options == [NullPool]
+    assert commit_calls == 2
+    assert dispose_calls == 1
+
+
+def test_postgres_migration_failure_unlocks_and_disposes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlalchemy.pool import NullPool
+
+    from conformdag.platform.persistence import migrations
+
+    dsn = "postgresql+psycopg://platform@db/conformdag"
+    statements: list[str] = []
+    parameters: list[object] = []
+    engine_options: list[object] = []
+    commit_calls = 0
+    dispose_calls = 0
+
+    class FakeConnection:
+        def __enter__(self) -> "FakeConnection":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def execute(self, statement: object, params: object) -> None:
+            statements.append(str(statement))
+            parameters.append(params)
+
+        def commit(self) -> None:
+            nonlocal commit_calls
+            commit_calls += 1
+
+    class FakeEngine:
+        def connect(self) -> FakeConnection:
+            return FakeConnection()
+
+        def dispose(self) -> None:
+            nonlocal dispose_calls
+            dispose_calls += 1
+
+    def fake_create_engine(*_args: object, **kwargs: object) -> FakeEngine:
+        engine_options.append(kwargs.get("poolclass"))
+        return FakeEngine()
+
+    def fail_upgrade(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("migration failed")
+
+    monkeypatch.setattr(migrations, "create_engine", fake_create_engine)
+    monkeypatch.setattr("alembic.command.upgrade", fail_upgrade)
+
+    with pytest.raises(RuntimeError, match="migration failed"):
+        migrations.run_migrations(dsn)
+
+    assert len(statements) == 2
+    assert "pg_advisory_lock" in statements[0]
+    assert "pg_advisory_unlock" in statements[1]
+    assert parameters == [{"lock_key": dsn}, {"lock_key": dsn}]
+    assert engine_options == [NullPool]
+    assert commit_calls == 2
+    assert dispose_calls == 1
 
 
 def test_suppression_identity_migration_deduplicates_existing_rows(tmp_path: Path) -> None:
@@ -3064,15 +3139,38 @@ def test_runner_rejects_non_running_scan(platform_env: str) -> None:
 
 
 def test_runner_does_not_run_migrations(platform_env: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from conformdag.platform import db
+    from conformdag.platform.persistence import migrations
     from conformdag.platform.runner import execute_scan
 
-    def fail_if_called(_url: str) -> NoReturn:
+    migration_calls: list[str] = []
+    initialization_calls: list[str] = []
+
+    def fail_if_migrated(url: str) -> NoReturn:
+        migration_calls.append(url)
         raise AssertionError("the runner subprocess must never run migrations")
 
+    def fail_if_initialized(url: str) -> NoReturn:
+        initialization_calls.append(url)
+        raise AssertionError("the runner subprocess must never initialize the persistence schema")
+
     seed_running_scan(platform_env, tmp_path)
-    monkeypatch.setattr("conformdag.platform.db.run_migrations", fail_if_called)
+    monkeypatch.setattr(migrations, "run_migrations", fail_if_migrated)
+    monkeypatch.setattr(migrations, "initialize_session_factory", fail_if_initialized)
+    monkeypatch.setattr(db, "initialize_session_factory", fail_if_initialized)
+    with pytest.raises(AssertionError, match="must never initialize"):
+        migrations.initialize_session_factory(platform_env)
+    assert initialization_calls == [platform_env]
+    initialization_calls.clear()
+
+    with pytest.raises(AssertionError, match="must never run migrations"):
+        migrations.run_migrations(platform_env)
+    assert migration_calls == [platform_env]
+    migration_calls.clear()
 
     assert execute_scan("scan1", platform_env) == 1
+    assert migration_calls == []
+    assert initialization_calls == []
 
 
 def test_runner_application_report_parity(

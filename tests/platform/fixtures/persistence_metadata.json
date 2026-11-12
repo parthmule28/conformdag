@@ -1,0 +1,82 @@
+{
+  "findings": {
+    "columns": [
+      ["id", "Integer", "INTEGER", "INTEGER", false, true, true, null],
+      ["scan_id", "String", "VARCHAR(64)", "VARCHAR(64)", false, false, "auto", null],
+      ["repository_id", "String", "VARCHAR(64)", "VARCHAR(64)", false, false, "auto", null],
+      ["policy_id", "String", "VARCHAR(64)", "VARCHAR(64)", false, false, "auto", null],
+      ["policy_version", "String", "VARCHAR(32)", "VARCHAR(32)", false, false, "auto", null],
+      ["status", "String", "VARCHAR(16)", "VARCHAR(16)", false, false, "auto", null],
+      ["severity", "String", "VARCHAR(16)", "VARCHAR(16)", false, false, "auto", null],
+      ["file_path", "String", "VARCHAR(1024)", "VARCHAR(1024)", true, false, "auto", null],
+      ["start_line", "Integer", "INTEGER", "INTEGER", true, false, "auto", null],
+      ["end_line", "Integer", "INTEGER", "INTEGER", true, false, "auto", null],
+      ["fingerprint", "String", "VARCHAR(64)", "VARCHAR(64)", false, false, "auto", null],
+      ["explanation", "Text", "TEXT", "TEXT", true, false, "auto", null],
+      ["remediation", "Text", "TEXT", "TEXT", true, false, "auto", null],
+      ["fix_json", "JSON", "JSON", "JSONB", true, false, "auto", null],
+      ["suppressed", "Boolean", "BOOLEAN", "BOOLEAN", false, false, "auto", false]
+    ],
+    "constraints": [
+      ["ForeignKeyConstraint", null, ["repository_id"], "CASCADE", ["repos.id"]],
+      ["ForeignKeyConstraint", null, ["scan_id"], "CASCADE", ["scans.id"]],
+      ["PrimaryKeyConstraint", null, ["id"], null, []]
+    ],
+    "indexes": [["ix_findings_repo_policy", ["repository_id", "policy_id"], false]]
+  },
+  "repos": {
+    "columns": [
+      ["id", "String", "VARCHAR(64)", "VARCHAR(64)", false, true, "auto", null],
+      ["name", "String", "VARCHAR(255)", "VARCHAR(255)", false, false, "auto", null],
+      ["path", "String", "VARCHAR(1024)", "VARCHAR(1024)", false, false, "auto", null],
+      ["policy_pack", "String", "VARCHAR(1024)", "VARCHAR(1024)", true, false, "auto", null],
+      ["airflow_profile", "String", "VARCHAR(32)", "VARCHAR(32)", true, false, "auto", null],
+      ["baseline_scan_id", "String", "VARCHAR(64)", "VARCHAR(64)", true, false, "auto", null],
+      ["created_at", "DateTime", "DATETIME", "TIMESTAMP WITH TIME ZONE", false, false, "auto", "utcnow"]
+    ],
+    "constraints": [
+      ["PrimaryKeyConstraint", null, ["id"], null, []],
+      ["UniqueConstraint", null, ["name"], null, []]
+    ],
+    "indexes": []
+  },
+  "scans": {
+    "columns": [
+      ["id", "String", "VARCHAR(64)", "VARCHAR(64)", false, true, "auto", null],
+      ["repository_id", "String", "VARCHAR(64)", "VARCHAR(64)", false, false, "auto", null],
+      ["status", "String", "VARCHAR(16)", "VARCHAR(16)", false, false, "auto", "queued"],
+      ["trigger", "String", "VARCHAR(32)", "VARCHAR(32)", false, false, "auto", "dashboard"],
+      ["attempts", "Integer", "INTEGER", "INTEGER", false, false, "auto", 0],
+      ["created_at", "DateTime", "DATETIME", "TIMESTAMP WITH TIME ZONE", false, false, "auto", "utcnow"],
+      ["claimed_at", "DateTime", "DATETIME", "TIMESTAMP WITH TIME ZONE", true, false, "auto", null],
+      ["finished_at", "DateTime", "DATETIME", "TIMESTAMP WITH TIME ZONE", true, false, "auto", null],
+      ["result_fingerprint", "String", "VARCHAR(64)", "VARCHAR(64)", true, false, "auto", null],
+      ["complete", "Boolean", "BOOLEAN", "BOOLEAN", true, false, "auto", null],
+      ["report_json", "JSON", "JSON", "JSONB", true, false, "auto", null],
+      ["error", "Text", "TEXT", "TEXT", true, false, "auto", null]
+    ],
+    "constraints": [
+      ["ForeignKeyConstraint", null, ["repository_id"], "CASCADE", ["repos.id"]],
+      ["PrimaryKeyConstraint", null, ["id"], null, []]
+    ],
+    "indexes": [
+      ["ix_scans_repo_created", ["repository_id", "created_at"], false],
+      ["ix_scans_status_claimed", ["status", "claimed_at"], false],
+      ["ix_scans_status_created", ["status", "created_at"], false]
+    ]
+  },
+  "suppressions": {
+    "columns": [
+      ["id", "String", "VARCHAR(64)", "VARCHAR(64)", false, true, "auto", null],
+      ["policy_id", "String", "VARCHAR(64)", "VARCHAR(64)", false, false, "auto", null],
+      ["fingerprint", "String", "VARCHAR(64)", "VARCHAR(64)", false, false, "auto", null],
+      ["reason", "Text", "TEXT", "TEXT", false, false, "auto", null],
+      ["owner", "String", "VARCHAR(255)", "VARCHAR(255)", false, false, "auto", null],
+      ["created_at", "DateTime", "DATETIME", "TIMESTAMP WITH TIME ZONE", false, false, "auto", "utcnow"],
+      ["expires_at", "DateTime", "DATETIME", "TIMESTAMP WITH TIME ZONE", false, false, "auto", null],
+      ["source", "String", "VARCHAR(16)", "VARCHAR(16)", false, false, "auto", "platform"]
+    ],
+    "constraints": [["PrimaryKeyConstraint", null, ["id"], null, []]],
+    "indexes": [["uq_suppressions_policy_fingerprint", ["policy_id", "fingerprint"], true]]
+  }
+}
