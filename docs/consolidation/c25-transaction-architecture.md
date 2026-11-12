@@ -1,8 +1,18 @@
 # C25 — Transaction ownership decision
 
-**Status:** Stage A architecture proposed on 2026-11-12; **implementation not authorized**. The canonical exact T0–T8 build contract is [Issue #92](https://github.com/parthmule28/conformdag/issues/92). This record captures the reasoning, ownership matrix, and non-goals; do not implement from this note alone.
+**Status:** Stage A design approved and merged; Stage B tests implemented and independently reviewed, merged under explicit user authorization on 2026-11-12. **Formal C25 acceptance remains pending Stage C documentation-only PR authorization, merge, and six green exact-merge-SHA main CI jobs.** The canonical exact T0–T8 implementation contract is [Issue #92](https://github.com/parthmule28/conformdag/issues/92).
 
 **Baseline:** C24 is formally accepted on `main@6c192eee61113c65821a5e9273317c9b06d685d6`; [Issue #88](https://github.com/parthmule28/conformdag/issues/88) closed after Stage C acceptance. C24 created five persistence owner modules and the existing `platform.db` compatibility facade. No C25 source changes exist in this documentation-only design.
+
+## Stage A and B evidence
+
+- Stage A [PR #93](https://github.com/parthmule28/conformdag/pull/93) approved and merged as `0965446a827d22224ff3ba14788ddd72c4c9f8c9`, then passed [all six required post-merge main jobs #43230451910](https://github.com/parthmule28/conformdag/actions/runs/43230451910).
+- Stage B [PR #94](https://github.com/parthmule28/conformdag/pull/94) independently reviewed at `290852feb99515b6fed917b5873c20b4defcfcf6` and merged under explicit user authorization as `e74008b0f2d295efddb5a719379fa4b844536e38`. [Exact-head hosted CI #43251630499](https://github.com/parthmule28/conformdag/actions/runs/43251630499) passed all six required jobs on that exact SHA; optional semantic smoke skipped as configured.
+- Five new implementation-owned test files add **29 parametrized cases**. No production code, ORM, migration, schema, dependency or runtime code changed because characterization and failure injection found no defect justifying production corrections.
+- Verified hosted exact-head evidence: 1,171 passed, 2 skipped, 19 deselected; strict Pyright 0 errors; **93.06% coverage**; built wheel/sdist; pip-audit found no known vulnerabilities; Gitleaks found no leaks; 19 Airflow 3.3.0 runtime tests and real Docker smoke passed. OpenCode reported local 1,173 passed / 93.30% coverage and fresh wheel/sdist smoke; those local raw logs were not independently retrieved.
+- Tests cover caller-owned transaction rollback, file-backed SQLite transition one-winner/fencing, runner prior-report/finding replacement and rollback after real DELETE/flushed INSERT/lost completion, worker claim/retry/retention failure isolation and independent policy YAML versus SQL commit boundaries.
+- Post-merge implementation push CI [#43279366999](https://github.com/parthmule28/conformdag/actions/runs/43279366999) **passed all six required jobs** on exact merge SHA `e74008b0f2d295efddb5a719379fa4b844536e38`; optional semantic smoke skipped. Independently inspected hosted Release validation logs: **1,171 passed, 2 skipped, 19 deselected, 93.06% coverage**, built wheel and sdist, pip-audit no known vulnerabilities, Gitleaks no leaks. Airflow runtime: **19 passed** and real Airflow 3.3.0 Docker smoke passed.
+- Remaining limitations are unchanged: PostgreSQL `SKIP LOCKED` and real concurrency tests belong to C26; retention protects the newest *scan row*, not necessarily a populated artifact; policy-pack filesystem writes and repository SQL writes are not jointly ACID.
 
 ## Decision: bounded hybrid transaction ownership
 
