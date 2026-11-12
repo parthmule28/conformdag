@@ -12,7 +12,8 @@ This directory is the execution backlog for the C01–C64 consolidation program.
 6. `progress.md` — execution ledger.
 7. `prompts/CNN-*.md` — backlog Build prompts; a canonical GitHub issue, when present, supplies the exact approved implementation contract.
 8. [`c24-persistence-architecture.md`](c24-persistence-architecture.md) — accepted C24 persistence decision; [Issue #88](https://github.com/parthmule28/conformdag/issues/88) is closed.
-9. [`c25-transaction-architecture.md`](c25-transaction-architecture.md) — C25 proposed transaction ownership decision; [Issue #92](https://github.com/parthmule28/conformdag/issues/92) owns sequential T0–T8 work, not yet authorized.
+9. [`c25-transaction-architecture.md`](c25-transaction-architecture.md) — accepted C25 transaction ownership and failure-atomicity verification; [Issue #92](https://github.com/parthmule28/conformdag/issues/92) is closed.
+10. [`c26-postgres-architecture.md`](c26-postgres-architecture.md) — proposed C26 real PostgreSQL integration and seventh mandatory CI gate; [Issue #96](https://github.com/parthmule28/conformdag/issues/96) owns PG01–PG11/T0–T8, Stage B not authorized.
 
 ## How to execute one slice
 
