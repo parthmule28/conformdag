@@ -1,6 +1,6 @@
 # Consolidation Progress Ledger
 
-This ledger records evidence for C01–C64. It starts at `planned` because this branch contains the backlog artifacts, not product consolidation implementations. ChatGPT owns acceptance-ledger changes, recording exact commits, commands, results, compatibility notes, and independent review evidence after each Stage B implementation.
+This ledger records the status and evidence for C01–C64. A slice becomes formally accepted only after its approved implementation merge, required main CI, reviewed acceptance documentation, authorized documentation merge, and its own green post-merge main CI. ChatGPT owns ledger changes; implementation agents report evidence rather than edit acceptance records.
 
 ## Status legend
 
