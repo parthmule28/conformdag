@@ -10,6 +10,8 @@ from typing import cast
 import pytest
 from ruamel.yaml import YAML
 
+_POSTGRES_TEST_PASSWORD = "c26-ephemeral-postgres-test-only"
+
 
 def _assert_postgres_job_conditions(job: object) -> None:
     """Disallow job/step gates except the explicit always-run cleanup audit."""
@@ -31,6 +33,28 @@ def _assert_postgres_job_conditions(job: object) -> None:
     assert cleanup_count == 1
 
 
+def _assert_postgres_passwords_are_test_only(job: object) -> None:
+    """Keep the ephemeral CI database credential independent of GitHub tokens."""
+    job_mapping = cast("Mapping[str, object]", job)
+    services = cast("Mapping[str, object]", job_mapping["services"])
+    postgres_service = cast("Mapping[str, object]", services["postgres"])
+    service_env = cast("Mapping[str, object]", postgres_service["env"])
+    steps = cast("list[object]", job_mapping["steps"])
+    named_steps = {cast("Mapping[str, object]", step).get("name"): cast("Mapping[str, object]", step) for step in steps}
+    setup_env = cast("Mapping[str, object]", named_steps["Configure PostgreSQL test DSN"]["env"])
+    cleanup_env = cast("Mapping[str, object]", named_steps["Verify PostgreSQL test cleanup"]["env"])
+    passwords = (
+        service_env["POSTGRES_PASSWORD"],
+        setup_env["POSTGRES_SUPERUSER_PASSWORD"],
+        cleanup_env["POSTGRES_SUPERUSER_PASSWORD"],
+    )
+
+    for password in passwords:
+        assert isinstance(password, str)
+        assert "${{" not in password
+        assert password == _POSTGRES_TEST_PASSWORD
+
+
 def test_postgres_ci_job_is_mandatory_isolated_and_repeated() -> None:
     workflow = YAML(typ="safe").load(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
         Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
@@ -50,7 +74,7 @@ def test_postgres_ci_job_is_mandatory_isolated_and_repeated() -> None:
     service = job["services"]["postgres"]
     assert service["image"] == "postgres:17-alpine"
     assert service["env"]["POSTGRES_USER"] == "postgres"
-    assert service["env"]["POSTGRES_PASSWORD"] == "${{ github.token }}"
+    _assert_postgres_passwords_are_test_only(job)
     assert service["env"]["POSTGRES_DB"] == "postgres"
     assert service["ports"] == ["127.0.0.1:5432:5432"]
     assert "--health-cmd" in service["options"]
@@ -67,7 +91,6 @@ def test_postgres_ci_job_is_mandatory_isolated_and_repeated() -> None:
 
     setup_dsn = next(step for step in steps if step.get("name") == "Configure PostgreSQL test DSN")
     assert "uv run python - <<'PY'" in setup_dsn["run"]
-    assert "github.token" in setup_dsn["env"]["POSTGRES_SUPERUSER_PASSWORD"]
     assert "GITHUB_ENV" in setup_dsn["run"]
     assert "add-mask" in setup_dsn["run"]
     assert "CREATE ROLE" in setup_dsn["run"]
@@ -81,6 +104,26 @@ def test_postgres_ci_job_is_mandatory_isolated_and_repeated() -> None:
     assert "pg_stat_activity" in cleanup["run"]
     assert "default_transaction_read_only=on" in cleanup["run"]
     assert "DROP DATABASE" not in cleanup["run"].upper()
+
+
+@pytest.mark.parametrize("location", ["service", "setup", "cleanup"])
+@pytest.mark.parametrize("expression", ["${{ github.token }}", "${{ secrets.GITHUB_TOKEN }}"])
+def test_postgres_ci_password_guard_rejects_github_tokens(location: str, expression: str) -> None:
+    workflow = YAML(typ="safe").load(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+        Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    job = deepcopy(workflow["jobs"]["postgres-integration"])
+    steps = job["steps"]
+
+    if location == "service":
+        job["services"]["postgres"]["env"]["POSTGRES_PASSWORD"] = expression
+    else:
+        step_name = "Configure PostgreSQL test DSN" if location == "setup" else "Verify PostgreSQL test cleanup"
+        target_step = next(step for step in steps if step.get("name") == step_name)
+        target_step["env"]["POSTGRES_SUPERUSER_PASSWORD"] = expression
+
+    with pytest.raises(AssertionError):
+        _assert_postgres_passwords_are_test_only(job)
 
 
 @pytest.mark.parametrize(

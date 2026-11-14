@@ -114,7 +114,8 @@ jobs:
         image: postgres:17-alpine
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ${{ github.token }}
+          # Fixed ephemeral credential for this loopback-only test container; TEST ONLY, NOT DEPLOYMENT.
+          POSTGRES_PASSWORD: c26-ephemeral-postgres-test-only
           POSTGRES_DB: postgres
         ports:
           - 127.0.0.1:5432:5432
@@ -132,7 +133,8 @@ jobs:
       - run: mise run setup
       - name: Configure PostgreSQL test DSN
         env:
-          POSTGRES_SUPERUSER_PASSWORD: ${{ github.token }}
+          # Fixed ephemeral credential for this loopback-only test container; TEST ONLY, NOT DEPLOYMENT.
+          POSTGRES_SUPERUSER_PASSWORD: c26-ephemeral-postgres-test-only
         run: |
           uv run python - <<'PY'
           import os
@@ -176,7 +178,8 @@ jobs:
       - name: Verify PostgreSQL test cleanup
         if: ${{ always() }}
         env:
-          POSTGRES_SUPERUSER_PASSWORD: ${{ github.token }}
+          # Fixed ephemeral credential for this loopback-only test container; TEST ONLY, NOT DEPLOYMENT.
+          POSTGRES_SUPERUSER_PASSWORD: c26-ephemeral-postgres-test-only
         run: |
           uv run python - <<'PY'
           import os
