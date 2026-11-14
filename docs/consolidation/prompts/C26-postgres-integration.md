@@ -1,11 +1,11 @@
 # C26 — Add the Real PostgreSQL Integration Suite
 
-**Status: Stage A architecture proposed; C26 Stage B is NOT authorized.**
+**Status: Stage A/B implementation merged and verified; Stage C formal acceptance conditional/pending.** User-authorized [Stage A PR #97](https://github.com/parthmule28/conformdag/pull/97) and [Stage B PR #98](https://github.com/parthmule28/conformdag/pull/98) are merged. Stage B exact-merge-SHA [seven-job CI #43593019959](https://github.com/parthmule28/conformdag/actions/runs/43593019959) passed. This archived T0–T8 contract remains for traceability; the proposed Stage C documentation PR and its own user authorization/seven-job post-merge CI are still required before Issue #96 closes. C27 is NOT authorized.
 
-**Approved design candidate:** [C26 PostgreSQL architecture](../c26-postgres-architecture.md).
-**Canonical, exact PG01–PG11 acceptance and T0–T8 sequential contract:** [Issue #96](https://github.com/parthmule28/conformdag/issues/96). Issue #96 takes precedence over this backlog summary once Stage A is merged. OpenCode must not start implementation until ChatGPT completes Stage A and the user explicitly authorizes Stage B.
+**Approved architecture and Stage B evidence:** [C26 PostgreSQL architecture](../c26-postgres-architecture.md).
+**Canonical, exact PG01–PG11 acceptance and T0–T8 sequential contract:** [Issue #96](https://github.com/parthmule28/conformdag/issues/96). Issue #96 took precedence over this backlog summary after Stage A merged; ChatGPT completed Stage A and the user separately authorized Stage B before OpenCode implemented C26.
 
-## Implementer scope (after authorization only)
+## Implementer scope (historical Stage B contract, completed)
 
 OpenCode GPT-6.1 Sol orchestrates bounded GPT-6 Luna Max implementation/read-only review subagents; only one writer per worktree. **Implementation only:** new marked PostgreSQL tests and safe fixtures, necessary pytest/mise settings and dedicated CI service job, bounded fixes *only* for reproduced defects with a ChatGPT architecture decision. No OpenCode research, architecture, planning docs, issue/ADR updates, progress ledger, acceptance or merges. ChatGPT owns all of those.
 
@@ -38,8 +38,8 @@ OpenCode GPT-6.1 Sol orchestrates bounded GPT-6 Luna Max implementation/read-onl
 
 ## Blocking rules
 
-- No implementation before separately authorized Stage B.
+- Stage B implementation was begun only after separate explicit authorization; no additional implementation is authorized by this Stage C documentation PR.
 - No silent `pytest.skip` on broken PostgreSQL service; no shared database mutation, no leaked secrets/DSN.
 - No SQL compilation/mock/SQLite-only race tests as substitute for real Postgres; no `time.sleep` as correctness proof.
 - No changes to `FOR UPDATE SKIP LOCKED`, transition winner logic, migration owner, C25 caller-commit boundaries, output/fingerprint/HTTP schemas or retention policy without independent design approval.
-- Do not merge own PR or start C27; report reproducible implementation evidence to ChatGPT for independent review and formal Stage C acceptance.
+- OpenCode did not merge its own PR; ChatGPT independently reviewed, obtained exact-head user merge permission and verified post-merge CI. Do not start C27. Stage C acceptance and its separate docs merge remain ChatGPT/user controlled.
