@@ -68,6 +68,7 @@ artifacts = ["src/conformdag/platform/static/**"]
 addopts = ["--strict-markers", "--strict-config"]
 markers = [
     "runtime: requires a Dockerized Airflow runtime profile",
+    "postgres: requires a guarded disposable PostgreSQL 17 test service",
 ]
 testpaths = ["tests"]
 

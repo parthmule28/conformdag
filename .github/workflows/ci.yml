@@ -103,6 +103,113 @@ jobs:
         env:
           CONFORMDAG_RUNTIME_PROFILE: ${{ matrix.profile }}
 
+  postgres-integration:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ${{ github.token }}
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready --username=postgres --dbname=postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 5s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+      - run: mise run setup
+      - name: Configure PostgreSQL test DSN
+        env:
+          POSTGRES_SUPERUSER_PASSWORD: ${{ github.token }}
+        run: |
+          uv run python - <<'PY'
+          import os
+
+          import psycopg
+          from psycopg import sql
+          from sqlalchemy.engine import URL
+
+          username = "conformdag_c26_test"
+          password = os.environ["POSTGRES_SUPERUSER_PASSWORD"]
+          with psycopg.connect(
+              host="127.0.0.1",
+              port=5432,
+              dbname="postgres",
+              user="postgres",
+              password=password,
+              autocommit=True,
+          ) as connection:
+              connection.execute(
+                  sql.SQL("CREATE ROLE {} WITH LOGIN CREATEDB PASSWORD {}").format(
+                      sql.Identifier(username), sql.Literal(password)
+                  )
+              )
+
+          dsn = URL.create(
+              "postgresql+psycopg",
+              username=username,
+              password=password,
+              host="127.0.0.1",
+              port=5432,
+              database="postgres",
+          ).render_as_string(hide_password=False)
+          print(f"::add-mask::{dsn}", flush=True)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as github_env:
+              github_env.write(f"CONFORMDAG_TEST_POSTGRES_DSN={dsn}\n")
+          PY
+      - name: PostgreSQL integration suite (first run)
+        run: mise run test:postgres
+      - name: PostgreSQL integration suite (repeat run)
+        run: mise run test:postgres
+      - name: Verify PostgreSQL test cleanup
+        if: ${{ always() }}
+        env:
+          POSTGRES_SUPERUSER_PASSWORD: ${{ github.token }}
+        run: |
+          uv run python - <<'PY'
+          import os
+
+          import psycopg
+
+          prefix = "conformdag_c26_"
+          with psycopg.connect(
+              host="127.0.0.1",
+              port=5432,
+              dbname="postgres",
+              user="postgres",
+              password=os.environ["POSTGRES_SUPERUSER_PASSWORD"],
+              options="-c default_transaction_read_only=on -c statement_timeout=5000",
+          ) as connection:
+              database_count, backend_count = connection.execute(
+                  """
+                  SELECT
+                      (SELECT count(*) FROM pg_database WHERE left(datname, length(%s)) = %s),
+                      (SELECT count(*) FROM pg_stat_activity
+                       WHERE datname IS NOT NULL AND left(datname, length(%s)) = %s)
+                  """,
+                  (prefix, prefix, prefix, prefix),
+              ).fetchone()
+
+          if database_count or backend_count:
+              raise SystemExit(
+                  "PostgreSQL test cleanup left "
+                  f"{database_count} owned database(s) and {backend_count} backend(s)."
+              )
+          print("PostgreSQL test cleanup left zero owned databases and zero matching backends.")
+          PY
+
   semantic-smoke:
     name: Semantic provider smoke (opt-in)
     if: ${{ vars.CONFORMDAG_RUN_SEMANTIC_SMOKE == 'true' }}

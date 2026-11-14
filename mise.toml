@@ -34,11 +34,15 @@ run = "uv run pyright"
 
 [tasks.test]
 description = "Run fast tests"
-run = "uv run pytest -m 'not runtime'"
+run = "uv run pytest -m 'not runtime and not postgres'"
 
 [tasks."test:coverage"]
 description = "Run core tests with the 90 percent coverage gate"
-run = "uv run pytest -m 'not runtime' --cov=conformdag --cov-report=term-missing --cov-fail-under=90"
+run = "uv run pytest -m 'not runtime and not postgres' --cov=conformdag --cov-report=term-missing --cov-fail-under=90"
+
+[tasks."test:postgres"]
+description = "Run the explicit live PostgreSQL 17 integration suite"
+run = "uv run pytest -m postgres"
 
 [tasks."test:runtime"]
 description = "Run Docker/Airflow runtime tests"
