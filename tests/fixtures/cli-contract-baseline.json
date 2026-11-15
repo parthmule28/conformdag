@@ -1,0 +1,2903 @@
+{
+  "baseline": {
+    "commit": "036838b77dd0a1bec947fd8ecd7eb8906ee9f888",
+    "source": "src/conformdag/cli.py",
+    "source_sha256": "4f25708cc22d317b1afa50732ef5551fa6b18e35ab41bd0e4266459318c69636",
+    "captured_from": "unchanged baseline module before the C28 package move",
+    "help_prog_name": "conformdag",
+    "help_width": 88,
+    "help_color": false
+  },
+  "tree": {
+    "path": [],
+    "kind": "group",
+    "callback": null,
+    "help": null,
+    "short_help": null,
+    "hidden": false,
+    "deprecated": false,
+    "params": [],
+    "children": [
+      {
+        "path": [
+          "init"
+        ],
+        "kind": "command",
+        "callback": "init",
+        "help": "Create a safe starter configuration and policy-pack scaffold.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [
+          {
+            "kind": "option",
+            "name": "path",
+            "opts": [
+              "--path"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": ".",
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "force",
+            "opts": [
+              "--force"
+            ],
+            "secondary_opts": [
+              "--no-force"
+            ],
+            "required": false,
+            "default": false,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": true,
+            "is_bool_flag": true,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": true,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "BoolParamType",
+              "name": "boolean",
+              "settings": {}
+            }
+          }
+        ],
+        "children": []
+      },
+      {
+        "path": [
+          "doctor"
+        ],
+        "kind": "command",
+        "callback": "doctor",
+        "help": "Diagnose the local workspace: config, pack, registry, provenance, runtime.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [],
+        "children": []
+      },
+      {
+        "path": [
+          "validate-policies"
+        ],
+        "kind": "command",
+        "callback": "validate_policies",
+        "help": "Validate one policy pack and its local provenance sources.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [
+          {
+            "kind": "option",
+            "name": "path",
+            "opts": [
+              "--path"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          }
+        ],
+        "children": []
+      },
+      {
+        "path": [
+          "list-policies"
+        ],
+        "kind": "command",
+        "callback": "list_policies",
+        "help": "List policies in one validated policy pack.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [
+          {
+            "kind": "option",
+            "name": "path",
+            "opts": [
+              "--path"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          }
+        ],
+        "children": []
+      },
+      {
+        "path": [
+          "explain"
+        ],
+        "kind": "command",
+        "callback": "explain",
+        "help": "Backward-compatible alias for the machine-readable policy contract.",
+        "short_help": null,
+        "hidden": true,
+        "deprecated": false,
+        "params": [
+          {
+            "kind": "argument",
+            "name": "policy_id",
+            "opts": [
+              "policy_id"
+            ],
+            "secondary_opts": [],
+            "required": true,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": null,
+            "is_bool_flag": null,
+            "count": null,
+            "prompt": null,
+            "confirmation_prompt": null,
+            "prompt_required": null,
+            "hide_input": null,
+            "allow_from_autoenv": null,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "StringParamType",
+              "name": "str",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "path",
+            "opts": [
+              "--path"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          }
+        ],
+        "children": []
+      },
+      {
+        "path": [
+          "scan"
+        ],
+        "kind": "command",
+        "callback": "scan",
+        "help": "Analyze sources and render JSON, SARIF, HTML, or terminal output.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [
+          {
+            "kind": "option",
+            "name": "path",
+            "opts": [
+              "--path"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": ".",
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "policy_pack",
+            "opts": [
+              "--policy-pack"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "output",
+            "opts": [
+              "--output"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "format",
+            "opts": [
+              "--format"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": "json",
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "StringParamType",
+              "name": "str",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "no_evidence",
+            "opts": [
+              "--no-evidence"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": false,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Remove source evidence from rendered findings.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": true,
+            "is_bool_flag": true,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": true,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "BoolParamType",
+              "name": "boolean",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "preview_model_context",
+            "opts": [
+              "--preview-model-context"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": false,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Print the redacted semantic context without calling a provider.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": true,
+            "is_bool_flag": true,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": true,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "BoolParamType",
+              "name": "boolean",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "runtime",
+            "opts": [
+              "--runtime"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Enable the maintained published runtime profile (3.3.0).",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperChoice",
+              "name": "choice",
+              "settings": {
+                "choices": [
+                  "3.3.0"
+                ],
+                "case_sensitive": true
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "runtime_image",
+            "opts": [
+              "--runtime-image"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Enable an explicitly pinned custom runtime image.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "StringParamType",
+              "name": "str",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "semantic",
+            "opts": [
+              "--semantic"
+            ],
+            "secondary_opts": [
+              "--no-semantic"
+            ],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Enable or disable BYOK semantic evaluation (defaults to project configuration).",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": true,
+            "is_bool_flag": true,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": true,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "BoolParamType",
+              "name": "boolean",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "semantic_base_url",
+            "opts": [
+              "--semantic-base-url"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Override the configured OpenAI-compatible API base URL.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "StringParamType",
+              "name": "str",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "semantic_model",
+            "opts": [
+              "--semantic-model"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Override the exact configured semantic model ID.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "StringParamType",
+              "name": "str",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "semantic_structured_output",
+            "opts": [
+              "--semantic-structured-output"
+            ],
+            "secondary_opts": [
+              "--no-semantic-structured-output"
+            ],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Enable or disable provider-native strict JSON Schema output.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": true,
+            "is_bool_flag": true,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": true,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "BoolParamType",
+              "name": "boolean",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "baseline",
+            "opts": [
+              "--baseline"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Path to a baseline scan report JSON used by quality-gate rules.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          }
+        ],
+        "children": []
+      },
+      {
+        "path": [
+          "fix"
+        ],
+        "kind": "command",
+        "callback": "fix",
+        "help": "Propose deterministic fixes; print unified diffs and verify by re-scan.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [
+          {
+            "kind": "option",
+            "name": "path",
+            "opts": [
+              "--path"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": ".",
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "policy_pack",
+            "opts": [
+              "--policy-pack"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "apply",
+            "opts": [
+              "--apply"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": false,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Write verified patches to sources; without it nothing is written.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": true,
+            "is_bool_flag": true,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": true,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "BoolParamType",
+              "name": "boolean",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "max_iterations",
+            "opts": [
+              "--max-iterations"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": 3,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Bound on the patch-and-rescan verification loop.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "IntRange",
+              "name": "int range",
+              "settings": {
+                "min": 1,
+                "max": null,
+                "min_open": false,
+                "max_open": false,
+                "clamp": false
+              }
+            }
+          }
+        ],
+        "children": []
+      },
+      {
+        "path": [
+          "version"
+        ],
+        "kind": "command",
+        "callback": "version",
+        "help": "Show the installed ConformDAG version.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [],
+        "children": []
+      },
+      {
+        "path": [
+          "serve"
+        ],
+        "kind": "command",
+        "callback": "serve",
+        "help": "Serve the platform dashboard API on /api/v1.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [
+          {
+            "kind": "option",
+            "name": "host",
+            "opts": [
+              "--host"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": "127.0.0.1",
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Bind address for the dashboard API.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "StringParamType",
+              "name": "str",
+              "settings": {}
+            }
+          },
+          {
+            "kind": "option",
+            "name": "port",
+            "opts": [
+              "--port"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": 8642,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Bind port for the dashboard API.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "IntParamType",
+              "name": "int",
+              "settings": {}
+            }
+          }
+        ],
+        "children": []
+      },
+      {
+        "path": [
+          "worker"
+        ],
+        "kind": "command",
+        "callback": "worker_command",
+        "help": "Run the durable platform worker that executes queued scans.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [],
+        "children": []
+      },
+      {
+        "path": [
+          "benchmark"
+        ],
+        "kind": "command",
+        "callback": "benchmark",
+        "help": "Verify and run the local deterministic benchmark without provider or network access.",
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [
+          {
+            "kind": "argument",
+            "name": "path",
+            "opts": [
+              "path"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": "benchmarks/synthetic",
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": null,
+            "is_bool_flag": null,
+            "count": null,
+            "prompt": null,
+            "confirmation_prompt": null,
+            "prompt_required": null,
+            "hide_input": null,
+            "allow_from_autoenv": null,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "policy_pack",
+            "opts": [
+              "--policy-pack"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": "policies/pack.yaml",
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": null,
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "output",
+            "opts": [
+              "--output"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Write the JSON report to this path.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          },
+          {
+            "kind": "option",
+            "name": "technical_report",
+            "opts": [
+              "--technical-report"
+            ],
+            "secondary_opts": [],
+            "required": false,
+            "default": null,
+            "nargs": 1,
+            "multiple": false,
+            "metavar": null,
+            "envvar": null,
+            "expose_value": true,
+            "is_eager": false,
+            "help": "Write the human-readable Markdown report to this path.",
+            "hidden": false,
+            "show_default": true,
+            "show_choices": true,
+            "show_envvar": true,
+            "is_flag": false,
+            "is_bool_flag": false,
+            "count": false,
+            "prompt": null,
+            "confirmation_prompt": false,
+            "prompt_required": true,
+            "hide_input": false,
+            "allow_from_autoenv": true,
+            "rich_help_panel": null,
+            "_depr_flag_value": null,
+            "flag_value": null,
+            "deprecated": null,
+            "callback_name": null,
+            "custom_shell_complete_name": null,
+            "type": {
+              "class": "TyperPath",
+              "name": "path",
+              "settings": {
+                "exists": false,
+                "file_okay": true,
+                "dir_okay": true,
+                "readable": true,
+                "writable": false,
+                "resolve_path": false,
+                "allow_dash": false,
+                "type": null,
+                "name": "path"
+              }
+            }
+          }
+        ],
+        "children": []
+      },
+      {
+        "path": [
+          "policy"
+        ],
+        "kind": "group",
+        "callback": null,
+        "help": null,
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [],
+        "children": [
+          {
+            "path": [
+              "policy",
+              "show"
+            ],
+            "kind": "command",
+            "callback": "policy_show",
+            "help": "Show a concise human-readable summary of one policy.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "policy_id",
+                "opts": [
+                  "policy_id"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "path",
+                "opts": [
+                  "--path"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "TyperPath",
+                  "name": "path",
+                  "settings": {
+                    "exists": false,
+                    "file_okay": true,
+                    "dir_okay": true,
+                    "readable": true,
+                    "writable": false,
+                    "resolve_path": false,
+                    "allow_dash": false,
+                    "type": null,
+                    "name": "path"
+                  }
+                }
+              }
+            ],
+            "children": []
+          },
+          {
+            "path": [
+              "policy",
+              "review"
+            ],
+            "kind": "command",
+            "callback": "policy_review",
+            "help": "Review one policy's contract, provenance, enforcement, and exceptions.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "policy_id",
+                "opts": [
+                  "policy_id"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "path",
+                "opts": [
+                  "--path"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "TyperPath",
+                  "name": "path",
+                  "settings": {
+                    "exists": false,
+                    "file_okay": true,
+                    "dir_okay": true,
+                    "readable": true,
+                    "writable": false,
+                    "resolve_path": false,
+                    "allow_dash": false,
+                    "type": null,
+                    "name": "path"
+                  }
+                }
+              }
+            ],
+            "children": []
+          },
+          {
+            "path": [
+              "policy",
+              "explain"
+            ],
+            "kind": "command",
+            "callback": "policy_explain",
+            "help": "Emit the complete machine-readable JSON policy contract.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "policy_id",
+                "opts": [
+                  "policy_id"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "path",
+                "opts": [
+                  "--path"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "TyperPath",
+                  "name": "path",
+                  "settings": {
+                    "exists": false,
+                    "file_okay": true,
+                    "dir_okay": true,
+                    "readable": true,
+                    "writable": false,
+                    "resolve_path": false,
+                    "allow_dash": false,
+                    "type": null,
+                    "name": "path"
+                  }
+                }
+              }
+            ],
+            "children": []
+          },
+          {
+            "path": [
+              "policy",
+              "reference"
+            ],
+            "kind": "command",
+            "callback": "policy_reference",
+            "help": "Explain policy outcomes, exit codes, runtime, and report contracts.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "topic",
+                "opts": [
+                  "topic"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": "all",
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Reference topic: all, outcomes, exit-codes, runtime, or reports.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "format",
+                "opts": [
+                  "--format"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": "terminal",
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              }
+            ],
+            "children": []
+          },
+          {
+            "path": [
+              "policy",
+              "hash"
+            ],
+            "kind": "command",
+            "callback": "policy_hash",
+            "help": "Print the SHA-256 provenance hash of a standards document.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "document",
+                "opts": [
+                  "document"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              }
+            ],
+            "children": []
+          },
+          {
+            "path": [
+              "policy",
+              "new"
+            ],
+            "kind": "command",
+            "callback": "policy_new",
+            "help": "Print a valid policy block scaffold for a check kind.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "policy_id",
+                "opts": [
+                  "policy_id"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "kind",
+                "opts": [
+                  "--kind"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Check kind for the policy configuration.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "document",
+                "opts": [
+                  "--document"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": "standards/dag-authoring.md",
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Standards document for provenance.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              }
+            ],
+            "children": []
+          }
+        ]
+      },
+      {
+        "path": [
+          "agent"
+        ],
+        "kind": "group",
+        "callback": null,
+        "help": null,
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [],
+        "children": [
+          {
+            "path": [
+              "agent",
+              "run"
+            ],
+            "kind": "command",
+            "callback": "agent_run",
+            "help": "Fix findings deterministically, verify semantically, and optionally open a PR.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "option",
+                "name": "path",
+                "opts": [
+                  "--path"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": ".",
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "TyperPath",
+                  "name": "path",
+                  "settings": {
+                    "exists": false,
+                    "file_okay": true,
+                    "dir_okay": true,
+                    "readable": true,
+                    "writable": false,
+                    "resolve_path": false,
+                    "allow_dash": false,
+                    "type": null,
+                    "name": "path"
+                  }
+                }
+              },
+              {
+                "kind": "option",
+                "name": "policy_pack",
+                "opts": [
+                  "--policy-pack"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "TyperPath",
+                  "name": "path",
+                  "settings": {
+                    "exists": false,
+                    "file_okay": true,
+                    "dir_okay": true,
+                    "readable": true,
+                    "writable": false,
+                    "resolve_path": false,
+                    "allow_dash": false,
+                    "type": null,
+                    "name": "path"
+                  }
+                }
+              },
+              {
+                "kind": "option",
+                "name": "open_pr",
+                "opts": [
+                  "--open-pr"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": false,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Push a fix branch and open a PR under the agent identity.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": true,
+                "is_bool_flag": true,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": true,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "BoolParamType",
+                  "name": "boolean",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "no_verifier",
+                "opts": [
+                  "--no-verifier"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": false,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Skip the LLM semantic verifier (deterministic gates only).",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": true,
+                "is_bool_flag": true,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": true,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "BoolParamType",
+                  "name": "boolean",
+                  "settings": {}
+                }
+              }
+            ],
+            "children": []
+          },
+          {
+            "path": [
+              "agent",
+              "policy-review"
+            ],
+            "kind": "command",
+            "callback": "agent_policy_review",
+            "help": "Aggregate reports on disk and draft a policy-pack change proposal.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "reports",
+                "opts": [
+                  "reports"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": -1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Canonical report JSON paths to aggregate.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "TyperPath",
+                  "name": "path",
+                  "settings": {
+                    "exists": false,
+                    "file_okay": true,
+                    "dir_okay": true,
+                    "readable": true,
+                    "writable": false,
+                    "resolve_path": false,
+                    "allow_dash": false,
+                    "type": null,
+                    "name": "path"
+                  }
+                }
+              },
+              {
+                "kind": "option",
+                "name": "pack_id",
+                "opts": [
+                  "--pack-id"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": "org-pack",
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Pack label for the proposal.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "output",
+                "opts": [
+                  "--output"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "TyperPath",
+                  "name": "path",
+                  "settings": {
+                    "exists": false,
+                    "file_okay": true,
+                    "dir_okay": true,
+                    "readable": true,
+                    "writable": false,
+                    "resolve_path": false,
+                    "allow_dash": false,
+                    "type": null,
+                    "name": "path"
+                  }
+                }
+              },
+              {
+                "kind": "option",
+                "name": "format",
+                "opts": [
+                  "--format"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": "markdown",
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Proposal format: markdown or json.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              }
+            ],
+            "children": []
+          }
+        ]
+      },
+      {
+        "path": [
+          "baseline"
+        ],
+        "kind": "group",
+        "callback": null,
+        "help": null,
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [],
+        "children": [
+          {
+            "path": [
+              "baseline",
+              "set"
+            ],
+            "kind": "command",
+            "callback": "baseline_set",
+            "help": "Mark one platform scan as its repository's baseline.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "scan_id",
+                "opts": [
+                  "scan_id"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": null,
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              }
+            ],
+            "children": []
+          }
+        ]
+      },
+      {
+        "path": [
+          "pack"
+        ],
+        "kind": "group",
+        "callback": null,
+        "help": null,
+        "short_help": null,
+        "hidden": false,
+        "deprecated": false,
+        "params": [],
+        "children": [
+          {
+            "path": [
+              "pack",
+              "pull"
+            ],
+            "kind": "command",
+            "callback": "pack_pull",
+            "help": "Pull and validate a policy pack from git; record the resolved ref.",
+            "short_help": null,
+            "hidden": false,
+            "deprecated": false,
+            "params": [
+              {
+                "kind": "argument",
+                "name": "source",
+                "opts": [
+                  "source"
+                ],
+                "secondary_opts": [],
+                "required": true,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Git URL of a repository containing a policy pack.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": null,
+                "is_bool_flag": null,
+                "count": null,
+                "prompt": null,
+                "confirmation_prompt": null,
+                "prompt_required": null,
+                "hide_input": null,
+                "allow_from_autoenv": null,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "name",
+                "opts": [
+                  "--name"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Local cache name for the pulled pack.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "StringParamType",
+                  "name": "str",
+                  "settings": {}
+                }
+              },
+              {
+                "kind": "option",
+                "name": "cache_root",
+                "opts": [
+                  "--cache-root"
+                ],
+                "secondary_opts": [],
+                "required": false,
+                "default": null,
+                "nargs": 1,
+                "multiple": false,
+                "metavar": null,
+                "envvar": null,
+                "expose_value": true,
+                "is_eager": false,
+                "help": "Cache root; defaults to .conformdag/packs.",
+                "hidden": false,
+                "show_default": true,
+                "show_choices": true,
+                "show_envvar": true,
+                "is_flag": false,
+                "is_bool_flag": false,
+                "count": false,
+                "prompt": null,
+                "confirmation_prompt": false,
+                "prompt_required": true,
+                "hide_input": false,
+                "allow_from_autoenv": true,
+                "rich_help_panel": null,
+                "_depr_flag_value": null,
+                "flag_value": null,
+                "deprecated": null,
+                "callback_name": null,
+                "custom_shell_complete_name": null,
+                "type": {
+                  "class": "TyperPath",
+                  "name": "path",
+                  "settings": {
+                    "exists": false,
+                    "file_okay": true,
+                    "dir_okay": true,
+                    "readable": true,
+                    "writable": false,
+                    "resolve_path": false,
+                    "allow_dash": false,
+                    "type": null,
+                    "name": "path"
+                  }
+                }
+              }
+            ],
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "help": [
+    {
+      "path": [],
+      "output": "                                                                                        \n Usage: conformdag [OPTIONS] COMMAND [ARGS]...                                          \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Commands ───────────────────────────────────────────────────────────────────────────╮\n│ init               Create a safe starter configuration and policy-pack scaffold.     │\n│ doctor             Diagnose the local workspace: config, pack, registry, provenance, │\n│                    runtime.                                                          │\n│ validate-policies  Validate one policy pack and its local provenance sources.        │\n│ list-policies      List policies in one validated policy pack.                       │\n│ scan               Analyze sources and render JSON, SARIF, HTML, or terminal output. │\n│ fix                Propose deterministic fixes; print unified diffs and verify by    │\n│                    re-scan.                                                          │\n│ version            Show the installed ConformDAG version.                            │\n│ serve              Serve the platform dashboard API on /api/v1.                      │\n│ worker             Run the durable platform worker that executes queued scans.       │\n│ benchmark          Verify and run the local deterministic benchmark without provider │\n│                    or network access.                                                │\n│ policy                                                                               │\n│ agent                                                                                │\n│ baseline                                                                             │\n│ pack                                                                                 │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "init"
+      ],
+      "output": "                                                                                        \n Usage: conformdag init [OPTIONS]                                                       \n                                                                                        \n Create a safe starter configuration and policy-pack scaffold.                          \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path                   <path>  [default: .]                                        │\n│ --force    --no-force            [default: no-force]                                 │\n│ --help                           Show this message and exit.                         │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "doctor"
+      ],
+      "output": "                                                                                        \n Usage: conformdag doctor [OPTIONS]                                                     \n                                                                                        \n Diagnose the local workspace: config, pack, registry, provenance, runtime.             \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "validate-policies"
+      ],
+      "output": "                                                                                        \n Usage: conformdag validate-policies [OPTIONS]                                          \n                                                                                        \n Validate one policy pack and its local provenance sources.                             \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path        <path>                                                                 │\n│ --help                Show this message and exit.                                    │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "list-policies"
+      ],
+      "output": "                                                                                        \n Usage: conformdag list-policies [OPTIONS]                                              \n                                                                                        \n List policies in one validated policy pack.                                            \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path        <path>                                                                 │\n│ --help                Show this message and exit.                                    │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "explain"
+      ],
+      "output": "                                                                                        \n Usage: conformdag explain [OPTIONS] {policy_id}                                        \n                                                                                        \n Backward-compatible alias for the machine-readable policy contract.                    \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    policy_id      <str>  [required]                                                │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path        <path>                                                                 │\n│ --help                Show this message and exit.                                    │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "scan"
+      ],
+      "output": "                                                                                        \n Usage: conformdag scan [OPTIONS]                                                       \n                                                                                        \n Analyze sources and render JSON, SARIF, HTML, or terminal output.                      \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path                                              <path>   [default: .]            │\n│ --policy-pack                                       <path>                           │\n│ --output                                            <path>                           │\n│ --format                                            <str>    [default: json]         │\n│ --no-evidence                                                Remove source evidence  │\n│                                                              from rendered findings. │\n│ --preview-model-context                                      Print the redacted      │\n│                                                              semantic context        │\n│                                                              without calling a       │\n│                                                              provider.               │\n│ --runtime                                           <3.3.0>  Enable the maintained   │\n│                                                              published runtime       │\n│                                                              profile (3.3.0).        │\n│ --runtime-image                                     <str>    Enable an explicitly    │\n│                                                              pinned custom runtime   │\n│                                                              image.                  │\n│ --semantic                 --no-semantic                     Enable or disable BYOK  │\n│                                                              semantic evaluation     │\n│                                                              (defaults to project    │\n│                                                              configuration).         │\n│ --semantic-base-url                                 <str>    Override the configured │\n│                                                              OpenAI-compatible API   │\n│                                                              base URL.               │\n│ --semantic-model                                    <str>    Override the exact      │\n│                                                              configured semantic     │\n│                                                              model ID.               │\n│ --semantic-structured-…    --no-semantic-struct…             Enable or disable       │\n│                                                              provider-native strict  │\n│                                                              JSON Schema output.     │\n│ --baseline                                          <path>   Path to a baseline scan │\n│                                                              report JSON used by     │\n│                                                              quality-gate rules.     │\n│ --help                                                       Show this message and   │\n│                                                              exit.                   │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "fix"
+      ],
+      "output": "                                                                                        \n Usage: conformdag fix [OPTIONS]                                                        \n                                                                                        \n Propose deterministic fixes; print unified diffs and verify by re-scan.                \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path                  <path>              [default: .]                             │\n│ --policy-pack           <path>                                                       │\n│ --apply                                     Write verified patches to sources;       │\n│                                             without it nothing is written.           │\n│ --max-iterations        <int range> [x>=1]  Bound on the patch-and-rescan            │\n│                                             verification loop.                       │\n│                                             [default: 3]                             │\n│ --help                                      Show this message and exit.              │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "version"
+      ],
+      "output": "                                                                                        \n Usage: conformdag version [OPTIONS]                                                    \n                                                                                        \n Show the installed ConformDAG version.                                                 \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "serve"
+      ],
+      "output": "                                                                                        \n Usage: conformdag serve [OPTIONS]                                                      \n                                                                                        \n Serve the platform dashboard API on /api/v1.                                           \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --host        <str>  Bind address for the dashboard API. [default: 127.0.0.1]        │\n│ --port        <int>  Bind port for the dashboard API. [default: 8642]                │\n│ --help               Show this message and exit.                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "worker"
+      ],
+      "output": "                                                                                        \n Usage: conformdag worker [OPTIONS]                                                     \n                                                                                        \n Run the durable platform worker that executes queued scans.                            \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "benchmark"
+      ],
+      "output": "                                                                                        \n Usage: conformdag benchmark [OPTIONS] [path]                                           \n                                                                                        \n Verify and run the local deterministic benchmark without provider or network access.   \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│   path      <path>  [default: benchmarks/synthetic]                                  │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --policy-pack             <path>  [default: policies/pack.yaml]                      │\n│ --output                  <path>  Write the JSON report to this path.                │\n│ --technical-report        <path>  Write the human-readable Markdown report to this   │\n│                                   path.                                              │\n│ --help                            Show this message and exit.                        │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "policy"
+      ],
+      "output": "                                                                                        \n Usage: conformdag policy [OPTIONS] COMMAND [ARGS]...                                   \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Commands ───────────────────────────────────────────────────────────────────────────╮\n│ show       Show a concise human-readable summary of one policy.                      │\n│ review     Review one policy's contract, provenance, enforcement, and exceptions.    │\n│ explain    Emit the complete machine-readable JSON policy contract.                  │\n│ reference  Explain policy outcomes, exit codes, runtime, and report contracts.       │\n│ hash       Print the SHA-256 provenance hash of a standards document.                │\n│ new        Print a valid policy block scaffold for a check kind.                     │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "policy",
+        "show"
+      ],
+      "output": "                                                                                        \n Usage: conformdag policy show [OPTIONS] {policy_id}                                    \n                                                                                        \n Show a concise human-readable summary of one policy.                                   \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    policy_id      <str>  [required]                                                │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path        <path>                                                                 │\n│ --help                Show this message and exit.                                    │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "policy",
+        "review"
+      ],
+      "output": "                                                                                        \n Usage: conformdag policy review [OPTIONS] {policy_id}                                  \n                                                                                        \n Review one policy's contract, provenance, enforcement, and exceptions.                 \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    policy_id      <str>  [required]                                                │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path        <path>                                                                 │\n│ --help                Show this message and exit.                                    │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "policy",
+        "explain"
+      ],
+      "output": "                                                                                        \n Usage: conformdag policy explain [OPTIONS] {policy_id}                                 \n                                                                                        \n Emit the complete machine-readable JSON policy contract.                               \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    policy_id      <str>  [required]                                                │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path        <path>                                                                 │\n│ --help                Show this message and exit.                                    │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "policy",
+        "reference"
+      ],
+      "output": "                                                                                        \n Usage: conformdag policy reference [OPTIONS] [topic]                                   \n                                                                                        \n Explain policy outcomes, exit codes, runtime, and report contracts.                    \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│   topic      <str>  Reference topic: all, outcomes, exit-codes, runtime, or reports. │\n│                     [default: all]                                                   │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --format        <str>  [default: terminal]                                           │\n│ --help                 Show this message and exit.                                   │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "policy",
+        "hash"
+      ],
+      "output": "                                                                                        \n Usage: conformdag policy hash [OPTIONS] {document}                                     \n                                                                                        \n Print the SHA-256 provenance hash of a standards document.                             \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    document      <str>  [required]                                                 │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "policy",
+        "new"
+      ],
+      "output": "                                                                                        \n Usage: conformdag policy new [OPTIONS] {policy_id}                                     \n                                                                                        \n Print a valid policy block scaffold for a check kind.                                  \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    policy_id      <str>  [required]                                                │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ *  --kind            <str>  Check kind for the policy configuration. [required]      │\n│    --document        <str>  Standards document for provenance.                       │\n│                             [default: standards/dag-authoring.md]                    │\n│    --help                   Show this message and exit.                              │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "agent"
+      ],
+      "output": "                                                                                        \n Usage: conformdag agent [OPTIONS] COMMAND [ARGS]...                                    \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Commands ───────────────────────────────────────────────────────────────────────────╮\n│ run            Fix findings deterministically, verify semantically, and optionally   │\n│                open a PR.                                                            │\n│ policy-review  Aggregate reports on disk and draft a policy-pack change proposal.    │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "agent",
+        "run"
+      ],
+      "output": "                                                                                        \n Usage: conformdag agent run [OPTIONS]                                                  \n                                                                                        \n Fix findings deterministically, verify semantically, and optionally open a PR.         \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --path               <path>  [default: .]                                            │\n│ --policy-pack        <path>                                                          │\n│ --open-pr                    Push a fix branch and open a PR under the agent         │\n│                              identity.                                               │\n│ --no-verifier                Skip the LLM semantic verifier (deterministic gates     │\n│                              only).                                                  │\n│ --help                       Show this message and exit.                             │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "agent",
+        "policy-review"
+      ],
+      "output": "                                                                                        \n Usage: conformdag agent policy-review [OPTIONS] {reports}...                           \n                                                                                        \n Aggregate reports on disk and draft a policy-pack change proposal.                     \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    reports      <path>  Canonical report JSON paths to aggregate. [required]       │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --pack-id        <str>   Pack label for the proposal. [default: org-pack]            │\n│ --output         <path>                                                              │\n│ --format         <str>   Proposal format: markdown or json. [default: markdown]      │\n│ --help                   Show this message and exit.                                 │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "baseline"
+      ],
+      "output": "                                                                                        \n Usage: conformdag baseline [OPTIONS] COMMAND [ARGS]...                                 \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Commands ───────────────────────────────────────────────────────────────────────────╮\n│ set  Mark one platform scan as its repository's baseline.                            │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "baseline",
+        "set"
+      ],
+      "output": "                                                                                        \n Usage: conformdag baseline set [OPTIONS] {scan_id}                                     \n                                                                                        \n Mark one platform scan as its repository's baseline.                                   \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    scan_id      <str>  [required]                                                  │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "pack"
+      ],
+      "output": "                                                                                        \n Usage: conformdag pack [OPTIONS] COMMAND [ARGS]...                                     \n                                                                                        \n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --help          Show this message and exit.                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Commands ───────────────────────────────────────────────────────────────────────────╮\n│ pull  Pull and validate a policy pack from git; record the resolved ref.             │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    },
+    {
+      "path": [
+        "pack",
+        "pull"
+      ],
+      "output": "                                                                                        \n Usage: conformdag pack pull [OPTIONS] {source}                                         \n                                                                                        \n Pull and validate a policy pack from git; record the resolved ref.                     \n                                                                                        \n╭─ Arguments ──────────────────────────────────────────────────────────────────────────╮\n│ *    source      <str>  Git URL of a repository containing a policy pack. [required] │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n╭─ Options ────────────────────────────────────────────────────────────────────────────╮\n│ --name              <str>   Local cache name for the pulled pack.                    │\n│ --cache-root        <path>  Cache root; defaults to .conformdag/packs.               │\n│ --help                      Show this message and exit.                              │\n╰──────────────────────────────────────────────────────────────────────────────────────╯\n\n"
+    }
+  ]
+}
