@@ -46,12 +46,14 @@ from conformdag.runtime import RuntimePhaseError
 from conformdag.scan import SemanticProvider
 
 
-def _missing_binary(_command: str) -> None:
-    return None
+def _recording_which(result: str | None) -> tuple[Callable[[str], str | None], list[str]]:
+    calls: list[str] = []
 
+    def which(command: str) -> str | None:
+        calls.append(command)
+        return result
 
-def _docker_binary(_command: str) -> str:
-    return "/usr/bin/docker"
+    return which, calls
 
 
 def test_init_writes_quoted_scan_globs(tmp_path: Path) -> None:
@@ -89,18 +91,21 @@ def test_policy_new_rejects_non_executable_catalogue_kind(kind: str) -> None:
 
 
 def test_policy_configuration_delegates_to_catalogue(monkeypatch: pytest.MonkeyPatch) -> None:
-    import conformdag.cli as cli_module
+    import conformdag.cli.policy as cli_policy
 
     expected = {"kind": "required-owner", "allowed_values": ["catalogue"]}
+    calls: list[str] = []
 
     def fake_check_spec(kind: str) -> SimpleNamespace:
+        calls.append(kind)
         assert kind == "effective-owner"
         return SimpleNamespace(evaluator=object(), scaffold_factory=lambda: expected.copy())
 
-    monkeypatch.setattr(cli_module, "check_spec", fake_check_spec)
-    policy_configuration = cast(Callable[[str], dict[str, object]], cli_module.__dict__["_policy_configuration"])
+    monkeypatch.setattr(cli_policy, "check_spec", fake_check_spec)
+    policy_configuration = cast(Callable[[str], dict[str, object]], cli_policy.__dict__["_policy_configuration"])
 
     assert policy_configuration("effective-owner") == expected
+    assert calls == ["effective-owner"]
 
 
 def test_policy_new_scaffolds_valid_policy_for_every_registered_kind(
@@ -150,10 +155,12 @@ def test_doctor_reports_healthy_tmp_repo(tmp_path: Path, monkeypatch: pytest.Mon
     assert CliRunner().invoke(app, ["init", "--path", str(tmp_path)]).exit_code == 0
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CONFORMDAG_PLATFORM_DSN", raising=False)
-    monkeypatch.setattr("conformdag.cli.shutil.which", _missing_binary)
+    which, which_calls = _recording_which(None)
+    monkeypatch.setattr("conformdag.cli.utility.shutil.which", which)
 
     result = CliRunner().invoke(app, ["doctor"])
 
+    assert which_calls == ["docker"]
     assert result.exit_code == 0
     assert "config" in result.stdout
     assert "pack" in result.stdout
@@ -164,10 +171,12 @@ def test_doctor_reports_platform_dsn_reachability(tmp_path: Path, monkeypatch: p
     assert CliRunner().invoke(app, ["init", "--path", str(tmp_path)]).exit_code == 0
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", f"sqlite:///{tmp_path / 'platform.db'}")
-    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+    which, which_calls = _recording_which("/usr/bin/docker")
+    monkeypatch.setattr("conformdag.cli.utility.shutil.which", which)
 
     result = CliRunner().invoke(app, ["doctor"])
 
+    assert which_calls == ["docker"]
     assert result.exit_code == 0
     assert "platform-dsn" in result.stdout
     assert "reachable" in result.stdout
@@ -189,10 +198,12 @@ def test_doctor_uses_configured_policy_pack(tmp_path: Path, monkeypatch: pytest.
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CONFORMDAG_PLATFORM_DSN", raising=False)
-    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+    which, which_calls = _recording_which("/usr/bin/docker")
+    monkeypatch.setattr("conformdag.cli.utility.shutil.which", which)
 
     result = CliRunner().invoke(app, ["doctor"])
 
+    assert which_calls == ["docker"]
     assert result.exit_code == 0
     assert "PASS pack: configured 1" in result.stdout
 
@@ -200,10 +211,12 @@ def test_doctor_uses_configured_policy_pack(tmp_path: Path, monkeypatch: pytest.
 def test_doctor_accepts_the_real_org_pack(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
     monkeypatch.delenv("CONFORMDAG_PLATFORM_DSN", raising=False)
-    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+    which, which_calls = _recording_which("/usr/bin/docker")
+    monkeypatch.setattr("conformdag.cli.utility.shutil.which", which)
 
     result = CliRunner().invoke(app, ["doctor"])
 
+    assert which_calls == ["docker"]
     assert result.exit_code == 0, result.stderr
     assert "PASS pack: conformdag-default" in result.stdout
 
@@ -250,10 +263,12 @@ def test_doctor_reports_unknown_hybrid_deterministic_check(tmp_path: Path, monke
     (tmp_path / "conformdag.yaml").write_text('config_version: "1"\n', encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CONFORMDAG_PLATFORM_DSN", raising=False)
-    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+    which, which_calls = _recording_which("/usr/bin/docker")
+    monkeypatch.setattr("conformdag.cli.utility.shutil.which", which)
 
     result = CliRunner().invoke(app, ["doctor"])
 
+    assert which_calls == ["docker"]
     assert result.exit_code == 1
     assert "unknown deterministic check 'unknown-hybrid'" in result.stdout
 
@@ -283,10 +298,12 @@ def test_doctor_fails_when_configured_platform_dsn_is_unreachable(
     assert CliRunner().invoke(app, ["init", "--path", str(tmp_path)]).exit_code == 0
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CONFORMDAG_PLATFORM_DSN", "postgresql://invalid-host.invalid/conformdag")
-    monkeypatch.setattr("conformdag.cli.shutil.which", _docker_binary)
+    which, which_calls = _recording_which("/usr/bin/docker")
+    monkeypatch.setattr("conformdag.cli.utility.shutil.which", which)
 
     result = CliRunner().invoke(app, ["doctor"])
 
+    assert which_calls == ["docker"]
     assert result.exit_code == 1
     assert "FAIL platform-dsn" in result.stdout
 
@@ -503,15 +520,24 @@ def test_preview_model_context_is_local_and_provider_free() -> None:
 
 def test_runtime_profile_is_explicitly_selectable() -> None:
     digest = "ghcr.io/example/conformdag@sha256:" + "a" * 64
-    with patch(
-        "conformdag.cli.execute_runtime",
-        return_value=(
-            [RuntimeObservation(status=FindingStatus.PASS, policy_id="AIR-DET-001")],
-            digest,
-        ),
-    ):
+    runtime_calls: list[tuple[Path, ProjectRuntimeConfig]] = []
+
+    def fake_runtime(
+        root: Path,
+        config: ProjectRuntimeConfig,
+        _policy_ids: list[str],
+        _include: list[str],
+        _exclude: list[str],
+    ) -> tuple[list[RuntimeObservation], str]:
+        runtime_calls.append((root, config))
+        return [RuntimeObservation(status=FindingStatus.PASS, policy_id="AIR-DET-001")], digest
+
+    with patch("conformdag.cli.scan.execute_runtime", fake_runtime):
         result = CliRunner().invoke(app, ["scan", "--path", ".", "--runtime", "3.3.0"])
 
+    assert len(runtime_calls) == 1
+    assert runtime_calls[0][0] == Path(".").resolve()
+    assert runtime_calls[0][1].airflow_version is AirflowProfile.AIRFLOW_3_3_0
     assert result.exit_code == 0
     assert "scan complete:" in result.stderr
     assert json.loads(result.stdout)["run"]["runtime_image_digest"] == digest
@@ -536,12 +562,16 @@ def test_runtime_profile_and_custom_image_are_mutually_exclusive() -> None:
 
 
 def test_runtime_execution_failure_is_a_structured_incomplete_report() -> None:
-    with patch(
-        "conformdag.cli.execute_runtime",
-        side_effect=RuntimePhaseError("Docker daemon is unavailable"),
-    ):
+    runtime_calls: list[bool] = []
+
+    def fail_runtime(*_args: object, **_kwargs: object) -> NoReturn:
+        runtime_calls.append(True)
+        raise RuntimePhaseError("Docker daemon is unavailable")
+
+    with patch("conformdag.cli.scan.execute_runtime", fail_runtime):
         result = CliRunner().invoke(app, ["scan", "--path", ".", "--runtime", "3.3.0"])
 
+    assert runtime_calls == [True]
     assert result.exit_code == 3
     payload = json.loads(result.stdout)
     assert payload["complete"] is False
@@ -973,15 +1003,18 @@ def test_scan_maps_report_outcome_without_changing_json(
     report = source.model_copy(
         update={"findings": [source.findings[0].model_copy(update={"status": FindingStatus.FAIL})], **changes}
     )
+    service_calls: list[bool] = []
 
     def execute_service(*_args: object, **_kwargs: object) -> ScanExecutionResult:
+        service_calls.append(True)
         return ScanExecutionResult(report=report, gate_result=report.gate_result)
 
-    monkeypatch.setattr("conformdag.cli.execute_scan", execute_service)
+    monkeypatch.setattr("conformdag.cli.scan.execute_scan", execute_service)
     result = CliRunner().invoke(
         app, ["scan", "--path", str(root), "--policy-pack", str(root / "pack.yaml"), "--format", "json"]
     )
 
+    assert service_calls == [True]
     assert result.exit_code == expected_exit, result.stderr
     payload = json.loads(result.stdout)
     assert "outcome" not in payload
@@ -1036,7 +1069,7 @@ def test_scan_delegates_to_application_service_with_adapter_inputs(
         )
         return ScanExecutionResult(report=service_report, gate_result=None)
 
-    monkeypatch.setattr("conformdag.cli.execute_scan", execute_service, raising=False)
+    monkeypatch.setattr("conformdag.cli.scan.execute_scan", execute_service)
 
     def fake_runtime(
         root: Path,
@@ -1048,7 +1081,7 @@ def test_scan_delegates_to_application_service_with_adapter_inputs(
         return [RuntimeObservation(status=FindingStatus.PASS, policy_id="AIR-TST-001")], "sha256:test"
 
     if runtime_enabled:
-        monkeypatch.setattr("conformdag.cli.execute_runtime", fake_runtime)
+        monkeypatch.setattr("conformdag.cli.scan.execute_runtime", fake_runtime)
 
     result = CliRunner().invoke(
         app,
@@ -1089,7 +1122,7 @@ def test_runtime_image_clears_project_profile_for_core_scan(
 ) -> None:
     """C07 intentionally corrects C06: an invocation image clears the project profile."""
     import conformdag.application.scan as application_scan
-    import conformdag.cli as cli_module
+    import conformdag.cli.scan as cli_scan
 
     root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
     _write_yaml(
@@ -1098,6 +1131,7 @@ def test_runtime_image_clears_project_profile_for_core_scan(
     )
     image = "ghcr.io/example/conformdag@sha256:" + "a" * 64
     core_profiles: list[object] = []
+    runtime_calls: list[tuple[Path, ProjectRuntimeConfig]] = []
 
     def scan_core(*args: object, **kwargs: object) -> ScanReport:
         core_profiles.append(kwargs["airflow_profile"])
@@ -1110,12 +1144,13 @@ def test_runtime_image_clears_project_profile_for_core_scan(
         include: list[str],
         exclude: list[str],
     ) -> tuple[list[RuntimeObservation], str]:
+        runtime_calls.append((root, config))
         assert config.image == image
         assert config.airflow_version is None
         return [RuntimeObservation(status=FindingStatus.PASS, policy_id="AIR-TST-001")], image
 
     monkeypatch.setattr(application_scan, "scan_repository", scan_core)
-    monkeypatch.setattr(cli_module, "execute_runtime", fake_runtime)
+    monkeypatch.setattr(cli_scan, "execute_runtime", fake_runtime)
 
     result = CliRunner().invoke(
         app,
@@ -1133,6 +1168,7 @@ def test_runtime_image_clears_project_profile_for_core_scan(
     )
 
     assert result.exit_code == 0, result.stderr
+    assert len(runtime_calls) == 1
     assert core_profiles == [None]
 
 
@@ -1140,7 +1176,7 @@ def test_scan_resolves_once_with_invocation_relative_pack_and_selector_overrides
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import conformdag.cli as cli_module
+    import conformdag.cli.scan as cli_scan
 
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -1183,8 +1219,8 @@ def test_scan_resolves_once_with_invocation_relative_pack_and_selector_overrides
         execution_configurations.append(configuration)
         return ScanExecutionResult(report=_application_report(), gate_result=None)
 
-    monkeypatch.setattr(cli_module, "resolve_effective_configuration", resolver_spy, raising=False)
-    monkeypatch.setattr(cli_module, "execute_scan", execute_service)
+    monkeypatch.setattr(cli_scan, "resolve_effective_configuration", resolver_spy)
+    monkeypatch.setattr(cli_scan, "execute_scan", execute_service)
 
     result = CliRunner().invoke(
         app,
@@ -1228,7 +1264,7 @@ def test_scan_semantic_adapter_uses_effective_values_and_api_key_at_adapter_boun
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import conformdag.cli as cli_module
+    import conformdag.cli.scan as cli_scan
 
     root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
     _write_yaml(
@@ -1246,6 +1282,8 @@ def test_scan_semantic_adapter_uses_effective_values_and_api_key_at_adapter_boun
     )
     monkeypatch.setenv("C07_TEST_MODEL_KEY", "secret-c07-key")
     provider_inputs: list[tuple[str, str, str, bool]] = []
+    cached_provider_calls: list[bool] = []
+    cache_paths: list[Path] = []
     configurations: list[EffectiveScanConfiguration] = []
 
     class DirectProvider:
@@ -1261,9 +1299,10 @@ def test_scan_semantic_adapter_uses_effective_values_and_api_key_at_adapter_boun
 
     class CachedProvider:
         def __init__(self, *args: object, **kwargs: object) -> None:
-            pass
+            cached_provider_calls.append(True)
 
-    def fake_cache(_path: Path) -> object:
+    def fake_cache(path: Path) -> object:
+        cache_paths.append(path)
         return object()
 
     def execute_service(
@@ -1280,10 +1319,10 @@ def test_scan_semantic_adapter_uses_effective_values_and_api_key_at_adapter_boun
         assert semantic_provider_name == "invoke.example"
         return ScanExecutionResult(report=_application_report(), gate_result=None)
 
-    monkeypatch.setattr(cli_module, "OpenAICompatibleProvider", DirectProvider)
-    monkeypatch.setattr(cli_module, "CachedSemanticProvider", CachedProvider)
-    monkeypatch.setattr(cli_module, "SemanticCache", fake_cache)
-    monkeypatch.setattr(cli_module, "execute_scan", execute_service)
+    monkeypatch.setattr(cli_scan, "OpenAICompatibleProvider", DirectProvider)
+    monkeypatch.setattr(cli_scan, "CachedSemanticProvider", CachedProvider)
+    monkeypatch.setattr(cli_scan, "SemanticCache", fake_cache)
+    monkeypatch.setattr(cli_scan, "execute_scan", execute_service)
 
     result = CliRunner().invoke(
         app,
@@ -1304,6 +1343,8 @@ def test_scan_semantic_adapter_uses_effective_values_and_api_key_at_adapter_boun
 
     assert result.exit_code == 0, result.stderr
     assert provider_inputs == [("https://invoke.example/v1", "invoke-model", "secret-c07-key", False)]
+    assert cached_provider_calls == [True]
+    assert cache_paths == [root / ".conformdag" / "semantic-cache.json"]
     assert len(configurations) == 1
     configuration = configurations[0]
     assert configuration.semantic.enabled is True
@@ -1317,7 +1358,7 @@ def test_scan_no_semantic_keeps_project_profile_inert_and_builds_no_phase_adapte
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import conformdag.cli as cli_module
+    import conformdag.cli.scan as cli_scan
 
     root = _write_gate_repo(tmp_path, with_gate=False, owner="platform")
     _write_yaml(
@@ -1347,10 +1388,10 @@ def test_scan_no_semantic_keeps_project_profile_inert_and_builds_no_phase_adapte
         assert runtime_executor is None
         return ScanExecutionResult(report=_application_report(), gate_result=None)
 
-    monkeypatch.setattr(cli_module, "OpenAICompatibleProvider", unexpected_adapter)
-    monkeypatch.setattr(cli_module, "CachedSemanticProvider", unexpected_adapter)
-    monkeypatch.setattr(cli_module, "_CliRuntimeExecutor", unexpected_adapter)
-    monkeypatch.setattr(cli_module, "execute_scan", execute_service)
+    monkeypatch.setattr(cli_scan, "OpenAICompatibleProvider", unexpected_adapter)
+    monkeypatch.setattr(cli_scan, "CachedSemanticProvider", unexpected_adapter)
+    monkeypatch.setattr(cli_scan, "_CliRuntimeExecutor", unexpected_adapter)
+    monkeypatch.setattr(cli_scan, "execute_scan", execute_service)
 
     result = CliRunner().invoke(
         app,
@@ -1416,7 +1457,7 @@ def test_scan_no_evidence_does_not_mutate_application_report_or_fingerprint(
         calls.append(options)
         return ScanExecutionResult(report=service_report, gate_result=None)
 
-    monkeypatch.setattr("conformdag.cli.execute_scan", execute_service, raising=False)
+    monkeypatch.setattr("conformdag.cli.scan.execute_scan", execute_service)
 
     result = CliRunner().invoke(
         app,
