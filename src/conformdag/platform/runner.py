@@ -148,6 +148,7 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
         ):
             print(f"scan {scan_id} is not claimable for execution", file=sys.stderr)
             return 2
+        attempt = scan.attempts
         repository = session.get(RepositoryRow, scan.repository_id)
         if repository is None:
             transition_running_scan(
@@ -160,7 +161,7 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
             return 2
         repository_root = Path(repository.path)
         try:
-            logger.info("scan_started", extra={"scan_id": scan_id})
+            logger.info("scan_started", extra={"scan_id": scan_id, "attempt": attempt})
             airflow_profile = coerce_platform_airflow_profile(repository.airflow_profile)
             effective = resolve_effective_configuration(
                 repository_root,
@@ -180,12 +181,12 @@ def execute_scan(scan_id: str, dsn: str, claim_attempt: int | None = None) -> in
             )
         except PERSISTENT_FAILURES as exc:
             error = redact_credentials(str(exc))
-            logger.info("scan_completed", extra={"scan_id": scan_id, "error": error})
+            logger.info("scan_completed", extra={"scan_id": scan_id, "attempt": attempt, "error": error})
             if not transition_running_scan(session, scan_id, ScanStatus.FAILED, error, expected_attempt=claim_attempt):
                 print(f"scan {scan_id} was cancelled during execution", file=sys.stderr)
                 return 0
             return 1
-        logger.info("scan_completed", extra={"scan_id": scan_id})
+        logger.info("scan_completed", extra={"scan_id": scan_id, "attempt": attempt})
         report = result.report
         if classify_report(report) is ExecutionOutcome.INCOMPLETE:
             if _was_cancelled(session, scan_id):
