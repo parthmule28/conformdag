@@ -7,6 +7,7 @@ import logging
 import os
 import signal
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -2963,8 +2964,22 @@ def test_worker_does_not_put_dsn_in_runner_argv(
         execute_claimed_scan(factory(platform_env), platform_env, "scan1", settings(), claim_attempt=0)
         == worker_module.RunnerOutcome()
     )
+    assert captured["arguments"] == [
+        sys.executable,
+        "-m",
+        "conformdag.platform.runner",
+        "--scan-id",
+        "scan1",
+        "--claim-attempt",
+        "0",
+    ]
+    assert captured["stdout"] is subprocess.PIPE
+    assert captured["stderr"] is subprocess.PIPE
+    assert captured["text"] is True
+    assert captured.get("shell", False) is False
+    assert set(captured) == {"arguments", "stdout", "stderr", "text", "env"}
     assert "--dsn" not in captured["arguments"]
-    assert captured["arguments"][-2:] == ["--claim-attempt", "0"]
+    assert platform_env not in captured["arguments"]
     assert captured["env"]["CONFORMDAG_PLATFORM_DSN"] == platform_env
 
 

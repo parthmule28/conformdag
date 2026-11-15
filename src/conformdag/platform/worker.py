@@ -213,7 +213,7 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
         scan_id = scan.id
         claim_attempt = scan.attempts
         session.commit()
-    logger.info("scan_claimed", extra={"scan_id": scan_id})
+    logger.info("scan_claimed", extra={"scan_id": scan_id, "attempt": claim_attempt})
 
     outcome = execute_claimed_scan(session_factory, dsn, scan_id, settings, claim_attempt)
     error = redact_credentials(outcome.error) if outcome.error else None
@@ -242,7 +242,7 @@ def run_worker_once(session_factory: sessionmaker[Session], dsn: str, settings: 
                     _apply_retention(session, final.repository_id, settings)
             else:
                 _apply_retention(session, final.repository_id, settings)
-    finished_extra: dict[str, object] = {"scan_id": scan_id}
+    finished_extra: dict[str, object] = {"scan_id": scan_id, "attempt": claim_attempt}
     if error:
         finished_extra["error"] = error
     if outcome.cancelled:
