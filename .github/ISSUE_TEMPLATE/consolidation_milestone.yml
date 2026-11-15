@@ -1,0 +1,104 @@
+name: "Consolidation milestone"
+description: "Canonical issue for one C-series milestone; architecture and acceptance remain issue-first."
+title: "C?? — "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ChatGPT owns architecture, specification, review and formal acceptance.
+        OpenCode owns implementation and tests only after separate explicit Stage B authorization.
+        Creating or updating an issue does NOT authorize implementation or PR merges.
+        Retain one canonical issue and one unmerged implementation PR per milestone.
+        Link the PR with Refs #N, not Closes/Fixes/Resolves #N.
+  - type: input
+    id: milestone
+    attributes:
+      label: Milestone ID and title
+      description: "Use a unique ID such as C28."
+      placeholder: "C28 — outcome"
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Problem, outcome and scope
+      description: "State the evidence-led problem, intended outcome and measurable completion."
+      placeholder: "Current problem; success criteria; explicitly included work"
+    validations:
+      required: true
+  - type: textarea
+    id: baseline
+    attributes:
+      label: Accepted baseline and evidence
+      description: "Exact main SHA, preceding accepted milestone, CI run URLs and known caveats."
+      placeholder: "main@SHA; accepted issue/PR; exact-SHA CI evidence"
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Source-audited ownership and boundaries
+      description: "Files/symbols, callers, dependency direction, existing test seams and invariants."
+      placeholder: "Current owner -> approved owner; unchanged owners; relevant tests"
+    validations:
+      required: true
+  - type: textarea
+    id: interfaces
+    attributes:
+      label: Fixed interfaces and compatibility constraints
+      description: "API, CLI, state, database, schema, security, transaction and behavior contracts to preserve."
+      placeholder: "Public interfaces and invariants; versioning constraints"
+    validations:
+      required: true
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Explicit non-goals
+      description: "Work that must not be pulled into this milestone."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Numbered acceptance matrix
+      description: "Testable criteria with identifiers and the evidence expected for each criterion."
+      placeholder: "XX01 — assertion; expected test or CI evidence"
+    validations:
+      required: true
+  - type: textarea
+    id: sequence
+    attributes:
+      label: Sequential implementation and TDD handoff
+      description: "T0 preflight, RED/GREEN sequence, integration, audits, full gates and PR handback; shorten only if justified."
+      placeholder: "T0 ... T8; one active writer per worktree"
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risks, stop conditions and rejected alternatives
+      description: "When OpenCode must stop and return for an architecture decision."
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and external gates
+      description: "Preceding accepted milestones, Postgres/runtime needs, security and 7-job CI requirements."
+    validations:
+      required: true
+  - type: input
+    id: stage-b
+    attributes:
+      label: Stage B authorization
+      description: "Leave PENDING until separately authorized in an explicit user comment. Editing this field does not grant authorization."
+      value: "PENDING — implementation NOT AUTHORIZED"
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Governance acknowledgment
+      options:
+        - label: "Issue creation does not authorize OpenCode implementation or any PR merge."
+          required: true
