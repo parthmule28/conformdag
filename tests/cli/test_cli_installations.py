@@ -10,6 +10,7 @@ import sys
 import tarfile
 import tomllib
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -209,10 +210,12 @@ def test_isolated_install_exposes_the_cli_contract_and_console_script(
             "PYTHONUTF8": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONNOUSERSITE": "1",
-            "TERM": "dumb",
+            "TERM": "xterm",
         }
     )
 
+    contract_helpers = runpy.run_path(str(CONTRACT_TEST_PATH))
+    normalize_help = cast(Callable[[str], str], contract_helpers["_normalize_help_output"])
     expected_help = _baseline_help()
     help_routes = ((), ("policy",), ("agent",), ("baseline",), ("pack",))
     for route in help_routes:
@@ -224,7 +227,7 @@ def test_isolated_install_exposes_the_cli_contract_and_console_script(
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert result.stderr == ""
-        assert result.stdout.replace("\r\n", "\n").replace("\r", "\n") == expected_help[route]
+        assert normalize_help(result.stdout) == expected_help[route]
 
     project = cast(dict[str, object], tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")))
     project_metadata = cast(dict[str, object], project["project"])
@@ -245,7 +248,6 @@ def test_isolated_install_exposes_the_cli_contract_and_console_script(
     reference_payload = json.loads(reference.stdout)
     assert isinstance(reference_payload, dict) and "outcomes" in reference_payload
 
-    contract_helpers = runpy.run_path(str(CONTRACT_TEST_PATH))
     guard_script = cast(str, contract_helpers["SIDE_EFFECT_GUARD_SCRIPT"])
     guarded_environment = console_environment.copy()
     guarded_environment["CONFORMDAG_EXPECTED_INSTALL_ROOT"] = str(venv_dir)
@@ -260,4 +262,4 @@ def test_isolated_install_exposes_the_cli_contract_and_console_script(
     )
     assert guarded.returncode == 0, guarded.stdout + guarded.stderr
     assert guarded.stderr == ""
-    assert "Usage: conformdag" in guarded.stdout
+    assert "Usage: conformdag" in normalize_help(guarded.stdout)

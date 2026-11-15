@@ -6,6 +6,7 @@ import importlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from enum import Enum
@@ -315,6 +316,11 @@ def _command_snapshot(command_value: object, path: tuple[str, ...] = ()) -> dict
     return node
 
 
+def _normalize_help_output(output: str) -> str:
+    """Remove SGR styling only; retain visible text, spacing and cursor controls."""
+    return re.sub(r"\x1b\[[0-9;:]*m", "", output).replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _help_snapshot(command_value: object, path: tuple[str, ...] = ()) -> list[dict[str, object]]:
     command = cast(TyperCommand | TyperGroup, command_value)
     runner = CliRunner()
@@ -324,14 +330,14 @@ def _help_snapshot(command_value: object, path: tuple[str, ...] = ()) -> list[di
         prog_name=PROG_NAME,
         terminal_width=HELP_WIDTH,
         color=False,
-        env={"COLUMNS": str(HELP_WIDTH), "NO_COLOR": "1", "PYTHONUTF8": "1"},
+        env={"COLUMNS": str(HELP_WIDTH), "NO_COLOR": "1", "PYTHONUTF8": "1", "TERM": "xterm"},
     )
     assert result.exit_code == 0, result.stderr
     assert result.stderr == ""
     entries: list[dict[str, object]] = [
         {
             "path": list(path),
-            "output": result.stdout.replace("\r\n", "\n").replace("\r", "\n"),
+            "output": _normalize_help_output(result.stdout),
         }
     ]
     if isinstance(command, TyperGroup):
@@ -425,6 +431,13 @@ def test_normalized_help_for_every_command_and_group_matches_baseline() -> None:
     assert actual["help"] == fixture["help"]
 
 
+def test_help_normalization_preserves_visible_text_and_spacing() -> None:
+    output = "\x1b[1mUsage:\x1b[0m conformdag  \r\n  --help   Show help.\r\n"
+    assert _normalize_help_output(output) == "Usage: conformdag  \n  --help   Show help.\n"
+    cursor_controls = "\x1b[2J\x1b[1GUsage: conformdag\n"
+    assert _normalize_help_output(cursor_controls) == cursor_controls
+
+
 def test_cli_is_one_package_with_the_canonical_app_module() -> None:
     spec = importlib.util.find_spec("conformdag.cli")
     assert spec is not None
@@ -457,6 +470,8 @@ def test_package_import_and_root_help_are_side_effect_free() -> None:
         if not key.startswith("COV_CORE_") and key != "COVERAGE_PROCESS_START"
     }
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["COLUMNS"] = str(HELP_WIDTH)
+    environment["TERM"] = "xterm"
     environment["PYTHONPATH"] = os.pathsep.join(
         filter(None, (str(REPO_ROOT / "src"), environment.get("PYTHONPATH", "")))
     )
@@ -470,4 +485,4 @@ def test_package_import_and_root_help_are_side_effect_free() -> None:
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stderr == ""
-    assert "Usage: conformdag" in completed.stdout
+    assert "Usage: conformdag" in _normalize_help_output(completed.stdout)
